@@ -202,4 +202,20 @@ class OfficeHoursSlotServiceTest {
                 new OfficeHoursSlotService.Slot(Instant.parse("2026-11-12T11:00:00Z"), 30),
                 new OfficeHoursSlotService.Slot(Instant.parse("2026-11-12T11:30:00Z"), 30));
     }
+
+    @Test
+    void aOneOffLaidOverAWeeklyRangeDoesNotOfferTheSameStartTwice() {
+        rules(rule(DayOfWeek.TUESDAY, 14, 15, 30));
+        OfficeHoursSettings settings = settings(0);
+        settings.setDefaultMeetingDurationMinutes(30);
+        when(settingsRepository.findById(ACADEMIC)).thenReturn(Optional.of(settings));
+        // Tuesday 10 November 14:00–15:30 in Turkey: 14:00 and 14:30 come from the weekly range already.
+        when(oneOffRepository.findByInstructorIdOrderByStartsAtAsc(ACADEMIC))
+                .thenReturn(List.of(oneOff("2026-11-10T11:00:00Z", "2026-11-10T12:30:00Z")));
+
+        assertThat(service.openSlots(ACADEMIC)).extracting(OfficeHoursSlotService.Slot::startsAt)
+                .filteredOn(startsAt -> startsAt.isBefore(Instant.parse("2026-11-11T00:00:00Z")))
+                .containsExactly(Instant.parse("2026-11-10T11:00:00Z"), Instant.parse("2026-11-10T11:30:00Z"),
+                        Instant.parse("2026-11-10T12:00:00Z"));
+    }
 }

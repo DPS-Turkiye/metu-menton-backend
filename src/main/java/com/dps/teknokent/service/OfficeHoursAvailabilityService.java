@@ -32,6 +32,7 @@ import com.dps.teknokent.repository.OfficeHoursOneOffRepository;
 import com.dps.teknokent.repository.OfficeHoursRuleRepository;
 import com.dps.teknokent.repository.OfficeHoursSettingsRepository;
 import com.dps.teknokent.util.MeetingSlotTimes;
+import com.dps.teknokent.util.TextUtils;
 
 /**
  * An academic's office hours: weekly ranges, dates away and meeting defaults, saved as a whole and checked with
@@ -211,7 +212,7 @@ public class OfficeHoursAvailabilityService {
 		oneOff.setInstructorId(instructorId);
 		oneOff.setStartsAt(request.startsAt().toInstant());
 		oneOff.setEndsAt(request.endsAt().toInstant());
-		oneOff.setPlace(request.place() == null || request.place().isBlank() ? null : request.place().trim());
+		oneOff.setPlace(TextUtils.normalizeOptional(request.place()));
 		return oneOff;
 	}
 

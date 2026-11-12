@@ -8,9 +8,12 @@ import java.time.ZonedDateTime;
 import java.time.temporal.TemporalAdjusters;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -100,6 +103,8 @@ public class OfficeHoursSlotService {
 			}
 		}
 		// One-off hours are cut into meetings of the default length; a day off hides them like the weekly ranges.
+		// A one-off laid over a weekly range would offer the same start twice, so a start already offered is skipped.
+		Set<Instant> offered = slots.stream().map(Slot::startsAt).collect(Collectors.toCollection(HashSet::new));
 		int oneOffMinutes = settings(instructorId).getDefaultMeetingDurationMinutes();
 		Duration oneOffLength = Duration.ofMinutes(oneOffMinutes);
 		for (OfficeHoursOneOff oneOff : oneOffRepository.findByInstructorIdOrderByStartsAtAsc(instructorId)) {
@@ -109,7 +114,8 @@ public class OfficeHoursSlotService {
 			}
 			for (Instant startsAt = oneOff.getStartsAt(); !startsAt.plus(oneOffLength).isAfter(oneOff.getEndsAt());
 					startsAt = startsAt.plus(oneOffLength)) {
-				if (!startsAt.isBefore(earliest) && !overlaps(meetings, startsAt, oneOffLength, buffer)) {
+				if (!startsAt.isBefore(earliest) && !overlaps(meetings, startsAt, oneOffLength, buffer)
+						&& offered.add(startsAt)) {
 					slots.add(new Slot(startsAt, oneOffMinutes));
 				}
 			}
