@@ -18,10 +18,12 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.dps.teknokent.entity.OfficeHoursException;
 import com.dps.teknokent.entity.OfficeHoursMeeting;
+import com.dps.teknokent.entity.OfficeHoursOneOff;
 import com.dps.teknokent.entity.OfficeHoursRule;
 import com.dps.teknokent.entity.OfficeHoursSettings;
 import com.dps.teknokent.repository.OfficeHoursExceptionRepository;
 import com.dps.teknokent.repository.OfficeHoursMeetingRepository;
+import com.dps.teknokent.repository.OfficeHoursOneOffRepository;
 import com.dps.teknokent.repository.OfficeHoursRuleRepository;
 import com.dps.teknokent.repository.OfficeHoursSettingsRepository;
 import com.dps.teknokent.util.MeetingSlotTimes;
@@ -46,22 +48,25 @@ public class OfficeHoursSlotService {
 	private final OfficeHoursExceptionRepository exceptionRepository;
 	private final OfficeHoursMeetingRepository meetingRepository;
 	private final OfficeHoursSettingsRepository settingsRepository;
+	private final OfficeHoursOneOffRepository oneOffRepository;
 	private final Clock clock;
 
 	@Autowired
 	public OfficeHoursSlotService(OfficeHoursRuleRepository ruleRepository,
 			OfficeHoursExceptionRepository exceptionRepository, OfficeHoursMeetingRepository meetingRepository,
-			OfficeHoursSettingsRepository settingsRepository) {
-		this(ruleRepository, exceptionRepository, meetingRepository, settingsRepository, Clock.systemUTC());
+			OfficeHoursSettingsRepository settingsRepository, OfficeHoursOneOffRepository oneOffRepository) {
+		this(ruleRepository, exceptionRepository, meetingRepository, settingsRepository, oneOffRepository,
+				Clock.systemUTC());
 	}
 
 	OfficeHoursSlotService(OfficeHoursRuleRepository ruleRepository, OfficeHoursExceptionRepository exceptionRepository,
 			OfficeHoursMeetingRepository meetingRepository, OfficeHoursSettingsRepository settingsRepository,
-			Clock clock) {
+			OfficeHoursOneOffRepository oneOffRepository, Clock clock) {
 		this.ruleRepository = ruleRepository;
 		this.exceptionRepository = exceptionRepository;
 		this.meetingRepository = meetingRepository;
 		this.settingsRepository = settingsRepository;
+		this.oneOffRepository = oneOffRepository;
 		this.clock = clock;
 	}
 
@@ -91,6 +96,21 @@ public class OfficeHoursSlotService {
 					if (!startsAt.isBefore(earliest) && !overlaps(meetings, startsAt, length, buffer)) {
 						slots.add(new Slot(startsAt, rule.getSlotMinutes()));
 					}
+				}
+			}
+		}
+		// One-off hours are cut into meetings of the default length; a day off hides them like the weekly ranges.
+		int oneOffMinutes = settings(instructorId).getDefaultMeetingDurationMinutes();
+		Duration oneOffLength = Duration.ofMinutes(oneOffMinutes);
+		for (OfficeHoursOneOff oneOff : oneOffRepository.findByInstructorIdOrderByStartsAtAsc(instructorId)) {
+			if (!oneOff.getEndsAt().isAfter(earliest) || !oneOff.getStartsAt().isBefore(horizon.toInstant())
+					|| isAway(away, oneOff.getStartsAt().atZone(MeetingSlotTimes.APP_ZONE).toLocalDate())) {
+				continue;
+			}
+			for (Instant startsAt = oneOff.getStartsAt(); !startsAt.plus(oneOffLength).isAfter(oneOff.getEndsAt());
+					startsAt = startsAt.plus(oneOffLength)) {
+				if (!startsAt.isBefore(earliest) && !overlaps(meetings, startsAt, oneOffLength, buffer)) {
+					slots.add(new Slot(startsAt, oneOffMinutes));
 				}
 			}
 		}

@@ -1,7 +1,9 @@
 package com.dps.teknokent.service;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -16,16 +18,20 @@ import org.springframework.web.server.ResponseStatusException;
 import com.dps.teknokent.domain.OfficeHoursRole;
 import com.dps.teknokent.dto.requests.CreateMentorAvailabilityRuleRequest;
 import com.dps.teknokent.dto.requests.MentorAvailabilityExceptionRequest;
+import com.dps.teknokent.dto.requests.OfficeHoursOneOffRequest;
 import com.dps.teknokent.dto.requests.UpdateOfficeHoursAvailabilityRequest;
 import com.dps.teknokent.dto.responses.OfficeHoursAvailabilityResponse;
 import com.dps.teknokent.entity.OfficeHoursException;
+import com.dps.teknokent.entity.OfficeHoursOneOff;
 import com.dps.teknokent.entity.OfficeHoursRule;
 import com.dps.teknokent.entity.OfficeHoursSettings;
 import com.dps.teknokent.exception.InvalidRequestException;
 import com.dps.teknokent.repository.OfficeHoursEnrollmentRepository;
 import com.dps.teknokent.repository.OfficeHoursExceptionRepository;
+import com.dps.teknokent.repository.OfficeHoursOneOffRepository;
 import com.dps.teknokent.repository.OfficeHoursRuleRepository;
 import com.dps.teknokent.repository.OfficeHoursSettingsRepository;
+import com.dps.teknokent.util.MeetingSlotTimes;
 
 /**
  * An academic's office hours: weekly ranges, dates away and meeting defaults, saved as a whole and checked with
@@ -37,27 +43,32 @@ import com.dps.teknokent.repository.OfficeHoursSettingsRepository;
 public class OfficeHoursAvailabilityService {
 
 	private static final int DEFAULT_SLOT_MINUTES = 60;
+	private static final Duration SHORTEST_MEETING = Duration.ofMinutes(15);
 
 	private final OfficeHoursEnrollmentRepository enrollmentRepository;
 	private final OfficeHoursSettingsRepository settingsRepository;
 	private final OfficeHoursRuleRepository ruleRepository;
 	private final OfficeHoursExceptionRepository exceptionRepository;
+	private final OfficeHoursOneOffRepository oneOffRepository;
 	private final Clock clock;
 
 	@Autowired
 	public OfficeHoursAvailabilityService(OfficeHoursEnrollmentRepository enrollmentRepository,
 			OfficeHoursSettingsRepository settingsRepository, OfficeHoursRuleRepository ruleRepository,
-			OfficeHoursExceptionRepository exceptionRepository) {
-		this(enrollmentRepository, settingsRepository, ruleRepository, exceptionRepository, Clock.systemUTC());
+			OfficeHoursExceptionRepository exceptionRepository, OfficeHoursOneOffRepository oneOffRepository) {
+		this(enrollmentRepository, settingsRepository, ruleRepository, exceptionRepository, oneOffRepository,
+				Clock.systemUTC());
 	}
 
 	OfficeHoursAvailabilityService(OfficeHoursEnrollmentRepository enrollmentRepository,
 			OfficeHoursSettingsRepository settingsRepository, OfficeHoursRuleRepository ruleRepository,
-			OfficeHoursExceptionRepository exceptionRepository, Clock clock) {
+			OfficeHoursExceptionRepository exceptionRepository, OfficeHoursOneOffRepository oneOffRepository,
+			Clock clock) {
 		this.enrollmentRepository = enrollmentRepository;
 		this.settingsRepository = settingsRepository;
 		this.ruleRepository = ruleRepository;
 		this.exceptionRepository = exceptionRepository;
+		this.oneOffRepository = oneOffRepository;
 		this.clock = clock;
 	}
 
@@ -73,11 +84,18 @@ public class OfficeHoursAvailabilityService {
 		requireInstructor(instructorId);
 		validateRules(request.rules());
 		validateExceptions(request.exceptions());
+		if (request.oneOffs() != null) {
+			validateOneOffs(request.oneOffs(), request.exceptions());
+		}
 		Instant now = clock.instant();
 
 		ruleRepository.deleteAll(ruleRepository.findByInstructorIdOrderByDayOfWeekAscStartTimeAsc(instructorId));
 		exceptionRepository.deleteAll(exceptionRepository.findByInstructorIdOrderByStartsOnAsc(instructorId));
 		// Deletes must reach the database first: the replacements may reuse the same unique day/time and dates.
+		if (request.oneOffs() != null) {
+			oneOffRepository.deleteAll(oneOffRepository.findByInstructorIdOrderByStartsAtAsc(instructorId));
+			oneOffRepository.flush();
+		}
 		ruleRepository.flush();
 		exceptionRepository.flush();
 
@@ -95,6 +113,11 @@ public class OfficeHoursAvailabilityService {
 		ruleRepository.saveAll(request.rules().stream().map(rule -> newRule(instructorId, rule, now)).toList());
 		exceptionRepository.saveAll(request.exceptions().stream()
 				.map(exception -> newException(instructorId, exception)).toList());
+		if (request.oneOffs() != null) {
+			oneOffRepository.saveAll(request.oneOffs().stream().map(oneOff -> newOneOff(instructorId, oneOff))
+					.toList());
+			oneOffRepository.flush();
+		}
 		ruleRepository.flush();
 		exceptionRepository.flush();
 		return response(instructorId, settings);
@@ -114,7 +137,9 @@ public class OfficeHoursAvailabilityService {
 						.stream().map(OfficeHoursAvailabilityResponse.DateOff::fromEntity).toList(),
 				settings.getStudentCapacity(),
 				settings.getDefaultMeetingDurationMinutes(),
-				settings.getMeetingBufferMinutes());
+				settings.getMeetingBufferMinutes(),
+				oneOffRepository.findByInstructorIdOrderByStartsAtAsc(instructorId)
+						.stream().map(OfficeHoursAvailabilityResponse.OneOff::fromEntity).toList());
 	}
 
 	/** The same checks a mentor's weekly availability gets. */
@@ -150,6 +175,44 @@ public class OfficeHoursAvailabilityService {
 				throw new InvalidRequestException("Duplicate availability exception dates");
 			}
 		}
+	}
+
+	/**
+	 * One-off hours end after they start, last at least the shortest meeting, don't overlap each other, and don't
+	 * fall on a day off: the day off would hide them, so the academic lifts it first. Past ones are kept as sent,
+	 * since every save sends the whole list back.
+	 */
+	static void validateOneOffs(List<OfficeHoursOneOffRequest> oneOffs,
+			List<MentorAvailabilityExceptionRequest> exceptions) {
+		for (OfficeHoursOneOffRequest oneOff : oneOffs) {
+			if (Duration.between(oneOff.startsAt(), oneOff.endsAt()).compareTo(SHORTEST_MEETING) < 0) {
+				throw new InvalidRequestException("One-off hours must last at least 15 minutes");
+			}
+			LocalDate day = oneOff.startsAt().atZoneSameInstant(MeetingSlotTimes.APP_ZONE).toLocalDate();
+			boolean away = exceptions.stream()
+					.anyMatch(range -> !day.isBefore(range.startsOn()) && !day.isAfter(range.endsOn()));
+			if (away) {
+				throw new InvalidRequestException("One-off hours cannot fall on a day off");
+			}
+		}
+		for (OfficeHoursOneOffRequest left : oneOffs) {
+			for (OfficeHoursOneOffRequest right : oneOffs) {
+				if (left != right && left.startsAt().isBefore(right.endsAt())
+						&& right.startsAt().isBefore(left.endsAt())) {
+					throw new InvalidRequestException("One-off hours cannot overlap");
+				}
+			}
+		}
+	}
+
+	private static OfficeHoursOneOff newOneOff(UUID instructorId, OfficeHoursOneOffRequest request) {
+		OfficeHoursOneOff oneOff = new OfficeHoursOneOff();
+		oneOff.setId(UUID.randomUUID());
+		oneOff.setInstructorId(instructorId);
+		oneOff.setStartsAt(request.startsAt().toInstant());
+		oneOff.setEndsAt(request.endsAt().toInstant());
+		oneOff.setPlace(request.place() == null || request.place().isBlank() ? null : request.place().trim());
+		return oneOff;
 	}
 
 	private static OfficeHoursRule newRule(UUID instructorId, CreateMentorAvailabilityRuleRequest request,
