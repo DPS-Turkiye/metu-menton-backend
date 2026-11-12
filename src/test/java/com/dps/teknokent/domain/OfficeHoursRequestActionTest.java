@@ -33,7 +33,7 @@ class OfficeHoursRequestActionTest {
 	void nothingIsLeftOnceItIsClosed() {
 		for (OfficeHoursRequestStatus status : new OfficeHoursRequestStatus[] { OfficeHoursRequestStatus.ACCEPTED,
 				OfficeHoursRequestStatus.DECLINED, OfficeHoursRequestStatus.WITHDRAWN,
-				OfficeHoursRequestStatus.CANCELLED }) {
+				OfficeHoursRequestStatus.CANCELLED, OfficeHoursRequestStatus.EXPIRED }) {
 			for (OfficeHoursRole role : OfficeHoursRole.values()) {
 				assertThat(OfficeHoursRequestAction.allowedFor(role, status)).isEmpty();
 			}

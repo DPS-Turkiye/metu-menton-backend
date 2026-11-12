@@ -42,14 +42,14 @@ public enum OfficeHoursRequestAction {
 		if (viewer == OfficeHoursRole.INSTRUCTOR) {
 			return switch (status) {
 			case PENDING, MORE_INFO_REQUESTED -> ANSWERS;
-			case ACCEPTED, DECLINED, COUNTER_PROPOSED, WITHDRAWN, CANCELLED -> List.of();
+			case ACCEPTED, DECLINED, COUNTER_PROPOSED, WITHDRAWN, CANCELLED, EXPIRED -> List.of();
 			};
 		}
 		return switch (status) {
 		case PENDING -> List.of(WITHDRAW);
 		case MORE_INFO_REQUESTED -> List.of(REPLY, WITHDRAW);
 		case COUNTER_PROPOSED -> List.of(ACCEPT_PROPOSED, WITHDRAW);
-		case ACCEPTED, DECLINED, WITHDRAWN, CANCELLED -> List.of();
+		case ACCEPTED, DECLINED, WITHDRAWN, CANCELLED, EXPIRED -> List.of();
 		};
 	}
 }

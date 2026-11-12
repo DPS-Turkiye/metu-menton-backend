@@ -36,6 +36,9 @@ app:
   user-deletion:
     cleanup:
       enabled: false
+  office-hours:
+    expiry:
+      enabled: false
   realtime:
     token-secret: test-secret
     allowed-origins: http://localhost:3000
