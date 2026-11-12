@@ -42,6 +42,10 @@ public class OfficeHoursSlotService {
 	public record Slot(Instant startsAt, int durationMinutes) {
 	}
 
+	/** One weekly range on one date. */
+	public record Hours(Instant startsAt, Instant endsAt) {
+	}
+
 	private final OfficeHoursRuleRepository ruleRepository;
 	private final OfficeHoursExceptionRepository exceptionRepository;
 	private final OfficeHoursMeetingRepository meetingRepository;
@@ -77,12 +81,7 @@ public class OfficeHoursSlotService {
 
 		List<Slot> slots = new ArrayList<>();
 		for (OfficeHoursRule rule : ruleRepository.findByInstructorIdOrderByDayOfWeekAscStartTimeAsc(instructorId)) {
-			ZonedDateTime day = start.toLocalDate().atStartOfDay(MeetingSlotTimes.APP_ZONE)
-					.with(TemporalAdjusters.nextOrSame(rule.day()));
-			for (; day.isBefore(horizon); day = day.plusWeeks(1)) {
-				if (isAway(away, day.toLocalDate())) {
-					continue;
-				}
+			for (ZonedDateTime day : daysOf(rule, start, horizon, away)) {
 				ZonedDateTime end = day.with(rule.getEndTime());
 				for (ZonedDateTime at = day.with(rule.getStartTime());
 						!at.plusMinutes(rule.getSlotMinutes()).isAfter(end); at = at.plusMinutes(rule.getSlotMinutes())) {
@@ -96,6 +95,25 @@ public class OfficeHoursSlotService {
 		}
 		slots.sort(Comparator.comparing(Slot::startsAt));
 		return slots;
+	}
+
+	/**
+	 * The academic's weekly ranges as dated blocks, from the start of today over the same eight weeks students can
+	 * book in, leaving out dates away. Meetings already booked do not cut them: these are the hours they keep.
+	 */
+	@Transactional(readOnly = true)
+	public List<Hours> hoursAhead(UUID instructorId) {
+		ZonedDateTime start = clock.instant().atZone(MeetingSlotTimes.APP_ZONE);
+		ZonedDateTime horizon = start.plusWeeks(HORIZON_WEEKS);
+		List<OfficeHoursException> away = exceptionRepository.findByInstructorIdOrderByStartsOnAsc(instructorId);
+		List<Hours> hours = new ArrayList<>();
+		for (OfficeHoursRule rule : ruleRepository.findByInstructorIdOrderByDayOfWeekAscStartTimeAsc(instructorId)) {
+			for (ZonedDateTime day : daysOf(rule, start, horizon, away)) {
+				hours.add(new Hours(day.with(rule.getStartTime()).toInstant(), day.with(rule.getEndTime()).toInstant()));
+			}
+		}
+		hours.sort(Comparator.comparing(Hours::startsAt));
+		return hours;
 	}
 
 	/** The open slot starting at this moment, if there is one; a time typed by hand has none. */
@@ -140,6 +158,20 @@ public class OfficeHoursSlotService {
 
 	private OfficeHoursSettings settings(UUID instructorId) {
 		return settingsRepository.findById(instructorId).orElseGet(OfficeHoursSettings::new);
+	}
+
+	/** The rule's weekday each week from {@code start}'s date until {@code horizon}, without the dates away. */
+	private static List<ZonedDateTime> daysOf(OfficeHoursRule rule, ZonedDateTime start, ZonedDateTime horizon,
+			List<OfficeHoursException> away) {
+		List<ZonedDateTime> days = new ArrayList<>();
+		ZonedDateTime day = start.toLocalDate().atStartOfDay(MeetingSlotTimes.APP_ZONE)
+				.with(TemporalAdjusters.nextOrSame(rule.day()));
+		for (; day.isBefore(horizon); day = day.plusWeeks(1)) {
+			if (!isAway(away, day.toLocalDate())) {
+				days.add(day);
+			}
+		}
+		return days;
 	}
 
 	private static boolean isAway(List<OfficeHoursException> away, LocalDate day) {
