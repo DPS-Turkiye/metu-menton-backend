@@ -20,6 +20,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import com.dps.teknokent.domain.OfficeHoursRequestStatus;
 import com.dps.teknokent.entity.OfficeHoursRequest;
 import com.dps.teknokent.repository.OfficeHoursRequestRepository;
+import com.dps.teknokent.service.OfficeHoursMailService.Event;
 
 @ExtendWith(MockitoExtension.class)
 class OfficeHoursRequestExpiryTest {
@@ -29,6 +30,9 @@ class OfficeHoursRequestExpiryTest {
 
 	@Mock
 	private OfficeHoursRequestRepository requestRepository;
+
+	@Mock
+	private OfficeHoursMailService mailService;
 
 	@InjectMocks
 	private OfficeHoursRequestExpiry expiry;
@@ -90,5 +94,18 @@ class OfficeHoursRequestExpiryTest {
 
 		assertThat(expiry.expireDue(now)).isEqualTo(1);
 		verify(requestRepository, never()).expireIfStill(eq(notYet.getId()), any(), any());
+		verify(mailService).requestChanged(due, Event.EXPIRED, null);
+		verify(mailService, never()).requestChanged(eq(notYet), any(), any());
+	}
+
+	@Test
+	void aLateAnswerThatWinsTheRaceLeavesTheRequestOpenAndSendsNoExpiryMail() {
+		OfficeHoursRequest due = request(OfficeHoursRequestStatus.PENDING, "2026-11-30T10:00", null);
+		when(requestRepository.findByStatusIn(any())).thenReturn(List.of(due));
+		Instant now = Instant.parse("2026-11-12T06:00:00Z");
+		when(requestRepository.expireIfStill(due.getId(), OfficeHoursRequestStatus.PENDING, now)).thenReturn(0);
+
+		assertThat(expiry.expireDue(now)).isZero();
+		verify(mailService, never()).requestChanged(any(), any(), any());
 	}
 }

@@ -137,6 +137,17 @@ class OfficeHoursMailServiceTest {
 	}
 
 	@Test
+	void anExpiredRequestTellsTheStudentItClosedAndTheyCanAskAgain() {
+		service.requestChanged(request, Event.EXPIRED, null);
+
+		String[] mail = sentTo("ayse@metu.edu.tr");
+		assertThat(mail[0]).isEqualTo("Ofis saati talebinizin süresi doldu · CENG 101");
+		assertThat(mail[1])
+				.contains("CENG 101 dersi için Ali Kaya ile olan ofis saati talebiniz zamanında yanıtlanmadığı")
+				.contains("Yeni bir talep gönderebilirsiniz.");
+	}
+
+	@Test
 	void someoneMoodleSharedNoAddressForGetsNoMail() {
 		student.setEmail(null);
 
