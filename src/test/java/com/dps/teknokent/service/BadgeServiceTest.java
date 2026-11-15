@@ -341,12 +341,14 @@ class BadgeServiceTest {
 		record.setUser(mentorAccount);
 		record.setDepartmentName("Endüstri Mühendisliği");
 		record.setClassYear(4);
+		record.setId(UUID.randomUUID());
 		record.setSyncedAt(java.time.Instant.parse("2026-11-01T00:00:00Z"));
 		com.dps.teknokent.entity.InstitutionPerson older = new com.dps.teknokent.entity.InstitutionPerson("odtu",
 				"S-0");
 		older.setUser(mentorAccount);
 		older.setDepartmentName("Eski Bölüm");
 		older.setClassYear(3);
+		older.setId(UUID.randomUUID());
 		older.setSyncedAt(java.time.Instant.parse("2025-11-01T00:00:00Z"));
 		when(institutionPeople.findByUserIdIn(any())).thenReturn(List.of(older, record));
 		com.dps.teknokent.entity.MentorProfile profile = new com.dps.teknokent.entity.MentorProfile();

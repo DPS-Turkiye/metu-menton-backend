@@ -223,11 +223,13 @@ public class BadgeService {
 		return profiles;
 	}
 
+	/** The latest synced record; on a tie the higher id, so the same record wins on every call. */
 	private static InstitutionPerson newerRecord(InstitutionPerson a, InstitutionPerson b) {
-		if (a.getSyncedAt() == null) {
-			return b;
+		int bySync = a.getSyncedAt().compareTo(b.getSyncedAt());
+		if (bySync != 0) {
+			return bySync > 0 ? a : b;
 		}
-		return b.getSyncedAt() != null && b.getSyncedAt().isAfter(a.getSyncedAt()) ? b : a;
+		return a.getId().compareTo(b.getId()) >= 0 ? a : b;
 	}
 
 	/** Watched, tries and best score on the program's current training version, for those who started it. */

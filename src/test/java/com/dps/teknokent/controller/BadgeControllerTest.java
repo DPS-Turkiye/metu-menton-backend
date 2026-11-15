@@ -121,6 +121,28 @@ class BadgeControllerTest {
 		verify(badgeService).roster(any(), any(), any());
 	}
 
+	@Test
+	void sendsEachRostersProfileAsKatilimcilarReadsIt() throws Exception {
+		GateBadgeRowResponse plain = row(GateBadgeState.ACTIVE);
+		GateBadgeRowResponse withProfile = new GateBadgeRowResponse(plain.userId(), plain.fullName(), plain.email(),
+				plain.programId(), plain.programName(), plain.state(), plain.awardId(), plain.source(),
+				plain.awardedAt(), plain.revokedAt(), plain.reason(), plain.training(),
+				new GateBadgeRowResponse.Profile("Endüstri Mühendisliği", 4, true,
+						List.of(com.dps.teknokent.domain.PeerTopicCategory.CAREER_INTERNSHIP), 3, 4));
+		when(badgeService.roster(ACTOR, PROGRAM, null)).thenReturn(List.of(withProfile));
+
+		mockMvc.perform(get("/api/coordinator/programs/" + PROGRAM + "/badges/roster")
+				.param("actorId", ACTOR.toString())
+				.with(user("proxy")))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$[0].profile.department").value("Endüstri Mühendisliği"))
+				.andExpect(jsonPath("$[0].profile.classYear").value(4))
+				.andExpect(jsonPath("$[0].profile.mentorProfile").value(true))
+				.andExpect(jsonPath("$[0].profile.categories[0]").value("CAREER_INTERNSHIP"))
+				.andExpect(jsonPath("$[0].profile.activeMentees").value(3))
+				.andExpect(jsonPath("$[0].profile.menteeCapacity").value(4));
+	}
+
 	private static GateBadgeRowResponse row(GateBadgeState state) {
 		return new GateBadgeRowResponse(STUDENT, "Zeynep Öğrenci", "zeynep@odtu-dev.invalid", PROGRAM,
 				"İŞKUR 2026 Bahar", state, AWARD, BadgeSource.COORDINATOR, Instant.parse("2026-11-08T10:00:00Z"),
