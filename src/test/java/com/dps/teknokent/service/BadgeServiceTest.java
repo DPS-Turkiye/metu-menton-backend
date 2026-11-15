@@ -81,6 +81,13 @@ class BadgeServiceTest {
 	@Mock
 	private com.dps.teknokent.repository.TrainingAttemptRepository trainingAttempts;
 
+	@Mock
+	private com.dps.teknokent.repository.InstitutionPersonRepository institutionPeople;
+	@Mock
+	private com.dps.teknokent.repository.MentorProfileRepository mentorProfiles;
+	@Mock
+	private com.dps.teknokent.repository.MentorshipRepository mentorships;
+
 	@InjectMocks
 	private BadgeService service;
 
@@ -322,6 +329,72 @@ class BadgeServiceTest {
 		var mentors = service.roster(coordinator.getId(), iskur.getId(), GateBadgeState.ACTIVE);
 		assertThat(mentors).extracting(row -> row.userId())
 				.containsExactlyInAnyOrder(student.getId(), mentorAccount.getId());
+	}
+
+	@Test
+	void theRosterShowsEachPersonsDepartmentAndAPeerMentorsCategoriesAndLoad() {
+		AppUser mentorAccount = user("Mert Demir", UserRole.MENTEE);
+		when(users.findByProgramIdAndPermissionAndStatusOrderByCreatedAtAsc(iskur.getId(), UserRole.MENTEE,
+				UserAccountStatus.APPROVED)).thenReturn(List.of(student, mentorAccount));
+		com.dps.teknokent.entity.InstitutionPerson record = new com.dps.teknokent.entity.InstitutionPerson("odtu",
+				"S-1");
+		record.setUser(mentorAccount);
+		record.setDepartmentName("Endüstri Mühendisliği");
+		record.setClassYear(4);
+		record.setSyncedAt(java.time.Instant.parse("2026-11-01T00:00:00Z"));
+		com.dps.teknokent.entity.InstitutionPerson older = new com.dps.teknokent.entity.InstitutionPerson("odtu",
+				"S-0");
+		older.setUser(mentorAccount);
+		older.setDepartmentName("Eski Bölüm");
+		older.setClassYear(3);
+		older.setSyncedAt(java.time.Instant.parse("2025-11-01T00:00:00Z"));
+		when(institutionPeople.findByUserIdIn(any())).thenReturn(List.of(older, record));
+		com.dps.teknokent.entity.MentorProfile profile = new com.dps.teknokent.entity.MentorProfile();
+		profile.setId(mentorAccount.getId());
+		profile.setMenteeCapacity(4);
+		profile.getCategoryLevels().put(com.dps.teknokent.domain.PeerTopicCategory.CAREER_INTERNSHIP,
+				com.dps.teknokent.domain.PeerTopicLevel.BASIC);
+		profile.getCategoryLevels().put(com.dps.teknokent.domain.PeerTopicCategory.ACADEMIC_DEVELOPMENT,
+				com.dps.teknokent.domain.PeerTopicLevel.BASIC);
+		when(mentorProfiles.findAllById(any())).thenReturn(List.of(profile));
+		com.dps.teknokent.repository.MentorCount load = new com.dps.teknokent.repository.MentorCount() {
+			@Override
+			public UUID getMentorId() {
+				return mentorAccount.getId();
+			}
+
+			@Override
+			public Long getTotal() {
+				return 3L;
+			}
+		};
+		when(mentorships.countOrganizationsByMentor(eq(java.util.Set.of(mentorAccount.getId())), any()))
+				.thenReturn(List.of(load));
+
+		var rows = service.roster(coordinator.getId(), iskur.getId(), null);
+
+		assertThat(rows).filteredOn(row -> row.userId().equals(mentorAccount.getId())).singleElement()
+				.satisfies(row -> assertThat(row.profile()).isEqualTo(new GateBadgeRowResponse.Profile(
+						"Endüstri Mühendisliği", 4, true,
+						List.of(com.dps.teknokent.domain.PeerTopicCategory.ACADEMIC_DEVELOPMENT,
+								com.dps.teknokent.domain.PeerTopicCategory.CAREER_INTERNSHIP),
+						3, 4)));
+		assertThat(rows).filteredOn(row -> row.userId().equals(student.getId())).singleElement()
+				.satisfies(row -> assertThat(row.profile())
+						.isEqualTo(new GateBadgeRowResponse.Profile(null, null, false, List.of(), 0, null)));
+	}
+
+	@Test
+	void theAdminStudentListCarriesNoRosterProfile() {
+		AppUser admin = user("Arya Admin", UserRole.ADMIN);
+		when(domainLookupService.requireUser(admin.getId())).thenReturn(admin);
+		when(programs.findByProgramType(ProgramType.PEER_MENTORING)).thenReturn(List.of(iskur));
+		when(users.findByProgramIdAndPermissionAndStatusOrderByCreatedAtAsc(iskur.getId(), UserRole.MENTEE,
+				UserAccountStatus.APPROVED)).thenReturn(List.of(student));
+
+		assertThat(service.students(admin.getId(), null)).singleElement()
+				.satisfies(row -> assertThat(row.profile()).isNull());
+		org.mockito.Mockito.verifyNoInteractions(institutionPeople, mentorProfiles, mentorships);
 	}
 
 	// 4T-3: Katılımcılar shows how far someone got in the training on its current version.
