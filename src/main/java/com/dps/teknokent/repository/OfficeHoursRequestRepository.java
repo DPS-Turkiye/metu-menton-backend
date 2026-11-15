@@ -1,5 +1,6 @@
 package com.dps.teknokent.repository;
 
+import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -34,4 +35,16 @@ public interface OfficeHoursRequestRepository extends JpaRepository<OfficeHoursR
 
 	List<OfficeHoursRequest> findByInstructorIdAndStatusIn(UUID instructorId,
 			Collection<OfficeHoursRequestStatus> statuses);
+
+	/** Requests made in a window, newest first: the university-wide list a coordinator reads. */
+	List<OfficeHoursRequest> findByCreatedAtGreaterThanEqualAndCreatedAtLessThanOrderByCreatedAtDesc(Instant from,
+			Instant to);
+
+	List<OfficeHoursRequest> findByStatusAndCreatedAtGreaterThanEqualAndCreatedAtLessThanOrderByCreatedAtDesc(
+			OfficeHoursRequestStatus status, Instant from, Instant to);
+
+	long countByStatusIn(Collection<OfficeHoursRequestStatus> statuses);
+
+	long countByStatusAndUpdatedAtGreaterThanEqualAndUpdatedAtLessThan(OfficeHoursRequestStatus status, Instant from,
+			Instant to);
 }
