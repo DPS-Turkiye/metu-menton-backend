@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -15,6 +16,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -30,6 +32,8 @@ import com.dps.teknokent.domain.OfficeHoursHistoryStep;
 import com.dps.teknokent.domain.OfficeHoursMessageType;
 import com.dps.teknokent.domain.OfficeHoursRequestStatus;
 import com.dps.teknokent.domain.ProgramType;
+import com.dps.teknokent.domain.UserAccountStatus;
+import com.dps.teknokent.domain.UserRole;
 import com.dps.teknokent.dto.requests.ProgramOfficeHoursAppointmentsQuery;
 import com.dps.teknokent.dto.responses.ProgramOfficeHoursAppointmentResponse;
 import com.dps.teknokent.dto.responses.ProgramOfficeHoursAppointmentResponse.HistoryEntry;
@@ -100,7 +104,8 @@ class ProgramOfficeHoursServiceTest {
 		when(meetings.findByRequestIdIn(anyCollection())).thenReturn(List.of(meeting));
 		people(record(ayse, "Endüstri Mühendisliği", null, null),
 				record(ahmet, "Bilgisayar Mühendisliği", "Prof. Dr.", "Mühendislik Fakültesi"));
-		when(requests.countByStatusIn(anyCollection())).thenReturn(86L, 12L);
+		when(requests.countByStatusInAndCreatedAtGreaterThanEqual(anyCollection(),
+				eq(NOW.minus(ProgramOfficeHoursService.UNBOUNDED_LOOK_BACK)))).thenReturn(86L, 12L);
 		when(meetings.countByScheduledAtGreaterThanEqualAndScheduledAtLessThan(
 				Instant.parse("2026-11-08T21:00:00Z"), Instant.parse("2026-11-15T21:00:00Z"))).thenReturn(214L);
 		when(requests.countByStatusAndUpdatedAtGreaterThanEqualAndUpdatedAtLessThan(OfficeHoursRequestStatus.DECLINED,
@@ -153,24 +158,79 @@ class ProgramOfficeHoursServiceTest {
 	}
 
 	@Test
-	void aWeekKeepsOnlyItsAppointmentsInTheOrderTheyHappen() {
+	void aWeekShowsWhatHappensInItHoweverLongAgoItWasAskedFor() {
 		managed(ProgramType.OFFICE_HOURS);
 		OfficeHoursRequest friday = request(ayse, ahmet, OfficeHoursRequestStatus.PENDING, "Cuma",
 				"2026-11-13T10:30", null);
-		OfficeHoursRequest monday = request(ilker, ahmet, OfficeHoursRequestStatus.PENDING, "Pazartesi",
-				"2026-11-09T00:00", null);
+		OfficeHoursRequest monday = request(ilker, ahmet, OfficeHoursRequestStatus.COUNTER_PROPOSED, "Pazartesi",
+				"2026-10-01T10:00", "2026-11-09T00:00");
 		OfficeHoursRequest nextWeek = request(ayse, zeynep, OfficeHoursRequestStatus.PENDING, "Sonraki hafta",
 				"2026-11-16T00:00", null);
-		when(requests.findByCreatedAtGreaterThanEqualAndCreatedAtLessThanOrderByCreatedAtDesc(
-				Instant.parse("2026-11-08T21:00:00Z").minus(ProgramOfficeHoursService.RANGE_LOOK_BACK),
-				Instant.parse("2026-11-15T21:00:00Z"))).thenReturn(List.of(friday, monday, nextWeek));
+		OfficeHoursRequest booked = request(ilker, zeynep, OfficeHoursRequestStatus.ACCEPTED, "Uzun zaman önce",
+				"2026-11-11T09:00", null);
+		booked.setCreatedAt(NOW.minus(ProgramOfficeHoursService.UNBOUNDED_LOOK_BACK).minusSeconds(60));
+		OfficeHoursMeeting meeting = meeting(booked, Instant.parse("2026-11-11T06:00:00Z"));
+		when(meetings.findByScheduledAtGreaterThanEqualAndScheduledAtLessThan(Instant.parse("2026-11-08T21:00:00Z"),
+				Instant.parse("2026-11-15T21:00:00Z"))).thenReturn(List.of(meeting));
+		when(requests.findAllById(List.of(booked.getId()))).thenReturn(List.of(booked));
+		when(meetings.findByRequestIdIn(anyCollection())).thenReturn(List.of(meeting));
+		when(requests.findUnbookedShowingBetween("2026-11-09T00:00", "2026-11-16T00:00"))
+				.thenReturn(List.of(friday, monday, nextWeek));
 		people();
 
 		ProgramOfficeHoursAppointmentsResponse page = service.list(COORDINATOR, PROGRAM,
 				query(null, LocalDate.of(2026, 11, 9), LocalDate.of(2026, 11, 15)));
 
-		assertThat(page.appointments().content()).extracting(Row::topic).containsExactly("Pazartesi", "Cuma");
-		assertThat(page.appointments().totalElements()).isEqualTo(2);
+		assertThat(page.appointments().content()).extracting(Row::topic)
+				.containsExactly("Pazartesi", "Uzun zaman önce", "Cuma");
+		assertThat(page.appointments().totalElements()).isEqualTo(3);
+		verify(requests, never()).findByCreatedAtGreaterThanEqualAndCreatedAtLessThanOrderByCreatedAtDesc(any(),
+				any());
+	}
+
+	@Test
+	void aWeekFilteredByAnOpenStatusSkipsTheBookedMeetings() {
+		managed(ProgramType.OFFICE_HOURS);
+		OfficeHoursRequest pending = request(ayse, ahmet, OfficeHoursRequestStatus.PENDING, "Bekleyen",
+				"2026-11-13T10:30", null);
+		OfficeHoursRequest declined = request(ayse, ahmet, OfficeHoursRequestStatus.DECLINED, "Reddedilen",
+				"2026-11-13T11:30", null);
+		when(requests.findUnbookedShowingBetween(any(), any())).thenReturn(List.of(pending, declined));
+		people();
+
+		ProgramOfficeHoursAppointmentsResponse page = service.list(COORDINATOR, PROGRAM,
+				new ProgramOfficeHoursAppointmentsQuery(OfficeHoursRequestStatus.PENDING, null, null,
+						LocalDate.of(2026, 11, 9), LocalDate.of(2026, 11, 15), 0, 25));
+
+		assertThat(page.appointments().content()).extracting(Row::topic).containsExactly("Bekleyen");
+		verify(meetings, never()).findByScheduledAtGreaterThanEqualAndScheduledAtLessThan(any(), any());
+	}
+
+	@Test
+	void aWeekFilteredByAcceptedReadsOnlyTheBookedMeetings() {
+		managed(ProgramType.OFFICE_HOURS);
+
+		service.list(COORDINATOR, PROGRAM, new ProgramOfficeHoursAppointmentsQuery(
+				OfficeHoursRequestStatus.ACCEPTED, null, null, LocalDate.of(2026, 11, 9), LocalDate.of(2026, 11, 15),
+				0, 25));
+
+		verify(meetings).findByScheduledAtGreaterThanEqualAndScheduledAtLessThan(any(), any());
+		verify(requests, never()).findUnbookedShowingBetween(any(), any());
+	}
+
+	@Test
+	void looksUpManyPeopleInSlicesTheDatabaseAccepts() {
+		managed(ProgramType.OFFICE_HOURS);
+		List<OfficeHoursRequest> many = new ArrayList<>();
+		for (int i = 0; i < 600; i++) {
+			many.add(request(officeHoursUser("Öğrenci " + i), officeHoursUser("Hoca " + i),
+					OfficeHoursRequestStatus.PENDING, "Konu " + i, "2026-11-13T10:30", null));
+		}
+		candidates(many.toArray(OfficeHoursRequest[]::new));
+
+		service.list(COORDINATOR, PROGRAM, query(null, null, null));
+
+		verify(officeHoursUsers, times(2)).findAllById(anyCollection());
 	}
 
 	@Test
@@ -255,6 +315,8 @@ class ProgramOfficeHoursServiceTest {
 	@Test
 	void someoneWhoDoesNotRunTheProgramIsRefusedBeforeAnythingIsRead() {
 		UUID stranger = UUID.randomUUID();
+		when(coordinatorProgramService.requireCoordinatorOrAdmin(stranger))
+				.thenReturn(account(stranger, UserAccountStatus.APPROVED));
 		when(coordinatorProgramService.requireManagedProgram(stranger, PROGRAM))
 				.thenThrow(new InvalidRequestException("Only the program coordinator can change this program."));
 
@@ -266,6 +328,21 @@ class ProgramOfficeHoursServiceTest {
 	}
 
 	@Test
+	void aCoordinatorWhoseAccountIsNotApprovedIsRefused() {
+		for (UserAccountStatus status : List.of(UserAccountStatus.PENDING, UserAccountStatus.REJECTED)) {
+			UUID waiting = UUID.randomUUID();
+			when(coordinatorProgramService.requireCoordinatorOrAdmin(waiting)).thenReturn(account(waiting, status));
+
+			assertThatThrownBy(() -> service.list(waiting, PROGRAM, query(null, null, null)))
+					.isInstanceOf(InvalidRequestException.class);
+			assertThatThrownBy(() -> service.detail(waiting, PROGRAM, UUID.randomUUID()))
+					.isInstanceOf(InvalidRequestException.class);
+		}
+		verify(coordinatorProgramService, never()).requireManagedProgram(any(), any());
+		verifyNoInteractions(requests, meetings, messages, officeHoursUsers, institutionPeople);
+	}
+
+	@Test
 	void theDetailShowsAProposedTimeAsLongAsTheMeetingItWouldBookAndHowItGotThere() {
 		managed(ProgramType.OFFICE_HOURS);
 		OfficeHoursRequest proposed = request(ayse, ahmet, OfficeHoursRequestStatus.COUNTER_PROPOSED, "CV",
@@ -273,7 +350,6 @@ class ProgramOfficeHoursServiceTest {
 		proposed.setCreatedAt(Instant.parse("2026-11-10T13:20:00Z"));
 		proposed.setUpdatedAt(Instant.parse("2026-11-11T06:05:00Z"));
 		when(requests.findById(proposed.getId())).thenReturn(Optional.of(proposed));
-		when(meetings.findByRequestId(proposed.getId())).thenReturn(Optional.empty());
 		when(bookingService.meetingLengths(ahmet.getId())).thenReturn(start -> 30);
 		OfficeHoursRequestMessage question = message(proposed, OfficeHoursMessageType.INSTRUCTOR_QUESTION,
 				"2026-11-10T15:00:00Z");
@@ -289,6 +365,7 @@ class ProgramOfficeHoursServiceTest {
 		assertThat(detail.startsAt()).hasToString("2026-11-13T10:30+03:00");
 		assertThat(detail.endsAt()).hasToString("2026-11-13T11:00+03:00");
 		assertThat(detail.student().department()).isEqualTo("Endüstri Mühendisliği");
+		verify(meetings, never()).findByRequestId(any());
 		assertThat(detail.history()).containsExactly(
 				new HistoryEntry(OfficeHoursHistoryStep.SUBMITTED, Instant.parse("2026-11-10T13:20:00Z")),
 				new HistoryEntry(OfficeHoursHistoryStep.INFO_REQUESTED, Instant.parse("2026-11-10T15:00:00Z")),
@@ -352,6 +429,8 @@ class ProgramOfficeHoursServiceTest {
 	}
 
 	private void managed(ProgramType type) {
+		when(coordinatorProgramService.requireCoordinatorOrAdmin(COORDINATOR))
+				.thenReturn(account(COORDINATOR, UserAccountStatus.APPROVED));
 		Program program = new Program();
 		program.setId(PROGRAM);
 		program.setProgramType(type);
@@ -372,6 +451,14 @@ class ProgramOfficeHoursServiceTest {
 	private static ProgramOfficeHoursAppointmentsQuery query(@Nullable String search, @Nullable LocalDate from,
 			@Nullable LocalDate to) {
 		return new ProgramOfficeHoursAppointmentsQuery(null, null, search, from, to, 0, 25);
+	}
+
+	private static AppUser account(UUID id, UserAccountStatus status) {
+		AppUser account = new AppUser();
+		account.setId(id);
+		account.setRole(UserRole.COORDINATOR);
+		account.setStatus(status);
+		return account;
 	}
 
 	private static OfficeHoursUser officeHoursUser(String name) {

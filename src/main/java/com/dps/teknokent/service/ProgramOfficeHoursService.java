@@ -32,6 +32,7 @@ import com.dps.teknokent.domain.OfficeHoursHistoryStep;
 import com.dps.teknokent.domain.OfficeHoursMessageType;
 import com.dps.teknokent.domain.OfficeHoursRequestStatus;
 import com.dps.teknokent.domain.ProgramType;
+import com.dps.teknokent.domain.UserAccountStatus;
 import com.dps.teknokent.dto.requests.ProgramOfficeHoursAppointmentsQuery;
 import com.dps.teknokent.dto.responses.OfficeHoursTimeResponse;
 import com.dps.teknokent.dto.responses.PageResponse;
@@ -41,6 +42,7 @@ import com.dps.teknokent.dto.responses.ProgramOfficeHoursAppointmentResponse.Per
 import com.dps.teknokent.dto.responses.ProgramOfficeHoursAppointmentsResponse;
 import com.dps.teknokent.dto.responses.ProgramOfficeHoursAppointmentsResponse.Counts;
 import com.dps.teknokent.dto.responses.ProgramOfficeHoursAppointmentsResponse.Row;
+import com.dps.teknokent.entity.AppUser;
 import com.dps.teknokent.entity.InstitutionPerson;
 import com.dps.teknokent.entity.OfficeHoursMeeting;
 import com.dps.teknokent.entity.OfficeHoursRequest;
@@ -68,13 +70,10 @@ public class ProgramOfficeHoursService {
 	static final int MAX_PAGE_SIZE = 100;
 	static final int DEFAULT_PAGE_SIZE = 25;
 	static final int MAX_RANGE_DAYS = 62;
-	/** Without a date range the list covers the requests made in the last half year. */
+	/** Without a date range the list, and its open-request cards, cover the requests made in the last half year. */
 	static final Duration UNBOUNDED_LOOK_BACK = Duration.ofDays(26 * 7L);
-	/**
-	 * A time can be asked for at most {@link OfficeHoursSlotService#HORIZON_WEEKS} ahead; one more week covers an
-	 * alternative proposed a while after the request was made.
-	 */
-	static final Duration RANGE_LOOK_BACK = Duration.ofDays((OfficeHoursSlotService.HORIZON_WEEKS + 1) * 7L);
+	/** PostgreSQL takes at most 32767 bind parameters, so long id lists are looked up in slices. */
+	static final int LOOKUP_CHUNK = 1000;
 
 	private static final Set<OfficeHoursRequestStatus> AWAITING_DECISION = Set.of(OfficeHoursRequestStatus.PENDING,
 			OfficeHoursRequestStatus.MORE_INFO_REQUESTED);
@@ -121,7 +120,9 @@ public class ProgramOfficeHoursService {
 		DayRange range = rangeOf(query.from(), query.to());
 
 		Instant now = clock.instant();
-		List<OfficeHoursRequest> candidates = candidates(query.status(), range, now);
+		List<OfficeHoursRequest> candidates = range == null
+				? recent(query.status(), now)
+				: inRange(query.status(), range);
 		Map<UUID, OfficeHoursMeeting> meetingByRequest = meetingsOf(candidates);
 		People people = peopleOf(candidates);
 		@Nullable
@@ -146,8 +147,11 @@ public class ProgramOfficeHoursService {
 		requireOfficeHoursProgram(actorId, programId);
 		OfficeHoursRequest request = requests.findById(requestId)
 				.orElseThrow(() -> new ResourceNotFoundException("Office hours request not found: " + requestId));
+		// Only an accepted request is booked; the list reads meetings the same way.
 		@Nullable
-		OfficeHoursMeeting meeting = meetings.findByRequestId(requestId).orElse(null);
+		OfficeHoursMeeting meeting = request.getStatus() == OfficeHoursRequestStatus.ACCEPTED
+				? meetings.findByRequestId(requestId).orElse(null)
+				: null;
 		People people = peopleOf(List.of(request));
 		@Nullable
 		OfficeHoursTimeResponse time = timeOf(request, meeting);
@@ -162,21 +166,54 @@ public class ProgramOfficeHoursService {
 				history(request, meeting, messages.findByRequestIdInOrderByCreatedAtAsc(List.of(requestId))));
 	}
 
+	/**
+	 * The program's coordinators and the admin, and only while their account is approved: the shared program guard
+	 * checks the role alone, and this list names every student who booked office hours.
+	 */
 	private void requireOfficeHoursProgram(UUID actorId, UUID programId) {
+		AppUser actor = coordinatorProgramService.requireCoordinatorOrAdmin(actorId);
+		if (actor.getStatus() != UserAccountStatus.APPROVED) {
+			throw new InvalidRequestException("Only an approved coordinator or admin can see appointments.");
+		}
 		Program program = coordinatorProgramService.requireManagedProgram(actorId, programId);
 		if (program.getProgramType() != ProgramType.OFFICE_HOURS) {
 			throw new InvalidRequestException("Appointments are listed for Office Hours programs only.");
 		}
 	}
 
-	private List<OfficeHoursRequest> candidates(@Nullable OfficeHoursRequestStatus status, @Nullable DayRange range,
-			Instant now) {
-		Instant from = range == null ? now.minus(UNBOUNDED_LOOK_BACK) : range.start().minus(RANGE_LOOK_BACK);
-		Instant to = range == null ? now.plus(Duration.ofDays(1)) : range.end();
+	private List<OfficeHoursRequest> recent(@Nullable OfficeHoursRequestStatus status, Instant now) {
+		Instant from = now.minus(UNBOUNDED_LOOK_BACK);
+		Instant to = now.plus(Duration.ofDays(1));
 		return status == null
 				? requests.findByCreatedAtGreaterThanEqualAndCreatedAtLessThanOrderByCreatedAtDesc(from, to)
 				: requests.findByStatusAndCreatedAtGreaterThanEqualAndCreatedAtLessThanOrderByCreatedAtDesc(status,
 						from, to);
+	}
+
+	/**
+	 * Everything whose time falls in the range, however long ago it was asked for: booked meetings by their own time,
+	 * the rest by the time they show (the first proposed one for an alternative, the first asked-for one otherwise).
+	 */
+	private List<OfficeHoursRequest> inRange(@Nullable OfficeHoursRequestStatus status, DayRange range) {
+		List<OfficeHoursRequest> found = new ArrayList<>();
+		if (status == null || status == OfficeHoursRequestStatus.ACCEPTED) {
+			List<UUID> booked = meetings
+					.findByScheduledAtGreaterThanEqualAndScheduledAtLessThan(range.start(), range.end())
+					.stream()
+					.map(OfficeHoursMeeting::getRequestId)
+					.toList();
+			inChunks(booked, requests::findAllById).stream()
+					.filter(request -> request.getStatus() == OfficeHoursRequestStatus.ACCEPTED)
+					.forEach(found::add);
+		}
+		if (status != OfficeHoursRequestStatus.ACCEPTED) {
+			requests.findUnbookedShowingBetween(MeetingSlotTimes.formatMachineSlot(range.start()),
+					MeetingSlotTimes.formatMachineSlot(range.end()))
+					.stream()
+					.filter(request -> status == null || request.getStatus() == status)
+					.forEach(found::add);
+		}
+		return found;
 	}
 
 	private Counts counts(Instant now) {
@@ -184,9 +221,11 @@ public class ProgramOfficeHoursService {
 		LocalDate monday = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
 		Instant weekStart = startOf(monday);
 		Instant weekEnd = startOf(monday.plusWeeks(1));
+		Instant listed = now.minus(UNBOUNDED_LOOK_BACK);
 		return new Counts(
-				requests.countByStatusIn(AWAITING_DECISION),
-				requests.countByStatusIn(Set.of(OfficeHoursRequestStatus.COUNTER_PROPOSED)),
+				requests.countByStatusInAndCreatedAtGreaterThanEqual(AWAITING_DECISION, listed),
+				requests.countByStatusInAndCreatedAtGreaterThanEqual(Set.of(OfficeHoursRequestStatus.COUNTER_PROPOSED),
+						listed),
 				meetings.countByScheduledAtGreaterThanEqualAndScheduledAtLessThan(weekStart, weekEnd),
 				requests.countByStatusAndUpdatedAtGreaterThanEqualAndUpdatedAtLessThan(
 						OfficeHoursRequestStatus.DECLINED, weekStart, weekEnd));
@@ -234,7 +273,7 @@ public class ProgramOfficeHoursService {
 		@Nullable
 		Instant start = startOf(request, meeting);
 		return new Row(request.getId(), request.getStatus(), request.getTopic(),
-				start == null ? null : OfficeHoursTimeResponse.of(start, 0).startsAt(),
+				start == null ? null : start.atZone(MeetingSlotTimes.APP_ZONE).toOffsetDateTime(),
 				people.student(request), people.academic(request));
 	}
 
@@ -281,7 +320,8 @@ public class ProgramOfficeHoursService {
 
 	/**
 	 * Made, then the questions and answers in order, an alternative if one was proposed, and how it ended. The time of
-	 * a proposal is kept only while it is the latest change.
+	 * a proposal is kept only while it is the latest change. The order follows the booking rules: questions are asked
+	 * and answered before any alternative, and nothing follows the outcome.
 	 */
 	static List<HistoryEntry> history(OfficeHoursRequest request, @Nullable OfficeHoursMeeting meeting,
 			List<OfficeHoursRequestMessage> exchange) {
@@ -318,7 +358,7 @@ public class ProgramOfficeHoursService {
 		if (accepted.isEmpty()) {
 			return Map.of();
 		}
-		return meetings.findByRequestIdIn(accepted).stream()
+		return inChunks(accepted, meetings::findByRequestIdIn).stream()
 				.collect(Collectors.toMap(OfficeHoursMeeting::getRequestId, Function.identity(), (a, b) -> a));
 	}
 
@@ -328,22 +368,28 @@ public class ProgramOfficeHoursService {
 			ids.add(request.getStudentId());
 			ids.add(request.getInstructorId());
 		}
-		Map<UUID, OfficeHoursUser> users = ids.isEmpty() ? Map.of()
-				: officeHoursUsers.findAllById(ids).stream()
-						.collect(Collectors.toMap(OfficeHoursUser::getId, Function.identity()));
+		Map<UUID, OfficeHoursUser> users = inChunks(ids, officeHoursUsers::findAllById).stream()
+				.collect(Collectors.toMap(OfficeHoursUser::getId, Function.identity(), (a, b) -> a));
 		Set<UUID> accountIds = users.values().stream()
 				.map(OfficeHoursUser::getAppUserId)
 				.filter(Objects::nonNull)
 				.collect(Collectors.toSet());
 		Map<UUID, InstitutionPerson> records = new HashMap<>();
-		if (!accountIds.isEmpty()) {
-			for (InstitutionPerson person : institutionPeople.findByUserIdIn(accountIds)) {
-				if (person.getUser() != null) {
-					records.merge(person.getUser().getId(), person, People::newer);
-				}
+		for (InstitutionPerson person : inChunks(accountIds, institutionPeople::findByUserIdIn)) {
+			if (person.getUser() != null) {
+				records.merge(person.getUser().getId(), person, People::newer);
 			}
 		}
 		return new People(users, records);
+	}
+
+	private static <T> List<T> inChunks(Collection<UUID> ids, Function<List<UUID>, List<T>> lookup) {
+		List<UUID> all = List.copyOf(ids);
+		List<T> found = new ArrayList<>();
+		for (int start = 0; start < all.size(); start += LOOKUP_CHUNK) {
+			found.addAll(lookup.apply(all.subList(start, Math.min(start + LOOKUP_CHUNK, all.size()))));
+		}
+		return found;
 	}
 
 	/** The people behind a set of requests, looked up once. */

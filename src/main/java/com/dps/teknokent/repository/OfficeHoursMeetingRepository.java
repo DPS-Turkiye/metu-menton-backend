@@ -22,4 +22,6 @@ public interface OfficeHoursMeetingRepository extends JpaRepository<OfficeHoursM
 			Instant after);
 
 	long countByScheduledAtGreaterThanEqualAndScheduledAtLessThan(Instant from, Instant to);
+
+	List<OfficeHoursMeeting> findByScheduledAtGreaterThanEqualAndScheduledAtLessThan(Instant from, Instant to);
 }

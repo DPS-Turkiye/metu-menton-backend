@@ -43,7 +43,26 @@ public interface OfficeHoursRequestRepository extends JpaRepository<OfficeHoursR
 	List<OfficeHoursRequest> findByStatusAndCreatedAtGreaterThanEqualAndCreatedAtLessThanOrderByCreatedAtDesc(
 			OfficeHoursRequestStatus status, Instant from, Instant to);
 
-	long countByStatusIn(Collection<OfficeHoursRequestStatus> statuses);
+	long countByStatusInAndCreatedAtGreaterThanEqual(Collection<OfficeHoursRequestStatus> statuses, Instant from);
+
+	/**
+	 * Requests not booked yet whose shown time is from {@code fromSlot} up to (not including) {@code toSlot}: the
+	 * first proposed time of an alternative, the first asked-for time otherwise. Times are stored as
+	 * "yyyy-MM-ddTHH:mm" in Turkey time, which sorts as text, so the first 16 characters are the first time.
+	 */
+	@Query("""
+			select request from OfficeHoursRequest request
+			where request.status <> com.dps.teknokent.domain.OfficeHoursRequestStatus.ACCEPTED
+			  and (case when request.status = com.dps.teknokent.domain.OfficeHoursRequestStatus.COUNTER_PROPOSED
+			              and request.proposedSlots is not null and request.proposedSlots <> ''
+			            then substring(request.proposedSlots, 1, 16)
+			            else substring(request.preferredSlots, 1, 16) end) >= :fromSlot
+			  and (case when request.status = com.dps.teknokent.domain.OfficeHoursRequestStatus.COUNTER_PROPOSED
+			              and request.proposedSlots is not null and request.proposedSlots <> ''
+			            then substring(request.proposedSlots, 1, 16)
+			            else substring(request.preferredSlots, 1, 16) end) < :toSlot""")
+	List<OfficeHoursRequest> findUnbookedShowingBetween(@Param("fromSlot") String fromSlot,
+			@Param("toSlot") String toSlot);
 
 	long countByStatusAndUpdatedAtGreaterThanEqualAndUpdatedAtLessThan(OfficeHoursRequestStatus status, Instant from,
 			Instant to);

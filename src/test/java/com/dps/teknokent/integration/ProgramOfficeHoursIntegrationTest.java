@@ -29,6 +29,7 @@ import com.dps.teknokent.domain.OfficeHoursMessageType;
 import com.dps.teknokent.domain.OfficeHoursRequestStatus;
 import com.dps.teknokent.domain.ProgramStatus;
 import com.dps.teknokent.domain.ProgramType;
+import com.dps.teknokent.domain.UserAccountStatus;
 import com.dps.teknokent.domain.UserRole;
 import com.dps.teknokent.entity.AppUser;
 import com.dps.teknokent.entity.InstitutionPerson;
@@ -165,6 +166,29 @@ class ProgramOfficeHoursIntegrationTest {
 	void aCoordinatorOfAnotherProgramIsRefused() throws Exception {
 		call(list(), otherCoordinator).andExpect(status().isBadRequest());
 		call(detail(), otherCoordinator).andExpect(status().isBadRequest());
+	}
+
+	@Test
+	void aCoordinatorWhoseAccountIsNotApprovedIsRefused() throws Exception {
+		coordinator.setStatus(UserAccountStatus.PENDING);
+		appUsers.saveAndFlush(coordinator);
+
+		call(list(), coordinator).andExpect(status().isBadRequest());
+		call(detail(), coordinator).andExpect(status().isBadRequest());
+	}
+
+	@Test
+	void aDateRangeFindsTheRequestByItsAskedForTime() throws Exception {
+		LocalDate day = LocalDate.now(MeetingSlotTimes.APP_ZONE).plusDays(3);
+
+		String within = call(list().param("from", day.toString()).param("to", day.toString()), coordinator)
+				.andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+		String before = call(list().param("from", day.minusDays(2).toString()).param("to",
+				day.minusDays(1).toString()), coordinator)
+				.andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+
+		assertThat(jsonMapper.readTree(within).get("appointments").get("totalElements").asInt()).isEqualTo(1);
+		assertThat(jsonMapper.readTree(before).get("appointments").get("totalElements").asInt()).isZero();
 	}
 
 	@Test
