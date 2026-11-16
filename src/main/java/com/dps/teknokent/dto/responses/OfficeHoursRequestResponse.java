@@ -24,6 +24,7 @@ public record OfficeHoursRequestResponse(
 		String rejectionReason,
 		List<Message> messages,
 		@Nullable OfficeHoursSlotResponse meeting,
+		@Nullable Cancellation cancellation,
 		Instant createdAt,
 		/* The course's title from Moodle. */
 		@Nullable String courseName,
@@ -33,6 +34,13 @@ public record OfficeHoursRequestResponse(
 		List<OfficeHoursTimeResponse> proposedTimes,
 		/* What the caller may do next with this request. */
 		List<OfficeHoursRequestAction> allowedActions) {
+
+	/**
+	 * Who called the accepted meeting off, when, and why if they said. {@code late} when it was less than 24 hours
+	 * before the start (FR-OH-14).
+	 */
+	public record Cancellation(UUID cancelledById, String reason, Instant cancelledAt, boolean late) {
+	}
 
 	public record Message(UUID id, UUID authorId, OfficeHoursMessageType type, String body, Instant createdAt) {
 	}

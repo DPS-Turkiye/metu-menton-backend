@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.dps.teknokent.dto.requests.AnswerOfficeHoursAlternativeRequest;
 import com.dps.teknokent.dto.requests.AnswerOfficeHoursRequest;
+import com.dps.teknokent.dto.requests.CancelOfficeHoursMeetingRequest;
 import com.dps.teknokent.dto.requests.CreateMentonOfficeHoursRequest;
 import com.dps.teknokent.dto.requests.UpdateOfficeHoursAvailabilityRequest;
 import com.dps.teknokent.dto.requests.UpdateOfficeHoursProfileRequest;
@@ -81,6 +82,14 @@ public class OfficeHoursMeController {
 	public OfficeHoursInboxRequestResponse answer(@RequestParam(required = false) UUID actorId,
 			@PathVariable UUID requestId, @Valid @RequestBody AnswerOfficeHoursRequest answer) {
 		return meService.answer(CurrentActor.resolve(actorId), requestId, answer);
+	}
+
+	/** Either side calls off a booked meeting before it starts; the other side is e-mailed. */
+	@PostMapping("/requests/{requestId}/cancel")
+	@ResponseStatus(HttpStatus.NO_CONTENT)
+	public void cancel(@RequestParam(required = false) UUID actorId, @PathVariable UUID requestId,
+			@Valid @RequestBody CancelOfficeHoursMeetingRequest cancellation) {
+		meService.cancel(CurrentActor.resolve(actorId), requestId, cancellation);
 	}
 
 	/** The academician's booked meetings, soonest first. */

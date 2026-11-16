@@ -28,6 +28,7 @@ import com.dps.teknokent.domain.OfficeHoursRequestAction;
 import com.dps.teknokent.domain.OfficeHoursRequestStatus;
 import com.dps.teknokent.domain.OfficeHoursRole;
 import com.dps.teknokent.dto.requests.AnswerOfficeHoursRequest;
+import com.dps.teknokent.dto.requests.CancelOfficeHoursMeetingRequest;
 import com.dps.teknokent.dto.requests.DecideOfficeHoursRequest;
 import com.dps.teknokent.dto.requests.UpdateOfficeHoursAvailabilityRequest;
 import com.dps.teknokent.dto.requests.UpdateOfficeHoursProfileRequest;
@@ -162,12 +163,31 @@ public class OfficeHoursMeService {
 		OfficeHoursRequest request = requestRepository.findForUpdate(requestId)
 				.filter(found -> found.getInstructorId().equals(instructorId))
 				.orElseThrow(OfficeHoursMeService::requestNotFound);
-		if (!allowedActions(request).contains(answer.action())) {
+		if (!allowedActions(request, false).contains(answer.action())) {
 			throw new InvalidRequestException(answer.action() == OfficeHoursRequestAction.ASK_QUESTION
 					? "A question can only be asked on a course's request, where the student can answer it"
 					: "This request can no longer be answered");
 		}
 		return inboxItems(List.of(bookingService.decide(request, instructorId, decision(answer)))).getFirst();
+	}
+
+	/**
+	 * Either side calls off a booked meeting made from Menton or a linked course: 404 unless the caller is its
+	 * student or academician on ODTÜ's record. The meeting leaves both sides' lists and the other side is e-mailed.
+	 */
+	@Transactional
+	public void cancel(UUID accountId, UUID requestId, CancelOfficeHoursMeetingRequest cancellation) {
+		UUID personId = existing(accountId).map(OfficeHoursUser::getId)
+				.orElseThrow(OfficeHoursMeService::requestNotFound);
+		OfficeHoursRequest request = requestRepository.findForUpdate(requestId)
+				.filter(found -> found.getStudentId().equals(personId) || found.getInstructorId().equals(personId))
+				.orElseThrow(OfficeHoursMeService::requestNotFound);
+		IdentityKind kind = IdentityKind.STUDENT;
+		if (request.getInstructorId().equals(personId)) {
+			kind = IdentityKind.ACADEMIC;
+		}
+		people.require(accountId, kind);
+		bookingService.cancel(request, personId, cancellation);
 	}
 
 	/** The academician's booked meetings from the last half year on, soonest first. */
@@ -180,7 +200,7 @@ public class OfficeHoursMeService {
 		}
 		UUID instructorId = person.get().getId();
 		List<OfficeHoursMeeting> meetings = meetingRepository
-				.findByInstructorIdAndScheduledAtAfterOrderByScheduledAtAsc(instructorId,
+				.findByInstructorIdAndCancelledAtIsNullAndScheduledAtAfterOrderByScheduledAtAsc(instructorId,
 						clock.instant().minus(MEETING_HISTORY));
 		if (meetings.isEmpty()) {
 			return List.of();
@@ -271,7 +291,9 @@ public class OfficeHoursMeService {
 					messages.getOrDefault(request.getId(), List.of()),
 					meeting == null ? null
 							: OfficeHoursTimeResponse.of(meeting.getScheduledAt(), meeting.getDurationMinutes()),
-					request.getRejectionReason(), request.getCreatedAt(), allowedActions(request));
+					request.getRejectionReason(), request.getCreatedAt(),
+					allowedActions(request, bookingService.isAhead(meeting)),
+					OfficeHoursBookingService.cancellationOf(meeting));
 		}).toList();
 	}
 
@@ -279,9 +301,9 @@ public class OfficeHoursMeService {
 	 * The academic's answers the course pages allow, less asking a question on a Menton request: only the Moodle
 	 * course pages have the student's reply step so far.
 	 */
-	private static List<OfficeHoursRequestAction> allowedActions(OfficeHoursRequest request) {
+	private static List<OfficeHoursRequestAction> allowedActions(OfficeHoursRequest request, boolean meetingAhead) {
 		List<OfficeHoursRequestAction> actions = OfficeHoursRequestAction.allowedFor(OfficeHoursRole.INSTRUCTOR,
-				request.getStatus());
+				request.getStatus(), meetingAhead);
 		return request.getCourseId() != null ? actions
 				: actions.stream().filter(action -> action != OfficeHoursRequestAction.ASK_QUESTION).toList();
 	}
@@ -304,6 +326,7 @@ public class OfficeHoursMeService {
 				null, null);
 		case REPLY, ACCEPT_PROPOSED, WITHDRAW -> throw new InvalidRequestException(
 				"Only the student can do that with a request");
+		case CANCEL -> throw new InvalidRequestException("A meeting is cancelled through its own route");
 		};
 	}
 

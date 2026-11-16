@@ -6,6 +6,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 import org.jspecify.annotations.Nullable;
@@ -15,6 +16,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.server.ResponseStatusException;
 
 import com.dps.teknokent.config.LtiProperties;
+import com.dps.teknokent.domain.AppLanguage;
 import com.nimbusds.jose.JOSEException;
 import com.nimbusds.jose.JWSAlgorithm;
 import com.nimbusds.jose.proc.BadJOSEException;
@@ -91,7 +93,8 @@ public class LtiLaunchVerifier {
 				contextId,
 				text(context.get("label")),
 				text(context.get("title")),
-				roles(claims));
+				roles(claims),
+				language(claims));
 	}
 
 	private JWTClaimsSet verifiedClaims(String idToken) {
@@ -124,6 +127,21 @@ public class LtiLaunchVerifier {
 			return List.of();
 		}
 		return list.stream().filter(String.class::isInstance).map(String.class::cast).toList();
+	}
+
+	/**
+	 * Moodle sends the person's language as "en", "en_us" or "tr"; anything not English reads as Turkish. Null when
+	 * the launch names none (the claim is optional), so a saved choice is not reset to Turkish.
+	 */
+	private static @Nullable AppLanguage language(JWTClaimsSet claims) {
+		Map<String, Object> presentation = mapClaim(claims, CLAIM_PREFIX + "launch_presentation");
+		if (presentation == null || !(presentation.get("locale") instanceof String code)) {
+			return null;
+		}
+		if (code.toLowerCase(Locale.ROOT).startsWith("en")) {
+			return AppLanguage.EN;
+		}
+		return AppLanguage.TR;
 	}
 
 	/** A context value as text: LMSes send ids as strings or as numbers, so either is accepted. */

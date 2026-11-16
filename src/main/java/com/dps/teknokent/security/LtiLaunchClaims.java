@@ -4,6 +4,8 @@ import java.util.List;
 
 import org.jspecify.annotations.Nullable;
 
+import com.dps.teknokent.domain.AppLanguage;
+
 /** What office hours keep from a verified LTI 1.3 resource-link launch. */
 public record LtiLaunchClaims(
 		String issuer,
@@ -13,5 +15,6 @@ public record LtiLaunchClaims(
 		String contextId,
 		@Nullable String contextLabel,
 		@Nullable String contextTitle,
-		List<String> roles) {
+		List<String> roles,
+		@Nullable AppLanguage language) {
 }

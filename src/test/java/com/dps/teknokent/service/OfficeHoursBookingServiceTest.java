@@ -4,12 +4,15 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -28,11 +31,13 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
+import com.dps.teknokent.domain.OfficeHoursMeetingAction;
 import com.dps.teknokent.domain.OfficeHoursMessageType;
 import com.dps.teknokent.domain.OfficeHoursRequestAction;
 import com.dps.teknokent.domain.OfficeHoursRequestStatus;
 import com.dps.teknokent.domain.OfficeHoursRole;
 import com.dps.teknokent.dto.requests.AcceptOfficeHoursSlotRequest;
+import com.dps.teknokent.dto.requests.CancelOfficeHoursMeetingRequest;
 import com.dps.teknokent.dto.requests.CreateOfficeHoursRequest;
 import com.dps.teknokent.dto.requests.DecideOfficeHoursRequest;
 import com.dps.teknokent.dto.requests.ReplyOfficeHoursRequest;
@@ -58,6 +63,7 @@ import com.dps.teknokent.repository.OfficeHoursRequestMessageRepository;
 import com.dps.teknokent.repository.OfficeHoursRequestRepository;
 import com.dps.teknokent.repository.OfficeHoursSettingsRepository;
 import com.dps.teknokent.repository.OfficeHoursUserRepository;
+import com.dps.teknokent.service.OfficeHoursMailService.Event;
 
 @ExtendWith(MockitoExtension.class)
 class OfficeHoursBookingServiceTest {
@@ -87,13 +93,15 @@ class OfficeHoursBookingServiceTest {
 	private OfficeHoursSlotService slotService;
 	@Mock
 	private OfficeHoursCourseRepository courseRepository;
+	@Mock
+	private OfficeHoursMailService mailService;
 
 	private OfficeHoursBookingService service;
 
 	@BeforeEach
 	void setUp() {
 		service = new OfficeHoursBookingService(enrollmentRepository, userRepository, requestRepository,
-				messageRepository, meetingRepository, settingsRepository, slotService, courseRepository,
+				messageRepository, meetingRepository, settingsRepository, slotService, courseRepository, mailService,
 				Clock.fixed(NOW, ZoneOffset.UTC));
 		lenient().when(requestRepository.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
 		lenient().when(userRepository.findAllById(any())).thenReturn(List.of());
@@ -150,11 +158,9 @@ class OfficeHoursBookingServiceTest {
 		assertThat(response.status()).isEqualTo(OfficeHoursRequestStatus.PENDING);
 		assertThat(response.topic()).isEqualTo("Ödev 2 hakkında");
 		assertThat(response.expectedOutcome()).isNull();
-		assertThat(response.preferredSlots()).containsExactly(TUESDAY_2PM, TUESDAY_3PM); // The Moodle path takes the
-																							// academic's lock too: one
-																							// request to them at a
-																							// time, whichever way it
-																							// comes.
+		assertThat(response.preferredSlots()).containsExactly(TUESDAY_2PM, TUESDAY_3PM);
+		verify(mailService).requestChanged(any(), eq(Event.NEW_REQUEST), isNull());
+		// The Moodle path takes the academic's lock too: one request to them at a time, whichever way it comes.
 		verify(userRepository).findForUpdate(ACADEMIC);
 	}
 
@@ -166,12 +172,14 @@ class OfficeHoursBookingServiceTest {
 		OfficeHoursRequest someoneElse = new OfficeHoursRequest();
 		someoneElse.setStudentId(UUID.randomUUID());
 		when(requestRepository.findByInstructorIdAndStatusIn(eq(ACADEMIC), any())).thenReturn(List.of(someoneElse));
-		when(meetingRepository.findByInstructorIdAndScheduledAtAfter(ACADEMIC, NOW)).thenReturn(List.of());
+		when(meetingRepository.findByInstructorIdAndCancelledAtIsNullAndScheduledAtAfter(ACADEMIC, NOW))
+				.thenReturn(List.of());
 
 		assertThatThrownBy(() -> service.create(STUDENT, COURSE,
 				new CreateOfficeHoursRequest(ACADEMIC, "Soru", null, List.of(TUESDAY_2PM))))
 				.isInstanceOf(ConflictException.class);
 		verify(requestRepository, never()).saveAndFlush(any());
+		verifyNoInteractions(mailService);
 	}
 
 	@Test
@@ -182,7 +190,8 @@ class OfficeHoursBookingServiceTest {
 		when(requestRepository.findByInstructorIdAndStatusIn(eq(ACADEMIC), any())).thenReturn(List.of());
 		OfficeHoursMeeting own = new OfficeHoursMeeting();
 		own.setStudentId(STUDENT);
-		when(meetingRepository.findByInstructorIdAndScheduledAtAfter(ACADEMIC, NOW)).thenReturn(List.of(own));
+		when(meetingRepository.findByInstructorIdAndCancelledAtIsNullAndScheduledAtAfter(ACADEMIC, NOW))
+				.thenReturn(List.of(own));
 
 		OfficeHoursRequestResponse response = service.create(STUDENT, COURSE,
 				new CreateOfficeHoursRequest(ACADEMIC, "Soru", null, List.of(TUESDAY_2PM)));
@@ -226,6 +235,7 @@ class OfficeHoursBookingServiceTest {
 		verify(meetingRepository).saveAndFlush(meeting.capture());
 		assertThat(meeting.getValue().getScheduledAt()).isEqualTo(at);
 		assertThat(meeting.getValue().getDurationMinutes()).isEqualTo(20);
+		verify(mailService).requestChanged(any(), eq(Event.ACCEPTED), eq("Görüşürüz"));
 		assertThat(meeting.getValue().getStudentId()).isEqualTo(STUDENT);
 	}
 
@@ -285,6 +295,7 @@ class OfficeHoursBookingServiceTest {
 		assertThat(request.getStatus()).isEqualTo(OfficeHoursRequestStatus.DECLINED);
 		assertThat(request.getRejectionReason()).isEqualTo("Bu hafta yokum");
 		verify(meetingRepository, never()).saveAndFlush(any());
+		verify(mailService).requestChanged(request, Event.DECLINED, "Bu hafta yokum");
 	}
 
 	@Test
@@ -302,6 +313,8 @@ class OfficeHoursBookingServiceTest {
 		verify(messageRepository, org.mockito.Mockito.times(2)).save(messages.capture());
 		assertThat(messages.getAllValues()).extracting(OfficeHoursRequestMessage::getType)
 				.containsExactly(OfficeHoursMessageType.INSTRUCTOR_QUESTION, OfficeHoursMessageType.STUDENT_REPLY);
+		verify(mailService).requestChanged(request, Event.MORE_INFO_REQUESTED, "Hangi soru?");
+		verify(mailService).requestChanged(request, Event.REPLIED, "3. soru");
 	}
 
 	@Test
@@ -320,6 +333,8 @@ class OfficeHoursBookingServiceTest {
 
 		assertThat(request.getStatus()).isEqualTo(OfficeHoursRequestStatus.ACCEPTED);
 		verify(meetingRepository).saveAndFlush(any());
+		verify(mailService).requestChanged(request, Event.COUNTER_PROPOSED, "Şunlar uygun");
+		verify(mailService).requestChanged(request, Event.SLOT_CHOSEN, null);
 	}
 
 	@Test
@@ -337,9 +352,23 @@ class OfficeHoursBookingServiceTest {
 
 		service.withdraw(STUDENT, COURSE, REQUEST);
 		assertThat(request.getStatus()).isEqualTo(OfficeHoursRequestStatus.WITHDRAWN);
+		verify(mailService).requestChanged(request, Event.WITHDRAWN, null);
 
 		assertThatThrownBy(() -> service.withdraw(STUDENT, COURSE, REQUEST))
 				.isInstanceOf(InvalidRequestException.class);
+	}
+
+	@Test
+	void theStepsMentonTakesWithNoCourseEMailTheOtherSideToo() {
+		OfficeHoursRequest created = service.createRequest(STUDENT, null, new CreateOfficeHoursRequest(
+				ACADEMIC, "Ödev 2", null, List.of(TUESDAY_2PM)));
+		verify(mailService).requestChanged(created, Event.NEW_REQUEST, null);
+
+		OfficeHoursRequest request = existing(OfficeHoursRequestStatus.PENDING);
+		request.setCourseId(null);
+		service.decide(request, ACADEMIC,
+				new DecideOfficeHoursRequest(OfficeHoursRequestStatus.DECLINED, "Bu hafta yokum", null, null));
+		verify(mailService).requestChanged(request, Event.DECLINED, "Bu hafta yokum");
 	}
 
 	@Test
@@ -350,6 +379,81 @@ class OfficeHoursBookingServiceTest {
 				.isInstanceOf(ResponseStatusException.class);
 		assertThatThrownBy(() -> service.reply(ACADEMIC, COURSE, REQUEST, new ReplyOfficeHoursRequest("x")))
 				.isInstanceOf(ResponseStatusException.class);
+	}
+
+	private OfficeHoursMeeting acceptedMeetingAt(Instant at) {
+		existing(OfficeHoursRequestStatus.ACCEPTED);
+		OfficeHoursMeeting meeting = new OfficeHoursMeeting();
+		meeting.setRequestId(REQUEST);
+		meeting.setScheduledAt(at);
+		meeting.setDurationMinutes(20);
+		lenient().when(meetingRepository.findByRequestId(REQUEST)).thenReturn(Optional.of(meeting));
+		lenient().when(meetingRepository.findByRequestIdIn(any())).thenReturn(List.of(meeting));
+		lenient().when(meetingRepository.cancelIfLive(any(), any(), any(), any())).thenReturn(1);
+		return meeting;
+	}
+
+	@Test
+	void whenBothSidesCancelAtOnceOnlyOneWinsAndTellsTheOther() {
+		acceptedMeetingAt(NOW.plus(Duration.ofDays(2)));
+		when(meetingRepository.cancelIfLive(any(), any(), any(), any())).thenReturn(0);
+
+		assertThatThrownBy(() -> service.cancel(STUDENT, COURSE, REQUEST, new CancelOfficeHoursMeetingRequest(null)))
+				.isInstanceOf(ConflictException.class);
+		verifyNoInteractions(mailService);
+	}
+
+	@Test
+	void eitherSideCancelsAnUpcomingMeetingAndTheOtherSideIsTold() {
+		OfficeHoursMeeting meeting = acceptedMeetingAt(NOW.plusSeconds(3600));
+
+		OfficeHoursRequestResponse response = service.cancel(STUDENT, COURSE, REQUEST,
+				new CancelOfficeHoursMeetingRequest("  Hastayım "));
+
+		assertThat(response.status()).isEqualTo(OfficeHoursRequestStatus.CANCELLED);
+		assertThat(meeting.getCancelledAt()).isEqualTo(NOW);
+		assertThat(meeting.getCancelledBy()).isEqualTo(STUDENT);
+		assertThat(response.cancellation().reason()).isEqualTo("Hastayım");
+		verify(mailService).requestChanged(any(), eq(Event.CANCELLED_BY_STUDENT), eq("Hastayım"));
+
+		acceptedMeetingAt(NOW.plus(Duration.ofDays(2)));
+		service.cancel(ACADEMIC, COURSE, REQUEST, new CancelOfficeHoursMeetingRequest(null));
+		verify(mailService).requestChanged(any(), eq(Event.CANCELLED_BY_INSTRUCTOR), isNull());
+	}
+
+	@Test
+	void anAcademicCancellingWithin24HoursMustSayWhyAndTheCancelIsMarkedLate() {
+		acceptedMeetingAt(NOW.plus(Duration.ofHours(23)));
+		assertThatThrownBy(() -> service.cancel(ACADEMIC, COURSE, REQUEST, new CancelOfficeHoursMeetingRequest(" ")))
+				.isInstanceOf(InvalidRequestException.class);
+
+		OfficeHoursRequestResponse late = service.cancel(ACADEMIC, COURSE, REQUEST,
+				new CancelOfficeHoursMeetingRequest("Toplantıya çağrıldım"));
+		assertThat(late.cancellation().late()).isTrue();
+
+		// The student needs no reason, even late; the cancel is still marked late.
+		acceptedMeetingAt(NOW.plus(Duration.ofHours(2)));
+		assertThat(service.cancel(STUDENT, COURSE, REQUEST, new CancelOfficeHoursMeetingRequest(null))
+				.cancellation().late()).isTrue();
+
+		acceptedMeetingAt(NOW.plus(Duration.ofHours(25)));
+		assertThat(service.cancel(ACADEMIC, COURSE, REQUEST, new CancelOfficeHoursMeetingRequest(null))
+				.cancellation().late()).isFalse();
+	}
+
+	@Test
+	void aMeetingThatStartedOrWasNeverAcceptedCannotBeCancelledNorBySomeoneElse() {
+		// The meeting's state rules it out, not the request: a conflict (409), not a bad request.
+		acceptedMeetingAt(NOW.minusSeconds(60));
+		assertThatThrownBy(() -> service.cancel(STUDENT, COURSE, REQUEST, new CancelOfficeHoursMeetingRequest(null)))
+				.isInstanceOf(ConflictException.class);
+		assertThatThrownBy(() -> service.cancel(UUID.randomUUID(), COURSE, REQUEST,
+				new CancelOfficeHoursMeetingRequest(null))).isInstanceOf(ResponseStatusException.class);
+
+		existing(OfficeHoursRequestStatus.PENDING);
+		assertThatThrownBy(() -> service.cancel(STUDENT, COURSE, REQUEST, new CancelOfficeHoursMeetingRequest(null)))
+				.isInstanceOf(ConflictException.class);
+		verifyNoInteractions(mailService);
 	}
 
 	@Test
@@ -460,7 +564,7 @@ class OfficeHoursBookingServiceTest {
 		assertThat(response.time()).isEqualTo(new OfficeHoursTimeResponse(
 				OffsetDateTime.parse("2026-11-10T14:00+03:00"), OffsetDateTime.parse("2026-11-10T14:30+03:00")));
 		assertThat(response.courseName()).isEqualTo("CENG 242 Programlama Dilleri");
-		assertThat(response.allowedActions()).isEmpty();
+		assertThat(response.allowedActions()).containsExactly(OfficeHoursMeetingAction.CANCEL);
 	}
 
 	@Test
@@ -613,7 +717,8 @@ class OfficeHoursBookingServiceTest {
 		OfficeHoursRequest someoneElse = new OfficeHoursRequest();
 		someoneElse.setStudentId(UUID.randomUUID());
 		when(requestRepository.findByInstructorIdAndStatusIn(eq(ACADEMIC), any())).thenReturn(List.of(someoneElse));
-		when(meetingRepository.findByInstructorIdAndScheduledAtAfter(ACADEMIC, NOW)).thenReturn(List.of());
+		when(meetingRepository.findByInstructorIdAndCancelledAtIsNullAndScheduledAtAfter(ACADEMIC, NOW))
+				.thenReturn(List.of());
 
 		OfficeHoursRequestResponse response = service.create(STUDENT, COURSE,
 				new CreateOfficeHoursRequest(ACADEMIC, "Soru", null, List.of(TUESDAY_2PM)));
@@ -782,7 +887,8 @@ class OfficeHoursBookingServiceTest {
 		assertThat(response.messages()).containsExactly(new OfficeHoursRequestResponse.Message(
 				question.getId(), ACADEMIC, OfficeHoursMessageType.INSTRUCTOR_QUESTION, "Hangi soru?", NOW));
 		assertThat(response.meeting()).isEqualTo(new OfficeHoursSlotResponse(at, 30));
-		assertThat(response.allowedActions()).isEmpty();
+		// The meeting is still ahead, so either side may still call it off.
+		assertThat(response.allowedActions()).containsExactly(OfficeHoursRequestAction.CANCEL);
 	}
 
 	@Test
