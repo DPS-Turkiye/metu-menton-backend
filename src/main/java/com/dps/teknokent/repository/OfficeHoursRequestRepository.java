@@ -66,4 +66,25 @@ public interface OfficeHoursRequestRepository extends JpaRepository<OfficeHoursR
 
 	long countByStatusAndUpdatedAtGreaterThanEqualAndUpdatedAtLessThan(OfficeHoursRequestStatus status, Instant from,
 			Instant to);
+
+	/** Each student who asked for office hours since {@code from}, with their requests counted by status. */
+	@Query("""
+			select request.studentId as studentId,
+			  sum(case when request.status in (com.dps.teknokent.domain.OfficeHoursRequestStatus.PENDING,
+			    com.dps.teknokent.domain.OfficeHoursRequestStatus.MORE_INFO_REQUESTED) then 1 else 0 end)
+			    as awaitingDecision,
+			  sum(case when request.status = com.dps.teknokent.domain.OfficeHoursRequestStatus.COUNTER_PROPOSED
+			    then 1 else 0 end) as alternativeProposed,
+			  sum(case when request.status = com.dps.teknokent.domain.OfficeHoursRequestStatus.ACCEPTED
+			    then 1 else 0 end) as accepted,
+			  sum(case when request.status = com.dps.teknokent.domain.OfficeHoursRequestStatus.DECLINED
+			    then 1 else 0 end) as declined,
+			  sum(case when request.status = com.dps.teknokent.domain.OfficeHoursRequestStatus.WITHDRAWN
+			    then 1 else 0 end) as withdrawn,
+			  count(distinct request.instructorId) as academicians,
+			  max(request.createdAt) as lastRequestedAt
+			from OfficeHoursRequest request
+			where request.createdAt >= :from
+			group by request.studentId""")
+	List<OfficeHoursStudentLoad> loadByStudentSince(@Param("from") Instant from);
 }

@@ -163,6 +163,49 @@ class ProgramOfficeHoursIntegrationTest {
 	}
 
 	@Test
+	void theStudentListCarriesOnlyWhatItsTableShows() throws Exception {
+		OfficeHoursUser moodleOnly = new OfficeHoursUser();
+		moodleOnly.setId(UUID.randomUUID());
+		moodleOnly.setIssuer("https://odtuclass.example");
+		moodleOnly.setSubject("moodle-42");
+		moodleOnly.setFullName("Berk Özkan");
+		moodleOnly.setCreatedAt(Instant.now());
+		moodleOnly.setLastLaunchAt(Instant.now());
+		officeHoursUsers.saveAndFlush(moodleOnly);
+		OfficeHoursRequest fromCourse = new OfficeHoursRequest();
+		fromCourse.setId(UUID.randomUUID());
+		fromCourse.setStudentId(moodleOnly.getId());
+		fromCourse.setInstructorId(request.getInstructorId());
+		fromCourse.setStatus(OfficeHoursRequestStatus.DECLINED);
+		fromCourse.setTopic("Gizli başlık değil ama listede yok");
+		fromCourse.setExpectedOutcome(SECRET_DESCRIPTION);
+		fromCourse.setPreferredSlots(request.getPreferredSlots());
+		fromCourse.setCreatedAt(Instant.now().minus(3, ChronoUnit.DAYS));
+		fromCourse.setUpdatedAt(Instant.now().minus(2, ChronoUnit.DAYS));
+		requests.saveAndFlush(fromCourse);
+
+		String body = call(get("/api/coordinator/programs/{id}/office-hours/students", officeHours.getId()),
+				coordinator).andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+		JsonNode page = jsonMapper.readTree(body);
+
+		assertThat(fields(page)).containsExactlyInAnyOrder("faculties", "students");
+		JsonNode first = page.get("students").get("content").get(0);
+		assertThat(fields(first)).containsExactlyInAnyOrder("id", "student", "classYear", "requests", "academicians",
+				"lastRequestedAt");
+		assertThat(fields(first.get("student"))).containsExactlyInAnyOrder("name", "title", "department");
+		assertThat(fields(first.get("requests"))).containsExactlyInAnyOrder("awaitingDecision",
+				"alternativeProposed", "accepted", "declined", "withdrawn");
+		List<String> names = new ArrayList<>();
+		page.get("students").get("content").forEach(row -> names.add(row.get("student").get("name").asString()));
+		assertThat(names).containsExactly("Ayşe Yılmaz", "Berk Özkan");
+		assertThat(body).doesNotContain(SECRET_DESCRIPTION).doesNotContain(SECRET_MESSAGE)
+				.doesNotContain("Gizli başlık").doesNotContain(student.getEmail());
+
+		call(get("/api/coordinator/programs/{id}/office-hours/students", officeHours.getId()), otherCoordinator)
+				.andExpect(status().isBadRequest());
+	}
+
+	@Test
 	void aCoordinatorOfAnotherProgramIsRefused() throws Exception {
 		call(list(), otherCoordinator).andExpect(status().isBadRequest());
 		call(detail(), otherCoordinator).andExpect(status().isBadRequest());
