@@ -14,7 +14,7 @@ import com.dps.teknokent.domain.ProgramType;
 
 /**
  * A program as its coordinator sees it: the list card, and with {@link Detail} the overview tab. The detail's
- * {@code pendingApprovalCount} is the Onaylar tab's badge.
+ * {@code pendingApprovalCount} is the Onaylar tab's badge; {@code counts} are a peer or Office Hours program's own.
  */
 public record CoordinatorProgramResponse(
 		UUID id,
@@ -37,7 +37,8 @@ public record CoordinatorProgramResponse(
 		@Nullable ProgramPhaseResponse currentPhase,
 		List<ProgramPhaseResponse> phases,
 		@Nullable Integer currentWeek,
-		@Nullable Integer totalWeeks) {
+		@Nullable Integer totalWeeks,
+		ProgramCountsResponse counts) {
 
 	public record Detail(
 			CoordinatorProgramResponse program,
