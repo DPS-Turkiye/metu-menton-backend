@@ -86,13 +86,14 @@ springdoc:
 
 ai:
   provider: ${AI_PROVIDER:openai}
-  # One switch per feature that sends data to the AI provider; all on unless a deployment turns one off.
+  # One switch per feature that sends data to the AI provider. Unset follows the edition (AiFeatures): on in
+  # TEKNOKENT, off in ODTU, where switching one on stops the startup.
   features:
-    profile-parsing: ${AI_PROFILE_PARSING_ENABLED:true}
-    syllabus: ${AI_SYLLABUS_ENABLED:true}
-    matching: ${AI_MATCHING_ENABLED:true}
-    meeting-report: ${AI_MEETING_REPORT_ENABLED:true}
-    task-handover: ${AI_TASK_HANDOVER_ENABLED:true}
+    profile-parsing: ${AI_PROFILE_PARSING_ENABLED:}
+    syllabus: ${AI_SYLLABUS_ENABLED:}
+    matching: ${AI_MATCHING_ENABLED:}
+    meeting-report: ${AI_MEETING_REPORT_ENABLED:}
+    task-handover: ${AI_TASK_HANDOVER_ENABLED:}
   openai:
     api-key: ${OPENAI_API_KEY:}
     base-url: ${OPENAI_BASE_URL:https://api.openai.com/v1}
@@ -169,7 +170,8 @@ profile-parsing:
 
 matching:
   pgvector:
-    enabled: ${MATCHING_PGVECTOR_ENABLED:true}
+    # Unset follows AI matching: on in TEKNOKENT, off in ODTU (where switching it on stops the startup).
+    enabled: ${MATCHING_PGVECTOR_ENABLED:}
 
 meeting:
   provider:

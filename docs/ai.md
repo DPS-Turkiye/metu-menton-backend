@@ -4,8 +4,10 @@ Every AI call goes from Spring Boot straight to the configured provider (`AI_PRO
 any other value stops the app at start-up). No Python service or extra port is involved. Personal data is
 redacted locally (`LocalPiiRedactionService`) before any text leaves the server.
 
-Each feature has a switch, all on when unset. A switched-off feature answers 403 with code `AI_FEATURE_DISABLED`,
-and the frontend offers the manual path instead.
+Each feature has a switch. Unset follows the edition: on in TEKNOKENT; in ODTU every feature is off and the
+pgvector shortlist with it, whatever the switches say, and a switch set to `true` stops the backend at start-up (no
+ODTÜ data goes to an AI provider). A switched-off feature answers 403 with code `AI_FEATURE_DISABLED`, and the
+frontend offers the manual path instead.
 
 | Feature | Switch | Without it |
 |---|---|---|
