@@ -3,6 +3,8 @@ package com.dps.teknokent.controller;
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 
+import org.jspecify.annotations.Nullable;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.CacheControl;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -19,7 +21,6 @@ import com.dps.teknokent.exception.ResourceNotFoundException;
 import com.dps.teknokent.service.OfficeHoursCalendarFeedService;
 
 import io.swagger.v3.oas.annotations.tags.Tag;
-import lombok.RequiredArgsConstructor;
 
 /**
  * Calendar links for Moodle (FR-OH-23). Like the rest of office hours only the frontend's server calls this: it
@@ -27,32 +28,42 @@ import lombok.RequiredArgsConstructor;
  */
 @RestController
 @RequestMapping("/api/office-hours")
-@RequiredArgsConstructor
 @Tag(name = "Office hours")
 public class OfficeHoursCalendarFeedController {
 
 	static final MediaType TEXT_CALENDAR = new MediaType("text", "calendar", StandardCharsets.UTF_8);
 
 	private final OfficeHoursCalendarFeedService feedService;
+	private final boolean enabled;
+
+	public OfficeHoursCalendarFeedController(OfficeHoursCalendarFeedService feedService,
+			@Value("${app.office-hours.calendar-feed.enabled:false}") boolean enabled) {
+		this.feedService = feedService;
+		this.enabled = enabled;
+	}
 
 	@GetMapping("/users/{userId}/calendar-feed")
 	public OfficeHoursCalendarFeedResponse personalFeed(@PathVariable UUID userId) {
+		requireEnabled();
 		return feedService.personalFeed(userId);
 	}
 
 	@PostMapping("/users/{userId}/calendar-feed/reset")
 	public OfficeHoursCalendarFeedResponse resetPersonalFeed(@PathVariable UUID userId) {
+		requireEnabled();
 		return feedService.resetPersonalFeed(userId);
 	}
 
 	@GetMapping("/users/{userId}/courses/{courseId}/calendar-feed")
 	public OfficeHoursCalendarFeedResponse courseFeed(@PathVariable UUID userId, @PathVariable UUID courseId) {
+		requireEnabled();
 		return feedService.courseFeed(userId, courseId);
 	}
 
 	/** 403 for a student: the whole course shares this link. */
 	@PostMapping("/users/{userId}/courses/{courseId}/calendar-feed/reset")
 	public OfficeHoursCalendarFeedResponse resetCourseFeed(@PathVariable UUID userId, @PathVariable UUID courseId) {
+		requireEnabled();
 		return feedService.resetCourseFeed(userId, courseId);
 	}
 
@@ -62,7 +73,8 @@ public class OfficeHoursCalendarFeedController {
 	 */
 	@GetMapping("/calendar-feeds/{token}")
 	public ResponseEntity<String> feed(@PathVariable String token,
-			@RequestParam(name = "lang", required = false) String lang) {
+			@RequestParam(name = "lang", required = false) @Nullable String lang) {
+		requireEnabled();
 		AppLanguage language = AppLanguage.TR;
 		if (AppLanguage.EN.code().equals(lang)) {
 			language = AppLanguage.EN;
@@ -71,5 +83,12 @@ public class OfficeHoursCalendarFeedController {
 				.orElseThrow(() -> new ResourceNotFoundException("Calendar not found."));
 		// Always fresh: a cancelled or moved meeting must not linger in a cache between Moodle's fetches.
 		return ResponseEntity.ok().contentType(TEXT_CALENDAR).cacheControl(CacheControl.noStore()).body(calendar);
+	}
+
+	/** A deployment that has not turned the links on shows no sign of them: the routes look absent. */
+	private void requireEnabled() {
+		if (!enabled) {
+			throw new ResourceNotFoundException("Calendar not found.");
+		}
 	}
 }

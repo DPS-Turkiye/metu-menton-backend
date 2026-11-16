@@ -175,6 +175,27 @@ class RateLimitingFilterTest {
 		assertThat(call(from("POST", CV_PARSE, "198.51.100.20")).getStatus()).isEqualTo(429);
 	}
 
+	@Test
+	void aCalendarLinkGets120FetchesInTenMinutesWhateverAddressTheyComeFrom() throws Exception {
+		String feed = "/api/office-hours/calendar-feeds/";
+		String link = "c".repeat(43);
+		for (int i = 0; i < 120; i++) {
+			assertThat(call(from("GET", feed + link, "198.51.100." + (i % 200))).getStatus()).isEqualTo(200);
+		}
+
+		assertThat(call(from("GET", feed + link, "203.0.113.9")).getStatus()).isEqualTo(429);
+		assertThat(call(from("GET", feed + "d".repeat(43), "198.51.100.1")).getStatus()).isEqualTo(200);
+	}
+
+	@Test
+	void aCalendarLinksBudgetIsKeptUnderItsHashNotTheToken() {
+		String link = "e".repeat(43);
+
+		String key = RateLimitingFilter.linkKey("/api/office-hours/calendar-feeds/" + link);
+
+		assertThat(key).hasSize(64).doesNotContain(link).matches("[0-9a-f]+");
+	}
+
 	private MockHttpServletResponse call(MockHttpServletRequest request) throws Exception {
 		MockHttpServletResponse response = new MockHttpServletResponse();
 		filter.doFilter(request, response, new MockFilterChain());

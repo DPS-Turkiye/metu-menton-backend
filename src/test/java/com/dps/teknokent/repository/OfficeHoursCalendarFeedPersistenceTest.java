@@ -55,7 +55,9 @@ class OfficeHoursCalendarFeedPersistenceTest {
 		assertThat(feeds.findByToken("d".repeat(43))).isEmpty();
 	}
 
-	/** PostgreSQL only (ON CONFLICT): run with the datasource pointed at PostgreSQL; skipped on the H2 test database. */
+	/**
+	 * PostgreSQL only (ON CONFLICT): run with the datasource pointed at PostgreSQL; skipped on the H2 test database.
+	 */
 	@Test
 	@EnabledIfSystemProperty(named = "spring.datasource.url", matches = "jdbc:postgresql:.*")
 	void aSecondFirstOpenKeepsTheFirstLink() {

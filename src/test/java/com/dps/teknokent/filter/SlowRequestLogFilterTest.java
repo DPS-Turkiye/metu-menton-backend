@@ -31,6 +31,20 @@ class SlowRequestLogFilterTest {
 	}
 
 	@Test
+	void neverLogsACalendarFeedsToken(CapturedOutput output) throws Exception {
+		String token = "q".repeat(43);
+		MockHttpServletResponse response = new MockHttpServletResponse();
+		response.setStatus(200);
+
+		new SlowRequestLogFilter(0).doFilter(
+				new MockHttpServletRequest("GET", "/api/office-hours/calendar-feeds/" + token), response,
+				new MockFilterChain());
+
+		assertThat(output).contains("Slow request: GET /api/office-hours/calendar-feeds/[redacted] -> 200");
+		assertThat(output).doesNotContain(token);
+	}
+
+	@Test
 	void staysQuietForAFastRequest(CapturedOutput output) throws Exception {
 		new SlowRequestLogFilter(60_000).doFilter(
 				new MockHttpServletRequest("GET", "/api/health"), new MockHttpServletResponse(), new MockFilterChain());

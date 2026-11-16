@@ -6,13 +6,20 @@ import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * Writes an iCalendar (RFC 5545) feed for calendars that subscribe to a link, such as Moodle's. Times are written in
  * UTC, so no time zone block is needed and every calendar shows them in its own zone.
  */
 public final class ICalendarWriter {
 
-	public record Event(String uid, Instant startsAt, Instant endsAt, String summary, String description) {
+	/**
+	 * One event. A cancelled one stays in the feed under the same UID with a higher SEQUENCE, so a calendar that
+	 * already holds it marks it cancelled instead of keeping a stale entry until it next drops missing events.
+	 */
+	public record Event(String uid, Instant startsAt, Instant endsAt, String summary, @Nullable String description,
+			boolean cancelled) {
 	}
 
 	private static final String CRLF = "\r\n";
@@ -46,7 +53,10 @@ public final class ICalendarWriter {
 			if (event.description() != null) {
 				line(out, "DESCRIPTION:" + text(event.description()));
 			}
-			line(out, "TRANSP:OPAQUE");
+			line(out, "SEQUENCE:" + (event.cancelled() ? 1 : 0));
+			line(out, "STATUS:" + (event.cancelled() ? "CANCELLED" : "CONFIRMED"));
+			// A cancelled meeting no longer blocks the time in the subscriber's calendar.
+			line(out, "TRANSP:" + (event.cancelled() ? "TRANSPARENT" : "OPAQUE"));
 			line(out, "END:VEVENT");
 		}
 		line(out, "END:VCALENDAR");
@@ -62,7 +72,7 @@ public final class ICalendarWriter {
 	/** Folds at 75 octets of UTF-8, never inside a character, so Turkish letters survive the fold. */
 	private static void line(StringBuilder out, String content) {
 		int octets = 0;
-		for (int i = 0; i < content.length(); ) {
+		for (int i = 0; i < content.length();) {
 			int codePoint = content.codePointAt(i);
 			int size = new String(Character.toChars(codePoint)).getBytes(StandardCharsets.UTF_8).length;
 			if (octets + size > MAX_LINE_OCTETS) {

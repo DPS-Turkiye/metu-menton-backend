@@ -13,6 +13,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 import com.dps.teknokent.domain.Edition;
 import com.dps.teknokent.dto.responses.ApiErrorResponse;
+import com.dps.teknokent.util.RequestPaths;
 
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -50,7 +51,8 @@ public class EditionPathFilter extends OncePerRequestFilter {
 		response.setContentType(MediaType.APPLICATION_JSON_VALUE);
 		response.setCharacterEncoding("UTF-8");
 		jsonMapper.writeValue(response.getOutputStream(), new ApiErrorResponse(
-				Instant.now(), status.value(), status.getReasonPhrase(), "Not found", request.getRequestURI(),
+				Instant.now(), status.value(), status.getReasonPhrase(), "Not found",
+				RequestPaths.redacted(request.getRequestURI()),
 				Map.of()));
 	}
 }

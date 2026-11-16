@@ -1,6 +1,10 @@
 package com.dps.teknokent.filter;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.regex.Pattern;
 
@@ -58,6 +62,16 @@ public class RateLimitingFilter extends OncePerRequestFilter {
 	 */
 	private static final long CV_PREVIEW_PER_ADDRESS_CAPACITY = 30;
 
+	/**
+	 * A calendar feed is fetched by the subscriber's calendar server, not by a person, and the frontend's server
+	 * passes every fetch on from one address, so the budget is per link. A course link may have a subscription per
+	 * student, each refreshed every hour or so: 120 in ten minutes covers a large class and stops a loop. Guessing
+	 * links costs nothing here, since each guess is a new link; 256 random bits make guessing hopeless instead.
+	 */
+	private static final String CALENDAR_FEED_PATH = "/api/office-hours/calendar-feeds/";
+	private static final long CALENDAR_FEED_CAPACITY = 120;
+	private static final long CALENDAR_FEED_WINDOW_MS = 10 * 60_000;
+
 	@Override
 	protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
 			throws ServletException, IOException {
@@ -100,10 +114,26 @@ public class RateLimitingFilter extends OncePerRequestFilter {
 			return List.of(rateLimitingConfig.resolveBucket(
 					"cv_parse:" + getCallerIdentifier(request), CV_PARSE_CAPACITY, CV_PARSE_WINDOW_MS));
 		}
+		if ("GET".equalsIgnoreCase(request.getMethod()) && path.startsWith(CALENDAR_FEED_PATH)) {
+			return List.of(rateLimitingConfig.resolveBucket("calendar_feed:" + linkKey(path), CALENDAR_FEED_CAPACITY,
+					CALENDAR_FEED_WINDOW_MS));
+		}
 		if (shouldApplyRateLimit(request.getRequestURI())) {
 			return List.of(rateLimitingConfig.resolveBucket(clientAddress(request)));
 		}
 		return List.of();
+	}
+
+	/** The link's hash, so the token itself never becomes a key in Redis or in memory. */
+	static String linkKey(String path) {
+		String token = path.substring(CALENDAR_FEED_PATH.length());
+		try {
+			byte[] digest = MessageDigest.getInstance("SHA-256").digest(token.getBytes(StandardCharsets.UTF_8));
+			return HexFormat.of().formatHex(digest);
+		} catch (NoSuchAlgorithmException impossible) {
+			// Every Java runtime ships SHA-256.
+			throw new IllegalStateException(impossible);
+		}
 	}
 
 	private static boolean isCvPreview(String path) {

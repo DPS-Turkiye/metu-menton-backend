@@ -10,6 +10,7 @@ import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Function;
@@ -17,6 +18,7 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import org.jspecify.annotations.Nullable;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -130,7 +132,7 @@ public class OfficeHoursCalendarFeedService {
 
 	/** The feed behind a link, or nothing for a link that never existed or was reset. */
 	@Transactional(readOnly = true)
-	public Optional<String> feed(String token, AppLanguage language) {
+	public Optional<String> feed(@Nullable String token, AppLanguage language) {
 		if (token == null || !TOKEN.matcher(token).matches()) {
 			return Optional.empty();
 		}
@@ -148,8 +150,10 @@ public class OfficeHoursCalendarFeedService {
 		Map<UUID, OfficeHoursUser> people = byId(userRepository.findAllById(meetings.stream()
 				.flatMap(meeting -> Stream.of(meeting.getStudentId(), meeting.getInstructorId()))
 				.collect(Collectors.toSet())), OfficeHoursUser::getId);
+		// A meeting booked from Menton has no course, and findAllById refuses a null id.
 		Map<UUID, OfficeHoursCourse> courses = byId(courseRepository.findAllById(
-				meetings.stream().map(OfficeHoursMeeting::getCourseId).collect(Collectors.toSet())),
+				meetings.stream().map(OfficeHoursMeeting::getCourseId).filter(Objects::nonNull)
+						.collect(Collectors.toSet())),
 				OfficeHoursCourse::getId);
 		Map<UUID, OfficeHoursRequest> requests = byId(requestRepository.findAllById(
 				meetings.stream().map(OfficeHoursMeeting::getRequestId).collect(Collectors.toSet())),
@@ -163,11 +167,14 @@ public class OfficeHoursCalendarFeedService {
 				otherId = meeting.getInstructorId();
 			}
 			Instant startsAt = meeting.getScheduledAt();
+			boolean cancelled = meeting.getCancelledAt() != null;
+			// The status line is not shown by every calendar (Moodle's import, for one), so the title says it too.
+			String summaryKey = cancelled ? "officeHoursCalendar.meeting.cancelledSummary"
+					: "officeHoursCalendar.meeting.summary";
 			events.add(new ICalendarWriter.Event("meeting-" + meeting.getId() + UID_DOMAIN, startsAt,
 					startsAt.plus(Duration.ofMinutes(meeting.getDurationMinutes())),
-					Texts.get(language, "officeHoursCalendar.meeting.summary", nameOf(people.get(otherId))),
-					Texts.get(language, "officeHoursCalendar.meeting.description",
-							titleOf(courses.get(meeting.getCourseId())), topicOf(requests.get(meeting.getRequestId())))));
+					Texts.get(language, summaryKey, nameOf(people.get(otherId))),
+					description(language, meeting, courses, requests), cancelled));
 		}
 		return ICalendarWriter.write(Texts.get(language, "officeHoursCalendar.personal.name"), now, events);
 	}
@@ -185,12 +192,22 @@ public class OfficeHoursCalendarFeedService {
 				events.add(new ICalendarWriter.Event(
 						"hours-" + academicId + "-" + hours.startsAt().getEpochSecond() + UID_DOMAIN,
 						hours.startsAt(), hours.endsAt(), summary,
-						Texts.get(language, "officeHoursCalendar.hours.description")));
+						Texts.get(language, "officeHoursCalendar.hours.description"), false));
 			}
 		}
 		events.sort(Comparator.comparing(ICalendarWriter.Event::startsAt));
 		String title = titleOf(courseRepository.findById(courseId).orElse(null));
 		return ICalendarWriter.write(Texts.get(language, "officeHoursCalendar.course.name", title), now, events);
+	}
+
+	private static String description(AppLanguage language, OfficeHoursMeeting meeting,
+			Map<UUID, OfficeHoursCourse> courses, Map<UUID, OfficeHoursRequest> requests) {
+		String topic = topicOf(requests.get(meeting.getRequestId()));
+		UUID courseId = meeting.getCourseId();
+		if (courseId == null) {
+			return Texts.get(language, "officeHoursCalendar.meeting.mentonDescription", topic);
+		}
+		return Texts.get(language, "officeHoursCalendar.meeting.description", titleOf(courses.get(courseId)), topic);
 	}
 
 	private OfficeHoursCalendarFeed personalRow(UUID userId) {
@@ -224,21 +241,21 @@ public class OfficeHoursCalendarFeedService {
 
 	// The rows below are deleted with their meeting (ON DELETE CASCADE), so an empty one only shows up in a race
 	// with a delete; the feed then says less instead of failing for everyone subscribed.
-	private static String nameOf(OfficeHoursUser person) {
+	private static String nameOf(@Nullable OfficeHoursUser person) {
 		if (person == null) {
 			return "";
 		}
 		return person.getFullName();
 	}
 
-	private static String titleOf(OfficeHoursCourse course) {
+	private static String titleOf(@Nullable OfficeHoursCourse course) {
 		if (course == null) {
 			return "";
 		}
 		return course.getTitle();
 	}
 
-	private static String topicOf(OfficeHoursRequest request) {
+	private static String topicOf(@Nullable OfficeHoursRequest request) {
 		if (request == null) {
 			return "";
 		}
