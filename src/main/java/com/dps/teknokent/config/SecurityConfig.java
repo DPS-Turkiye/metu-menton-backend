@@ -154,7 +154,7 @@ public class SecurityConfig {
 	SecurityFilterChain securityFilterChain(
 			HttpSecurity http,
 			ObjectProvider<FirebaseBearerFilter> firebaseBearerFilter,
-			@Value("${app.edition:TEKNOKENT}") String edition,
+			@Value("${app.edition:}") String edition,
 			JsonMapper jsonMapper) throws Exception {
 		http
 				.csrf(csrf -> csrf.disable())

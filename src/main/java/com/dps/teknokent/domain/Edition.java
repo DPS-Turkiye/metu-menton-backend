@@ -77,7 +77,8 @@ public enum Edition {
 	 */
 	public static Edition parse(String value) {
 		if (value == null || value.isBlank()) {
-			throw new IllegalStateException("app.edition (APP_EDITION) is blank; set it to TEKNOKENT or ODTU.");
+			throw new IllegalStateException(
+					"app.edition (APP_EDITION) is missing or blank; set it to TEKNOKENT or ODTU.");
 		}
 		try {
 			return valueOf(value.trim().toUpperCase(Locale.ROOT));
