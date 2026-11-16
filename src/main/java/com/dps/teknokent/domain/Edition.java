@@ -42,6 +42,7 @@ public enum Edition {
 					"/api/office-hours/**",
 					"/api/coordinator/programs/*/academics/**",
 					"/api/coordinator/programs/*/badges/**",
+					"/api/coordinator/programs/*/office-hours/**",
 					"/api/coordinator/programs/*/peer-categories/**",
 					"/api/coordinator/programs/*/training/**",
 					"/api/users/*/badges/**"));
