@@ -18,24 +18,38 @@ public enum OfficeHoursRequestAction {
 	REPLY,
 	/** The student takes one of the times the academic offered. */
 	ACCEPT_PROPOSED,
-	WITHDRAW;
+	WITHDRAW,
+	/** Either side calls off the booked meeting before it starts. */
+	CANCEL;
 
 	private static final List<OfficeHoursRequestAction> ANSWERS = List.of(ACCEPT, DECLINE, PROPOSE_TIMES,
 			ASK_QUESTION);
 
-	/** The same checks the endpoints make: the academic answers pending ones, the student acts on open ones. */
+	/**
+	 * The same checks the endpoints make: the academic answers pending ones, the student acts on open ones, and
+	 * either side may cancel an accepted meeting while it is still ahead.
+	 */
+	public static List<OfficeHoursRequestAction> allowedFor(OfficeHoursRole viewer, OfficeHoursRequestStatus status,
+			boolean meetingAhead) {
+		if (status == OfficeHoursRequestStatus.ACCEPTED && meetingAhead) {
+			return List.of(CANCEL);
+		}
+		return allowedFor(viewer, status);
+	}
+
+	/** {@link #allowedFor(OfficeHoursRole, OfficeHoursRequestStatus, boolean)} with no meeting ahead. */
 	public static List<OfficeHoursRequestAction> allowedFor(OfficeHoursRole viewer, OfficeHoursRequestStatus status) {
 		if (viewer == OfficeHoursRole.INSTRUCTOR) {
 			return switch (status) {
 			case PENDING, MORE_INFO_REQUESTED -> ANSWERS;
-			case ACCEPTED, DECLINED, COUNTER_PROPOSED, WITHDRAWN -> List.of();
+			case ACCEPTED, DECLINED, COUNTER_PROPOSED, WITHDRAWN, CANCELLED, EXPIRED -> List.of();
 			};
 		}
 		return switch (status) {
 		case PENDING -> List.of(WITHDRAW);
 		case MORE_INFO_REQUESTED -> List.of(REPLY, WITHDRAW);
 		case COUNTER_PROPOSED -> List.of(ACCEPT_PROPOSED, WITHDRAW);
-		case ACCEPTED, DECLINED, WITHDRAWN -> List.of();
+		case ACCEPTED, DECLINED, WITHDRAWN, CANCELLED, EXPIRED -> List.of();
 		};
 	}
 }

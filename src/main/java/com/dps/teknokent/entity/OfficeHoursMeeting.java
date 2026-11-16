@@ -43,4 +43,18 @@ public class OfficeHoursMeeting {
 
 	@Column(name = "created_at", nullable = false)
 	private Instant createdAt;
+
+	@Column(name = "student_reminded_at")
+	private Instant studentRemindedAt;
+
+	@Column(name = "instructor_reminded_at")
+	private Instant instructorRemindedAt;
+	@Column(name = "cancelled_at")
+	private Instant cancelledAt;
+
+	@Column(name = "cancelled_by")
+	private UUID cancelledBy;
+
+	@Column(name = "cancellation_reason")
+	private String cancellationReason;
 }

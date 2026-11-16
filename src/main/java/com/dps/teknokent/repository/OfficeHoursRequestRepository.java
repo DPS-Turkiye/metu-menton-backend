@@ -8,6 +8,7 @@ import java.util.UUID;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -35,6 +36,14 @@ public interface OfficeHoursRequestRepository extends JpaRepository<OfficeHoursR
 
 	List<OfficeHoursRequest> findByInstructorIdAndStatusIn(UUID instructorId,
 			Collection<OfficeHoursRequestStatus> statuses);
+
+	List<OfficeHoursRequest> findByStatusIn(Collection<OfficeHoursRequestStatus> statuses);
+
+	/** Expires the request only if nobody moved it on since it was read, so a late answer wins over the job. */
+	@Modifying
+	@Query("update OfficeHoursRequest r set r.status = com.dps.teknokent.domain.OfficeHoursRequestStatus.EXPIRED,"
+			+ " r.updatedAt = :at where r.id = :id and r.status = :status")
+	int expireIfStill(@Param("id") UUID id, @Param("status") OfficeHoursRequestStatus status, @Param("at") Instant at);
 
 	/** Requests made in a window, newest first: the university-wide list a coordinator reads. */
 	List<OfficeHoursRequest> findByCreatedAtGreaterThanEqualAndCreatedAtLessThanOrderByCreatedAtDesc(Instant from,

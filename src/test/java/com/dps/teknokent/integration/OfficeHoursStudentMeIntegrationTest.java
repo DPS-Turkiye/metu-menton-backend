@@ -158,7 +158,7 @@ class OfficeHoursStudentMeIntegrationTest {
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.status").value("ACCEPTED"))
 				.andExpect(jsonPath("$.place").value("A-204"))
-				.andExpect(jsonPath("$.allowedActions.length()").value(0));
+				.andExpect(jsonPath("$.allowedActions[0]").value("CANCEL"));
 		assertThat(meetings.findAll()).hasSize(1);
 		mockMvc.perform(get("/api/office-hours/me/meetings").param("actorId", academician.getId().toString())
 				.with(frontendServer()))
@@ -186,6 +186,39 @@ class OfficeHoursStudentMeIntegrationTest {
 				.andExpect(status().isCreated())
 				.andReturn().getResponse().getContentAsString();
 		return JsonPath.read(created, "$.id");
+	}
+
+	@Test
+	void eitherSideCancelsABookedMeetingFromMentonAndItLeavesBothLists() throws Exception {
+		AppUser other = account(UserRole.MENTEE, "Can Demir", IdentityKind.STUDENT);
+		String requestId = sendRequest(student);
+		String time = JsonPath.read(getAs(student, "/api/office-hours/me/appointments"), "$[0].time.startsAt");
+		postAs(academician, "/api/office-hours/me/requests/" + requestId + "/decision",
+				"{\"action\":\"ACCEPT\",\"time\":\"" + time + "\"}")
+				.andExpect(status().isOk());
+
+		postAs(other, "/api/office-hours/me/requests/" + requestId + "/cancel", "{}")
+				.andExpect(status().isNotFound());
+		postAs(student, "/api/office-hours/me/requests/" + requestId + "/cancel", "{\"reason\":\"Hastayım\"}")
+				.andExpect(status().isNoContent());
+
+		String mine = getAs(student, "/api/office-hours/me/appointments");
+		assertThat(JsonPath.<String>read(mine, "$[0].status")).isEqualTo("CANCELLED");
+		assertThat(JsonPath.<Object>read(mine, "$[0].place")).isNull();
+		assertThat(JsonPath.<List<String>>read(mine, "$[0].allowedActions")).isEmpty();
+		assertThat(JsonPath.<String>read(mine, "$[0].cancellation.cancelledBy")).isEqualTo("STUDENT");
+		assertThat(JsonPath.<String>read(mine, "$[0].cancellation.reason")).isEqualTo("Hastayım");
+		String inbox = getAs(academician, "/api/office-hours/me/inbox");
+		assertThat(JsonPath.<String>read(inbox, "$[0].status")).isEqualTo("CANCELLED");
+		assertThat(JsonPath.<String>read(inbox, "$[0].cancellation.cancelledBy")).isEqualTo("STUDENT");
+		// The first open time is within a day, so this is a late cancel; a student needs no reason for one.
+		assertThat(JsonPath.<Boolean>read(inbox, "$[0].cancellation.late")).isTrue();
+		mockMvc.perform(get("/api/office-hours/me/meetings").param("actorId", academician.getId().toString())
+				.with(frontendServer()))
+				.andExpect(jsonPath("$.length()").value(0));
+
+		postAs(academician, "/api/office-hours/me/requests/" + requestId + "/cancel", "{}")
+				.andExpect(status().isConflict());
 	}
 
 	@Test

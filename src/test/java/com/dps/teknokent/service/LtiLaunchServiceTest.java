@@ -29,6 +29,7 @@ import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import com.dps.teknokent.config.LtiProperties;
+import com.dps.teknokent.domain.AppLanguage;
 import com.dps.teknokent.domain.OfficeHoursRole;
 import com.dps.teknokent.dto.requests.LtiLaunchRequest;
 import com.dps.teknokent.dto.requests.LtiLoginRequest;
@@ -71,7 +72,7 @@ class LtiLaunchServiceTest {
 
 	private static LtiLaunchClaims claims(String role) {
 		return new LtiLaunchClaims(ISSUER, "42", "Ayşe Yılmaz", "Ayse@METU.edu.tr", "7", "CENG 101",
-				"Introduction to Computing", List.of(role));
+				"Introduction to Computing", List.of(role), AppLanguage.EN);
 	}
 
 	@Test
@@ -128,6 +129,7 @@ class LtiLaunchServiceTest {
 		verify(enrollmentRepository).insertIfAbsent(any(), eq(inserted.getId()), eq(insertedCourse.getId()),
 				eq("STUDENT"), eq(NOW));
 		assertThat(inserted.getEmail()).isEqualTo("ayse@metu.edu.tr");
+		assertThat(inserted.getPreferredLanguage()).isEqualTo(AppLanguage.EN);
 		assertThat(inserted.getLastLaunchAt()).isEqualTo(NOW);
 		assertThat(insertedCourse.getShortName()).isEqualTo("CENG 101");
 		assertThat(insertedEnrollment.getRole()).isEqualTo(OfficeHoursRole.STUDENT);
@@ -161,6 +163,28 @@ class LtiLaunchServiceTest {
 		assertThat(enrollment.getRole()).isEqualTo(OfficeHoursRole.INSTRUCTOR);
 		assertThat(response.userId()).isEqualTo(known.getId());
 		assertThat(response.role()).isEqualTo(OfficeHoursRole.INSTRUCTOR);
+	}
+
+	@Test
+	void aLaunchThatNamesNoLanguageKeepsTheOneSaved() {
+		OfficeHoursUser known = new OfficeHoursUser();
+		known.setId(UUID.randomUUID());
+		known.setPreferredLanguage(AppLanguage.EN);
+		OfficeHoursCourse course = new OfficeHoursCourse();
+		course.setId(UUID.randomUUID());
+		OfficeHoursEnrollment enrollment = new OfficeHoursEnrollment();
+		enrollment.setRole(OfficeHoursRole.STUDENT);
+		when(stateStore.consume("state-1")).thenReturn(Optional.of("nonce-1"));
+		when(verifier.verify("token", "nonce-1")).thenReturn(new LtiLaunchClaims(ISSUER, "42", "Ayşe Yılmaz",
+				null, "7", "CENG 101", "Introduction to Computing", List.of(LtiLaunchService.INSTRUCTOR_ROLE), null));
+		when(userRepository.findByIssuerAndSubject(ISSUER, "42")).thenReturn(Optional.of(known));
+		when(courseRepository.findByIssuerAndContextId(ISSUER, "7")).thenReturn(Optional.of(course));
+		when(enrollmentRepository.findByUserIdAndCourseId(known.getId(), course.getId()))
+				.thenReturn(Optional.of(enrollment));
+
+		service.completeLaunch(new LtiLaunchRequest("token", "state-1"));
+
+		assertThat(known.getPreferredLanguage()).isEqualTo(AppLanguage.EN);
 	}
 
 	@Test
@@ -264,9 +288,9 @@ class LtiLaunchServiceTest {
 				.thenReturn(Optional.of(new OfficeHoursEnrollment()));
 		when(verifier.verify("token", "nonce-1")).thenReturn(
 				new LtiLaunchClaims(ISSUER, "42", "Ayşe Yılmaz", " ", "7", " CENG 101 ", " ",
-						List.of(LtiLaunchService.LEARNER_ROLE)),
+						List.of(LtiLaunchService.LEARNER_ROLE), null),
 				new LtiLaunchClaims(ISSUER, "42", "Ayşe Yılmaz", null, "7", null, null,
-						List.of(LtiLaunchService.LEARNER_ROLE)));
+						List.of(LtiLaunchService.LEARNER_ROLE), null));
 
 		LtiLaunchResponse byLabel = service.completeLaunch(new LtiLaunchRequest("token", "state-1"));
 
