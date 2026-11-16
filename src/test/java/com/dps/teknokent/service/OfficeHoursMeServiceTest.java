@@ -372,7 +372,8 @@ class OfficeHoursMeServiceTest {
 		meeting.setStudentId(STUDENT);
 		meeting.setScheduledAt(TUESDAY_2PM);
 		meeting.setDurationMinutes(45);
-		when(meetingRepository.findByInstructorIdAndScheduledAtAfterOrderByScheduledAtAsc(eq(PERSON), any()))
+		when(meetingRepository
+				.findByInstructorIdAndCancelledAtIsNullAndScheduledAtAfterOrderByScheduledAtAsc(eq(PERSON), any()))
 				.thenReturn(List.of(meeting));
 		when(requestRepository.findAllById(List.of(REQUEST)))
 				.thenReturn(List.of(request(null, STUDENT, OfficeHoursRequestStatus.ACCEPTED)));
