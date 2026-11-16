@@ -14,8 +14,11 @@ import java.util.Map;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Component;
 
+import com.dps.teknokent.config.AppProfiles;
 import com.dps.teknokent.config.LtiProperties;
 import com.nimbusds.jose.JWSAlgorithm;
 import com.nimbusds.jose.jwk.JWKSet;
@@ -25,7 +28,8 @@ import com.nimbusds.jose.jwk.RSAKey;
 /**
  * The tool's own RSA key. Moodle asks for the tool's public key set at registration; a basic launch never uses
  * it, later LTI services (names and roles, deep linking) will. Without a configured key a throwaway one is made
- * at start-up, which is fine locally but changes on every restart.
+ * at start-up, which is fine locally but changes on every restart, so Moodle's cached copy stops matching: once LTI
+ * is configured, only the {@code dev} profile may run without {@code LTI_TOOL_PRIVATE_KEY}.
  */
 @Component
 public class LtiToolKeys {
@@ -34,10 +38,19 @@ public class LtiToolKeys {
 
 	private final RSAKey key;
 
-	public LtiToolKeys(LtiProperties properties) {
-		this.key = properties.toolPrivateKey() == null || properties.toolPrivateKey().isBlank()
-				? generated()
-				: fromPem(properties.toolPrivateKey());
+	@Autowired
+	public LtiToolKeys(LtiProperties properties, Environment environment) {
+		this(properties, AppProfiles.onlyDev(environment));
+	}
+
+	LtiToolKeys(LtiProperties properties, boolean devProfile) {
+		boolean missing = properties.toolPrivateKey() == null || properties.toolPrivateKey().isBlank();
+		if (missing && properties.configured() && !devProfile) {
+			throw new IllegalStateException("LTI is configured but LTI_TOOL_PRIVATE_KEY is empty: a throwaway key would"
+					+ " change on every restart and break the launches Moodle signs against the old one. Set a"
+					+ " PKCS#8 RSA key (only the dev profile may run without one).");
+		}
+		this.key = missing ? generated() : fromPem(properties.toolPrivateKey());
 	}
 
 	/** The public half only, as Moodle reads it from the key set URL. */
