@@ -109,6 +109,22 @@ class ProgramOfficeHoursServiceStudentsTest {
 	}
 
 	@Test
+	void studentsWhoLastAskedAtTheSameMomentAreInTurkishAlphabeticalOrder() {
+		managed(ProgramType.OFFICE_HOURS);
+		OfficeHoursUser cagri = person("Çağrı Ak", false);
+		OfficeHoursUser can = person("Can Ek", false);
+		OfficeHoursUser dilek = person("Dilek Su", false);
+		when(requests.loadByStudentSince(NOW.minus(ProgramOfficeHoursService.RECENT_WINDOW)))
+				.thenReturn(List.of(load(dilek, 1, 0, 0, 0, 0, 1, "2026-11-10T08:00:00Z"),
+						load(cagri, 1, 0, 0, 0, 0, 1, "2026-11-10T08:00:00Z"),
+						load(can, 1, 0, 0, 0, 0, 1, "2026-11-10T08:00:00Z")));
+		when(officeHoursUsers.findAllById(anyCollection())).thenReturn(List.of(cagri, can, dilek));
+
+		assertThat(names(service.students(COORDINATOR, PROGRAM, query(null, null, false))))
+				.containsExactly("Can Ek", "Çağrı Ak", "Dilek Su");
+	}
+
+	@Test
 	void pagesTheStudents() {
 		managed(ProgramType.OFFICE_HOURS);
 		when(requests.loadByStudentSince(NOW.minus(ProgramOfficeHoursService.RECENT_WINDOW)))

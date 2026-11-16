@@ -1,5 +1,6 @@
 package com.dps.teknokent.service;
 
+import java.text.Collator;
 import java.time.Clock;
 import java.time.DayOfWeek;
 import java.time.Duration;
@@ -86,6 +87,8 @@ public class ProgramOfficeHoursService {
 	private static final Set<OfficeHoursRequestStatus> AWAITING_DECISION = Set.of(OfficeHoursRequestStatus.PENDING,
 			OfficeHoursRequestStatus.MORE_INFO_REQUESTED);
 	private static final Locale TURKISH = Locale.forLanguageTag("tr");
+	/** Names and faculties in Turkish alphabetical order ("Çağrı" after "Can"). */
+	private static final Comparator<String> TURKISH_ORDER = Collator.getInstance(TURKISH)::compare;
 
 	private final CoordinatorProgramService coordinatorProgramService;
 	private final OfficeHoursRequestRepository requests;
@@ -199,13 +202,14 @@ public class ProgramOfficeHoursService {
 				.filter(row -> faculty == null || faculty.equals(people.facultyOf(row.id())))
 				.filter(row -> !query.awaitingOnly() || row.requests().awaitingDecision() > 0)
 				.sorted(Comparator.comparing(StudentRow::lastRequestedAt).reversed()
-						.thenComparing(row -> row.student().name()))
+						.thenComparing(row -> row.student().name(), TURKISH_ORDER)
+						.thenComparing(StudentRow::id))
 				.toList();
 		List<String> faculties = loads.stream()
 				.map(load -> people.facultyOf(load.getStudentId()))
 				.filter(Objects::nonNull)
 				.distinct()
-				.sorted()
+				.sorted(TURKISH_ORDER)
 				.toList();
 		return new ProgramOfficeHoursStudentsResponse(faculties,
 				PageResponse.of(rows.stream().skip((long) page * size).limit(size).toList(), page, size, rows.size()));
