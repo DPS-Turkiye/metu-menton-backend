@@ -9,5 +9,7 @@ public enum OfficeHoursRequestStatus {
 	COUNTER_PROPOSED,
 	WITHDRAWN,
 	/** Accepted, then either side called the meeting off. */
-	CANCELLED
+	CANCELLED,
+	/** Nobody acted in time: see {@code OfficeHoursRequestExpiry}. */
+	EXPIRED
 }

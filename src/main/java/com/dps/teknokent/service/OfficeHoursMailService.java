@@ -53,7 +53,9 @@ public class OfficeHoursMailService {
 		SLOT_CHOSEN("slotChosen", true, Times.MEETING),
 		WITHDRAWN("withdrawn", true, Times.NONE),
 		CANCELLED_BY_STUDENT("meetingCancelled", true, Times.MEETING),
-		CANCELLED_BY_INSTRUCTOR("meetingCancelled", false, Times.MEETING);
+		CANCELLED_BY_INSTRUCTOR("meetingCancelled", false, Times.MEETING),
+		/** Nobody acted in time (FR-OH-15); the student hears, since the request was theirs. */
+		EXPIRED("expired", false, Times.NONE);
 
 		private final String key;
 		private final boolean toInstructor;
