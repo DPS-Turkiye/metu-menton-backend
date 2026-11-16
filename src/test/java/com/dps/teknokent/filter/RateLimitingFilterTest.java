@@ -188,6 +188,16 @@ class RateLimitingFilterTest {
 	}
 
 	@Test
+	void madeUpCalendarLinksShareOneThousandFetchesAMinute() throws Exception {
+		String feed = "/api/office-hours/calendar-feeds/";
+		for (int i = 0; i < 1_000; i++) {
+			assertThat(call(from("GET", feed + String.format("%043d", i), "198.51.100.1")).getStatus()).isEqualTo(200);
+		}
+
+		assertThat(call(from("GET", feed + "z".repeat(43), "198.51.100.1")).getStatus()).isEqualTo(429);
+	}
+
+	@Test
 	void aCalendarLinksBudgetIsKeptUnderItsHashNotTheToken() {
 		String link = "e".repeat(43);
 

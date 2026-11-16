@@ -71,6 +71,11 @@ public class RateLimitingFilter extends OncePerRequestFilter {
 	private static final String CALENDAR_FEED_PATH = "/api/office-hours/calendar-feeds/";
 	private static final long CALENDAR_FEED_CAPACITY = 120;
 	private static final long CALENDAR_FEED_WINDOW_MS = 10 * 60_000;
+	/**
+	 * Every link together: each made-up link is a new per-link budget, so a flood of them is stopped here instead.
+	 * The frontend's server sends all of them under one login, so there is no caller to tell apart.
+	 */
+	private static final long CALENDAR_FEEDS_PER_MINUTE = 1_000;
 
 	@Override
 	protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
@@ -115,8 +120,10 @@ public class RateLimitingFilter extends OncePerRequestFilter {
 					"cv_parse:" + getCallerIdentifier(request), CV_PARSE_CAPACITY, CV_PARSE_WINDOW_MS));
 		}
 		if ("GET".equalsIgnoreCase(request.getMethod()) && path.startsWith(CALENDAR_FEED_PATH)) {
-			return List.of(rateLimitingConfig.resolveBucket("calendar_feed:" + linkKey(path), CALENDAR_FEED_CAPACITY,
-					CALENDAR_FEED_WINDOW_MS));
+			return List.of(
+					rateLimitingConfig.resolveBucket("calendar_feed:" + linkKey(path), CALENDAR_FEED_CAPACITY,
+							CALENDAR_FEED_WINDOW_MS),
+					rateLimitingConfig.resolveBucket("calendar_feed_all", CALENDAR_FEEDS_PER_MINUTE, 60_000));
 		}
 		if (shouldApplyRateLimit(request.getRequestURI())) {
 			return List.of(rateLimitingConfig.resolveBucket(clientAddress(request)));

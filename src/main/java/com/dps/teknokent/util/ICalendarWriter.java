@@ -5,6 +5,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.regex.Pattern;
 
 import org.jspecify.annotations.Nullable;
 
@@ -23,6 +24,8 @@ public final class ICalendarWriter {
 	}
 
 	private static final String CRLF = "\r\n";
+	/** C0 controls other than tab, LF and CR, plus DEL: line breaks are escaped instead. */
+	private static final Pattern CONTROL = Pattern.compile("[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F\\x7F]");
 	/** RFC 5545 §3.1: a line is at most 75 octets; longer ones go on with CRLF and a space. */
 	private static final int MAX_LINE_OCTETS = 75;
 	private static final DateTimeFormatter UTC = DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss'Z'")
@@ -63,9 +66,13 @@ public final class ICalendarWriter {
 		return out.toString();
 	}
 
-	/** RFC 5545 §3.3.11: backslash, semicolon, comma and line breaks are escaped in text values. */
+	/**
+	 * RFC 5545 §3.3.11: backslash, semicolon, comma and line breaks are escaped in text values. Other control
+	 * characters (§3.1 allows none) are dropped, so a typed topic can't carry one into a strict parser.
+	 */
 	static String text(String value) {
-		return value.replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,").replace("\r\n", "\\n")
+		return CONTROL.matcher(value).replaceAll("").replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,")
+				.replace("\r\n", "\\n")
 				.replace("\n", "\\n").replace("\r", "\\n");
 	}
 

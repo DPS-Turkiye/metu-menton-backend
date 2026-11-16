@@ -82,4 +82,11 @@ class ICalendarWriterTest {
 		assertThat(calendar).contains("UID:meeting-1@office-hours.menton\r\n",
 				"SEQUENCE:1\r\nSTATUS:CANCELLED\r\nTRANSP:TRANSPARENT\r\n");
 	}
+
+	@Test
+	void dropsControlCharactersButKeepsTheEscapedLineBreak() {
+		String typed = "a" + (char) 0x00 + "b" + (char) 0x07 + "c" + (char) 0x1F + "d" + (char) 0x7F + "e\nf";
+
+		assertThat(ICalendarWriter.text(typed)).isEqualTo("abcde\\nf");
+	}
 }
