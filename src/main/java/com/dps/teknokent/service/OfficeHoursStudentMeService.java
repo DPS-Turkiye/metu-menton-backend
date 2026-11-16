@@ -14,6 +14,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -232,11 +233,20 @@ public class OfficeHoursStudentMeService {
 					request.getCourseId() == null ? null : courses.get(request.getCourseId()), time,
 					bookingService.timesOf(request.getInstructorId(), request.getProposedSlots()),
 					request.getInstructorMessage(),
-					request.getRejectionReason(), meeting == null ? null : where.getDefaultPlace(),
-					meeting == null ? null : where.getOnlineLink(),
+					request.getRejectionReason(), whileOn(meeting, where.getDefaultPlace()),
+					whileOn(meeting, where.getOnlineLink()),
 					request.getCreatedAt(), OfficeHoursRequestAction.allowedFor(OfficeHoursRole.STUDENT,
-							request.getStatus()));
+							request.getStatus(), bookingService.isAhead(meeting)),
+					OfficeHoursBookingService.cancellationOf(meeting));
 		}).toList();
+	}
+
+	/** Where and how to meet, only for a meeting that is still on: a cancelled one has nowhere to go. */
+	private static @Nullable String whileOn(@Nullable OfficeHoursMeeting meeting, @Nullable String value) {
+		if (meeting == null || meeting.getCancelledAt() != null) {
+			return null;
+		}
+		return value;
 	}
 
 	private static List<String> slots(String joined) {

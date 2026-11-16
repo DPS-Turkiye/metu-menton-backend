@@ -32,10 +32,21 @@ class OfficeHoursRequestActionTest {
 	@Test
 	void nothingIsLeftOnceItIsClosed() {
 		for (OfficeHoursRequestStatus status : new OfficeHoursRequestStatus[] { OfficeHoursRequestStatus.ACCEPTED,
-				OfficeHoursRequestStatus.DECLINED, OfficeHoursRequestStatus.WITHDRAWN }) {
+				OfficeHoursRequestStatus.DECLINED, OfficeHoursRequestStatus.WITHDRAWN,
+				OfficeHoursRequestStatus.CANCELLED }) {
 			for (OfficeHoursRole role : OfficeHoursRole.values()) {
 				assertThat(OfficeHoursRequestAction.allowedFor(role, status)).isEmpty();
 			}
+		}
+	}
+
+	@Test
+	void eitherSideMayCancelAnAcceptedMeetingOnlyWhileItIsAhead() {
+		for (OfficeHoursRole role : OfficeHoursRole.values()) {
+			assertThat(OfficeHoursRequestAction.allowedFor(role, OfficeHoursRequestStatus.ACCEPTED, true))
+					.containsExactly(OfficeHoursRequestAction.CANCEL);
+			assertThat(OfficeHoursRequestAction.allowedFor(role, OfficeHoursRequestStatus.ACCEPTED, false)).isEmpty();
+			assertThat(OfficeHoursRequestAction.allowedFor(role, OfficeHoursRequestStatus.CANCELLED, true)).isEmpty();
 		}
 	}
 }
