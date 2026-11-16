@@ -1,8 +1,9 @@
 package com.dps.teknokent.domain;
 
 import java.util.Arrays;
+import java.util.Optional;
 
-import com.dps.teknokent.exception.InvalidRequestException;
+import com.fasterxml.jackson.annotation.JsonValue;
 
 public enum DocumentKind {
 	CV("cv", 25 * 1024 * 1024, false, false),
@@ -19,7 +20,8 @@ public enum DocumentKind {
 	PROFILE_PDF("profile-pdf", 50 * 1024 * 1024, true, false),
 	REQUESTED_DOC("requested-doc", 25 * 1024 * 1024, false, false),
 	SYLLABUS("syllabus", 10 * 1024 * 1024, true, false),
-	WEEKLY_PROGRAM("weekly-program", 10 * 1024 * 1024, true, false);
+	WEEKLY_PROGRAM("weekly-program", 10 * 1024 * 1024, true, false),
+	PEER_EVIDENCE("peer-evidence", 10 * 1024 * 1024, true, false);
 
 	private final String value;
 	private final long maxBytes;
@@ -33,6 +35,8 @@ public enum DocumentKind {
 		this.imageOnly = imageOnly;
 	}
 
+	/** The kind's name in the stored_document.kind column, the S3 key and the JSON ("cv", "pitch-deck", ...). */
+	@JsonValue
 	public String value() {
 		return value;
 	}
@@ -49,10 +53,7 @@ public enum DocumentKind {
 		return imageOnly;
 	}
 
-	public static DocumentKind from(String raw) {
-		return Arrays.stream(values())
-				.filter(kind -> kind.value.equals(raw))
-				.findFirst()
-				.orElseThrow(() -> new InvalidRequestException("Unknown document kind."));
+	public static Optional<DocumentKind> find(String raw) {
+		return Arrays.stream(values()).filter(kind -> kind.value.equals(raw)).findFirst();
 	}
 }

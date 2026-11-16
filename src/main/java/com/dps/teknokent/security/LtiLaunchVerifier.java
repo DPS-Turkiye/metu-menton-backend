@@ -6,14 +6,17 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
+import org.jspecify.annotations.Nullable;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ResponseStatusException;
 
 import com.dps.teknokent.config.LtiProperties;
+import com.dps.teknokent.domain.AppLanguage;
 import com.nimbusds.jose.JOSEException;
 import com.nimbusds.jose.JWSAlgorithm;
 import com.nimbusds.jose.proc.BadJOSEException;
@@ -65,7 +68,8 @@ public class LtiLaunchVerifier {
 		Date expires = claims.getExpirationTime();
 		require(expires != null && now.minus(CLOCK_SKEW).isBefore(expires.toInstant()), "The token has expired.");
 		Date issued = claims.getIssueTime();
-		require(issued != null && !issued.toInstant().isAfter(now.plus(CLOCK_SKEW)), "The token is issued in the future.");
+		require(issued != null && !issued.toInstant().isAfter(now.plus(CLOCK_SKEW)),
+				"The token is issued in the future.");
 		require(expectedNonce != null && expectedNonce.equals(claims.getClaim("nonce")), "The nonce does not match.");
 		require(properties.deploymentIdList().contains(stringClaim(claims, CLAIM_PREFIX + "deployment_id")),
 				"Unknown deployment.");
@@ -77,7 +81,9 @@ public class LtiLaunchVerifier {
 
 		Map<String, Object> context = mapClaim(claims, CLAIM_PREFIX + "context");
 		String contextId = context == null ? null : text(context.get("id"));
-		require(contextId != null && !contextId.isBlank(), "Office hours open from a course only.");
+		if (context == null || contextId == null || contextId.isBlank()) {
+			throw unauthorized("Office hours open from a course only.");
+		}
 
 		return new LtiLaunchClaims(
 				claims.getIssuer(),
@@ -87,7 +93,8 @@ public class LtiLaunchVerifier {
 				contextId,
 				text(context.get("label")),
 				text(context.get("title")),
-				roles(claims));
+				roles(claims),
+				language(claims));
 	}
 
 	private JWTClaimsSet verifiedClaims(String idToken) {
@@ -122,21 +129,36 @@ public class LtiLaunchVerifier {
 		return list.stream().filter(String.class::isInstance).map(String.class::cast).toList();
 	}
 
+	/**
+	 * Moodle sends the person's language as "en", "en_us" or "tr"; anything not English reads as Turkish. Null when
+	 * the launch names none (the claim is optional), so a saved choice is not reset to Turkish.
+	 */
+	private static @Nullable AppLanguage language(JWTClaimsSet claims) {
+		Map<String, Object> presentation = mapClaim(claims, CLAIM_PREFIX + "launch_presentation");
+		if (presentation == null || !(presentation.get("locale") instanceof String code)) {
+			return null;
+		}
+		if (code.toLowerCase(Locale.ROOT).startsWith("en")) {
+			return AppLanguage.EN;
+		}
+		return AppLanguage.TR;
+	}
+
 	/** A context value as text: LMSes send ids as strings or as numbers, so either is accepted. */
-	private static String text(Object value) {
+	private static @Nullable String text(@Nullable Object value) {
 		if (value instanceof String string) {
 			return string;
 		}
 		return value instanceof Number number ? number.toString() : null;
 	}
 
-	private static String stringClaim(JWTClaimsSet claims, String name) {
+	private static @Nullable String stringClaim(JWTClaimsSet claims, String name) {
 		Object value = claims.getClaim(name);
 		return value instanceof String text ? text : null;
 	}
 
-	@SuppressWarnings("unchecked")
-	private static Map<String, Object> mapClaim(JWTClaimsSet claims, String name) {
+	@SuppressWarnings("unchecked") // A JSON object claim: its keys are strings.
+	private static @Nullable Map<String, Object> mapClaim(JWTClaimsSet claims, String name) {
 		Object value = claims.getClaim(name);
 		return value instanceof Map<?, ?> map ? (Map<String, Object>) map : null;
 	}

@@ -14,6 +14,7 @@ import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -22,6 +23,7 @@ import com.dps.teknokent.domain.BadgeKind;
 import com.dps.teknokent.domain.BadgeSource;
 import com.dps.teknokent.domain.BadgeStatus;
 import com.dps.teknokent.domain.GateBadgeState;
+import com.dps.teknokent.domain.MentorshipStatus;
 import com.dps.teknokent.domain.NotificationCategory;
 import com.dps.teknokent.domain.PermissionSource;
 import com.dps.teknokent.domain.ProgramMentorInvitedBy;
@@ -34,6 +36,8 @@ import com.dps.teknokent.dto.responses.BadgeCatalogueResponse;
 import com.dps.teknokent.dto.responses.GateBadgeRowResponse;
 import com.dps.teknokent.dto.responses.PublicBadgeResponse;
 import com.dps.teknokent.entity.AppUser;
+import com.dps.teknokent.entity.InstitutionPerson;
+import com.dps.teknokent.entity.MentorProfile;
 import com.dps.teknokent.entity.Program;
 import com.dps.teknokent.entity.ProgramMentor;
 import com.dps.teknokent.entity.TrainingAttempt;
@@ -43,12 +47,17 @@ import com.dps.teknokent.exception.ConflictException;
 import com.dps.teknokent.exception.InvalidRequestException;
 import com.dps.teknokent.exception.ResourceNotFoundException;
 import com.dps.teknokent.repository.AppUserRepository;
+import com.dps.teknokent.repository.InstitutionPersonRepository;
+import com.dps.teknokent.repository.MentorCount;
+import com.dps.teknokent.repository.MentorProfileRepository;
+import com.dps.teknokent.repository.MentorshipRepository;
 import com.dps.teknokent.repository.ProgramMentorRepository;
 import com.dps.teknokent.repository.ProgramRepository;
 import com.dps.teknokent.repository.TrainingAttemptRepository;
 import com.dps.teknokent.repository.TrainingModuleRepository;
 import com.dps.teknokent.repository.TrainingProgressRepository;
 import com.dps.teknokent.repository.UserBadgeRepository;
+import com.dps.teknokent.security.AdminAccess;
 import com.dps.teknokent.util.Texts;
 
 import lombok.RequiredArgsConstructor;
@@ -72,6 +81,10 @@ public class BadgeService {
 			.filter(code -> code.grants() != null)
 			.collect(Collectors.toCollection(() -> EnumSet.noneOf(BadgeCode.class)));
 
+	/** Mentorships still going, as the peer mentor directory counts them against a mentor's capacity. */
+	private static final List<MentorshipStatus> ONGOING_MENTORSHIP = List.of(MentorshipStatus.PLANNED,
+			MentorshipStatus.ACTIVE, MentorshipStatus.PAUSED);
+
 	private final UserBadgeRepository awards;
 	private final AppUserRepository users;
 	private final ProgramRepository programs;
@@ -82,6 +95,9 @@ public class BadgeService {
 	private final TrainingModuleRepository trainingModules;
 	private final TrainingProgressRepository trainingProgress;
 	private final TrainingAttemptRepository trainingAttempts;
+	private final InstitutionPersonRepository institutionPeople;
+	private final MentorProfileRepository mentorProfiles;
+	private final MentorshipRepository mentorships;
 
 	public List<BadgeCatalogueResponse> catalogue() {
 		return Arrays.stream(BadgeCode.values()).map(BadgeCatalogueResponse::of).toList();
@@ -120,10 +136,12 @@ public class BadgeService {
 				.filter(membership -> membership.getStatus() == ProgramMentorStatus.ACCEPTED)
 				.forEach(membership -> others.add(membership.getMentorId()));
 		users.findAllById(others).forEach(user -> people.putIfAbsent(user.getId(), user));
-		Map<UUID, GateBadgeRowResponse.Training> training = trainingOf(program, people.keySet());
+		Map<UUID, GateBadgeRowResponse.Training> training = trainingOf(program.getId(), people.keySet());
+		Map<UUID, GateBadgeRowResponse.Profile> profiles = profilesOf(people.keySet());
 		return people.values().stream()
 				.map(person -> row(person, program, latest.get(person.getId()),
-						training.getOrDefault(person.getId(), GateBadgeRowResponse.Training.NONE)))
+						training.getOrDefault(person.getId(), GateBadgeRowResponse.Training.NONE),
+						profiles.get(person.getId())))
 				.filter(row -> state == null || row.state() == state)
 				.sorted((left, right) -> left.fullName().compareToIgnoreCase(right.fullName()))
 				.toList();
@@ -132,9 +150,7 @@ public class BadgeService {
 	/** The admin's Öğrenciler list: everyone in a peer program, with their gate badge state there. */
 	@Transactional(readOnly = true)
 	public List<GateBadgeRowResponse> students(UUID actorId, GateBadgeState state) {
-		if (!domainLookupService.requireUser(actorId).has(UserRole.ADMIN)) {
-			throw new InvalidRequestException(Texts.forRequest("error.badgeAdminOnly"));
-		}
+		AdminAccess.requireAdmin(domainLookupService.requireUser(actorId), "error.badgeAdminOnly");
 		Map<UUID, Program> peerPrograms = programs.findByProgramType(ProgramType.PEER_MENTORING).stream()
 				.collect(Collectors.toMap(Program::getId, Function.identity()));
 		List<UserBadge> gateAwards = awards.findByBadgeCodeOrderByAwardedAtDesc(GATE);
@@ -161,7 +177,7 @@ public class BadgeService {
 				.collect(Collectors.groupingBy(GateBadgeRowResponse::programId));
 		return byProgram.entrySet().stream()
 				.flatMap(entry -> {
-					Map<UUID, GateBadgeRowResponse.Training> training = trainingOf(peerPrograms.get(entry.getKey()),
+					Map<UUID, GateBadgeRowResponse.Training> training = trainingOf(entry.getKey(),
 							entry.getValue().stream().map(GateBadgeRowResponse::userId).toList());
 					return entry.getValue().stream().map(row -> withTraining(row,
 							training.getOrDefault(row.userId(), GateBadgeRowResponse.Training.NONE)));
@@ -171,12 +187,57 @@ public class BadgeService {
 				.toList();
 	}
 
-	/** Watched, tries and best score on the program's current training version, for those who started it. */
-	private Map<UUID, GateBadgeRowResponse.Training> trainingOf(Program program, Collection<UUID> userIds) {
+	/**
+	 * Bölüm · sınıf, and for a peer mentor the categories and mentee load, of each person on a roster. The load counts
+	 * the mentorships still going, as the peer mentor directory does; it is the mentor's, across programs.
+	 */
+	private Map<UUID, GateBadgeRowResponse.Profile> profilesOf(Collection<UUID> userIds) {
 		if (userIds.isEmpty()) {
 			return Map.of();
 		}
-		return trainingModules.findByProgramId(program.getId()).map(module -> {
+		Map<UUID, InstitutionPerson> records = new LinkedHashMap<>();
+		for (InstitutionPerson record : institutionPeople.findByUserIdIn(userIds)) {
+			if (record.getUser() != null) {
+				records.merge(record.getUser().getId(), record, BadgeService::newerRecord);
+			}
+		}
+		Map<UUID, MentorProfile> mentors = mentorProfiles.findAllById(userIds).stream()
+				.collect(Collectors.toMap(MentorProfile::getId, Function.identity()));
+		Map<UUID, Long> active = mentors.isEmpty() ? Map.of()
+				: mentorships.countOrganizationsByMentor(mentors.keySet(), ONGOING_MENTORSHIP).stream()
+						.collect(Collectors.toMap(MentorCount::getMentorId, MentorCount::getTotal));
+		Map<UUID, GateBadgeRowResponse.Profile> profiles = new LinkedHashMap<>();
+		for (UUID userId : userIds) {
+			@Nullable
+			InstitutionPerson record = records.get(userId);
+			@Nullable
+			MentorProfile mentor = mentors.get(userId);
+			profiles.put(userId, new GateBadgeRowResponse.Profile(
+					record == null ? null : record.getDepartmentName(),
+					record == null ? null : record.getClassYear(),
+					mentor != null,
+					mentor == null ? List.of() : mentor.getCategoryLevels().keySet().stream().sorted().toList(),
+					active.getOrDefault(userId, 0L),
+					mentor == null ? null : mentor.getMenteeCapacity()));
+		}
+		return profiles;
+	}
+
+	/** The latest synced record; on a tie the higher id, so the same record wins on every call. */
+	private static InstitutionPerson newerRecord(InstitutionPerson a, InstitutionPerson b) {
+		int bySync = a.getSyncedAt().compareTo(b.getSyncedAt());
+		if (bySync != 0) {
+			return bySync > 0 ? a : b;
+		}
+		return a.getId().compareTo(b.getId()) >= 0 ? a : b;
+	}
+
+	/** Watched, tries and best score on the program's current training version, for those who started it. */
+	private Map<UUID, GateBadgeRowResponse.Training> trainingOf(UUID programId, Collection<UUID> userIds) {
+		if (userIds.isEmpty()) {
+			return Map.of();
+		}
+		return trainingModules.findByProgramId(programId).map(module -> {
 			int version = module.getCurrentVersion();
 			Set<UUID> watched = trainingProgress.findByModuleIdAndVersionAndUserIdIn(module.getId(), version, userIds)
 					.stream().map(TrainingProgress::getUserId).collect(Collectors.toSet());
@@ -196,7 +257,7 @@ public class BadgeService {
 	private static GateBadgeRowResponse withTraining(GateBadgeRowResponse row, GateBadgeRowResponse.Training training) {
 		return new GateBadgeRowResponse(row.userId(), row.fullName(), row.email(), row.programId(),
 				row.programName(), row.state(), row.awardId(), row.source(), row.awardedAt(), row.revokedAt(),
-				row.reason(), training);
+				row.reason(), training, row.profile());
 	}
 
 	/**
@@ -240,13 +301,14 @@ public class BadgeService {
 	 * The one way a badge is awarded, by hand now and by rules later: the award row, the permission a gate badge
 	 * gives, the program membership that makes a peer mentor discoverable there, and the notification.
 	 */
-	UserBadge award(AppUser holder, BadgeCode code, Program program, BadgeSource source, UUID awardedBy) {
+	UserBadge award(AppUser holder, BadgeCode code, @Nullable Program program, BadgeSource source,
+			@Nullable UUID awardedBy) {
 		return award(holder, code, program, source, awardedBy, true);
 	}
 
 	/** As above; {@code announce = false} awards without a notification (the achievement back-fill). */
-	UserBadge award(AppUser holder, BadgeCode code, Program program, BadgeSource source, UUID awardedBy,
-			boolean announce) {
+	UserBadge award(AppUser holder, BadgeCode code, @Nullable Program program, BadgeSource source,
+			@Nullable UUID awardedBy, boolean announce) {
 		Instant now = Instant.now();
 		UserBadge award = new UserBadge();
 		award.setId(UUID.randomUUID());
@@ -336,7 +398,8 @@ public class BadgeService {
 		}
 	}
 
-	private void notify(AppUser holder, String key, BadgeCode code, Program program, String reason) {
+	private void notify(AppUser holder, String key, BadgeCode code, @Nullable Program program,
+			@Nullable String reason) {
 		String badge = Texts.get(holder, "badge.name." + code.name());
 		String programName = program == null ? "" : program.getName();
 		notificationService.create(holder, NotificationCategory.BADGE, Texts.get(holder, key + ".title"),
@@ -382,7 +445,7 @@ public class BadgeService {
 		return actor.has(UserRole.ADMIN) ? BadgeSource.ADMIN : BadgeSource.COORDINATOR;
 	}
 
-	private UserBadge activeGate(UUID userId, UUID programId) {
+	private @Nullable UserBadge activeGate(UUID userId, UUID programId) {
 		return awards.findFirstByUserIdAndBadgeCodeAndProgramIdAndStatus(userId, GATE, programId, BadgeStatus.ACTIVE)
 				.orElse(null);
 	}
@@ -399,16 +462,16 @@ public class BadgeService {
 				: programs.findAllById(ids).stream().collect(Collectors.toMap(Program::getId, Program::getName));
 	}
 
-	private static GateBadgeRowResponse row(AppUser person, Program program, UserBadge award) {
-		return row(person, program, award, GateBadgeRowResponse.Training.NONE);
+	private static GateBadgeRowResponse row(AppUser person, Program program, @Nullable UserBadge award) {
+		return row(person, program, award, GateBadgeRowResponse.Training.NONE, null);
 	}
 
-	private static GateBadgeRowResponse row(AppUser person, Program program, UserBadge award,
-			GateBadgeRowResponse.Training training) {
+	private static GateBadgeRowResponse row(AppUser person, Program program, @Nullable UserBadge award,
+			GateBadgeRowResponse.Training training, GateBadgeRowResponse.@Nullable Profile profile) {
 		return new GateBadgeRowResponse(person.getId(), person.getFullName(), person.getEmail(), program.getId(),
 				program.getName(), GateBadgeState.of(award == null ? null : award.getStatus()),
 				award == null ? null : award.getId(), award == null ? null : award.getSource(),
 				award == null ? null : award.getAwardedAt(), award == null ? null : award.getRevokedAt(),
-				award == null ? null : award.getReason(), training);
+				award == null ? null : award.getReason(), training, profile);
 	}
 }

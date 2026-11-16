@@ -4,6 +4,8 @@ import java.util.Collection;
 import java.util.Map;
 import java.util.Optional;
 
+import org.jspecify.annotations.Nullable;
+
 /** Finds or creates the Firebase login for an address, so an admin can hand someone an account. */
 public interface LoginProvisioner {
 
@@ -41,5 +43,18 @@ public interface LoginProvisioner {
 	 * marks a login created here as verified, for a provider that vouches for the address; an existing login keeps
 	 * whatever it has.
 	 */
-	String customToken(String uid, String email, String displayName, boolean emailVerified);
+	String customToken(String uid, String email, @Nullable String displayName, boolean emailVerified);
+
+	/**
+	 * The uid of the Firebase login that uses {@code email} right now, empty when there is none; a 502 when Firebase
+	 * could not answer. Asked before an account is deleted, so the login is later removed by this uid and never by
+	 * e-mail: a login the same person creates afterwards has another uid and is left alone.
+	 */
+	Optional<String> uidForEmail(String email);
+
+	/**
+	 * Ends the sign-ins of the Firebase login {@code uid} and deletes it. A login that is already gone counts as
+	 * done; any other Firebase failure is thrown, so the caller can retry.
+	 */
+	void deleteLogin(String uid);
 }

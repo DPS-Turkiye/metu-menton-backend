@@ -11,6 +11,8 @@ import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import org.jspecify.annotations.Nullable;
+
 import com.dps.teknokent.domain.AppLanguage;
 
 public final class MeetingSlotTimes {
@@ -18,14 +20,13 @@ public final class MeetingSlotTimes {
 	public static final ZoneId APP_ZONE = ZoneId.of("Europe/Istanbul");
 	/** A meeting can be booked or proposed no sooner than this, so nobody is handed one at short notice. */
 	public static final Duration MIN_BOOKING_LEAD = Duration.ofHours(4);
-	private static final DateTimeFormatter MACHINE =
-			DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm");
-	private static final DateTimeFormatter FOR_PEOPLE =
-			DateTimeFormatter.ofPattern("d MMMM EEEE · HH:mm", Locale.forLanguageTag("tr-TR"));
-	private static final DateTimeFormatter FOR_PEOPLE_EN =
-			DateTimeFormatter.ofPattern("EEEE, d MMMM · HH:mm", Locale.ENGLISH);
-	private static final Pattern DECISION_SLOT =
-			Pattern.compile("Görüşme saati:\\s*(\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2})");
+	private static final DateTimeFormatter MACHINE = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm");
+	private static final DateTimeFormatter FOR_PEOPLE = DateTimeFormatter.ofPattern("d MMMM EEEE · HH:mm",
+			Locale.forLanguageTag("tr-TR"));
+	private static final DateTimeFormatter FOR_PEOPLE_EN = DateTimeFormatter.ofPattern("EEEE, d MMMM · HH:mm",
+			Locale.ENGLISH);
+	private static final Pattern DECISION_SLOT = Pattern
+			.compile("Görüşme saati:\\s*(\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2})");
 
 	private MeetingSlotTimes() {
 	}
@@ -47,7 +48,12 @@ public final class MeetingSlotTimes {
 		return (language == AppLanguage.EN ? FOR_PEOPLE_EN : FOR_PEOPLE).format(instant.atZone(APP_ZONE));
 	}
 
-	public static Instant parseMachineSlot(String value) {
+	/** The other way round from {@link #parseMachineSlot}: "2026-11-24T14:00" in Turkey time; seconds are dropped. */
+	public static String formatMachineSlot(Instant instant) {
+		return MACHINE.format(instant.atZone(APP_ZONE));
+	}
+
+	public static @Nullable Instant parseMachineSlot(@Nullable String value) {
 		if (value == null || value.isBlank()) {
 			return null;
 		}
@@ -59,7 +65,7 @@ public final class MeetingSlotTimes {
 		}
 	}
 
-	public static Instant parseFromDecisionMessage(String message) {
+	public static @Nullable Instant parseFromDecisionMessage(@Nullable String message) {
 		if (message == null || message.isBlank()) {
 			return null;
 		}

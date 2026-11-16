@@ -31,7 +31,6 @@ import com.dps.teknokent.entity.Mentorship;
 import com.dps.teknokent.entity.MentorshipGoal;
 import com.dps.teknokent.entity.MentorshipRequest;
 import com.dps.teknokent.entity.Program;
-import com.dps.teknokent.entity.ProgramStartup;
 import com.dps.teknokent.exception.InvalidRequestException;
 import com.dps.teknokent.exception.ResourceNotFoundException;
 import com.dps.teknokent.repository.ActionItemRepository;
@@ -58,7 +57,8 @@ import lombok.RequiredArgsConstructor;
 public class CoordinatorMentorshipService {
 
 	private static final Set<MentorshipStatus> LISTED = EnumSet.of(MentorshipStatus.PLANNED, MentorshipStatus.ACTIVE);
-	private static final List<ActionItemStatus> CLOSED_ACTIONS = List.of(ActionItemStatus.COMPLETED, ActionItemStatus.CANCELLED);
+	private static final List<ActionItemStatus> CLOSED_ACTIONS = List.of(ActionItemStatus.COMPLETED,
+			ActionItemStatus.CANCELLED);
 	private static final List<CoordinatorMentorshipHealth> RISK_ORDER = List.of(
 			CoordinatorMentorshipHealth.RISKY,
 			CoordinatorMentorshipHealth.FOLLOW_UP,
@@ -83,13 +83,11 @@ public class CoordinatorMentorshipService {
 		List<Program> scope = programService.scopeOf(actorId, managed, programId);
 		Snapshot snapshot = programService.snapshot(scope);
 		Context context = context(scope, snapshot);
-		// Each mentorship is listed once, under the program it was made in. One made before V82 has no program
-		// and is listed under the first of the team's programs here, as before.
+		// Each mentorship is listed once, under the program it was made in, also after its team left that program.
+		// One made before V82 has no program and is listed under the first of the team's programs here, as before.
 		Set<UUID> listed = new HashSet<>();
 		return scope.stream()
-				.flatMap(program -> snapshot.startups().getOrDefault(program.getId(), List.of()).stream()
-						.flatMap(startup -> CoordinatorProgramService
-								.mentorshipsOf(snapshot, Set.of(program.getId()), startup.getOrganizationId()).stream())
+				.flatMap(program -> CoordinatorProgramService.programMentorships(snapshot, program).stream()
 						.filter(mentorship -> LISTED.contains(mentorship.getStatus()))
 						.filter(mentorship -> listed.add(mentorship.getId()))
 						.map(mentorship -> row(mentorship, program, snapshot, context)))
@@ -110,17 +108,20 @@ public class CoordinatorMentorshipService {
 		Context context = context(List.of(program), snapshot);
 		CoordinatorMentorshipResponse row = row(mentorship, program, snapshot, context);
 
-		List<Meeting> meetings = pairMeetings(mentorship, snapshot);
+		List<Meeting> meetings = pairMeetings(mentorship, program, snapshot);
 		List<Meeting> past = meetings.stream().filter(meeting -> isPast(meeting, snapshot.now())).toList();
 		List<Meeting> noted = past.stream().filter(meeting -> isNoted(meeting, context)).toList();
-		List<MentorshipGoal> goals = mentorshipGoalRepository.findByMentorshipIdOrderBySortOrderAscCreatedAtAsc(mentorship.getId());
+		List<MentorshipGoal> goals = mentorshipGoalRepository
+				.findByMentorshipIdOrderBySortOrderAscCreatedAtAsc(mentorship.getId());
 		UUID mentorId = mentorship.getMentor().getId();
 		long load = mentorshipRepository.countOrganizationsByMentor(List.of(mentorId), LISTED).stream()
 				.mapToLong(MentorCount::getTotal)
 				.sum();
-		Integer capacity = mentorProfileRepository.findById(mentorId).map(MentorProfile::getMenteeCapacity).orElse(null);
+		Integer capacity = mentorProfileRepository.findById(mentorId).map(MentorProfile::getMenteeCapacity)
+				.orElse(null);
 		AppUser founder = mentorship.getOrganization().getFounder();
-		int members = appUserRepository.findByOrganizationIdOrderByFullNameAsc(mentorship.getOrganization().getId()).size();
+		int members = appUserRepository.findByOrganizationIdOrderByFullNameAsc(mentorship.getOrganization().getId())
+				.size();
 
 		return new CoordinatorMentorshipResponse.Detail(
 				row,
@@ -158,19 +159,23 @@ public class CoordinatorMentorshipService {
 				Texts.get(mentorship.getMentor(), "notification.coordinatorReminder.title"),
 				Texts.get(mentorship.getMentor(), "notification.coordinatorReminder.body", program, pair),
 				"/mentor-dashboard/calendar");
-		for (AppUser member : appUserRepository.findByOrganizationIdOrderByFullNameAsc(mentorship.getOrganization().getId())) {
+		for (AppUser member : appUserRepository
+				.findByOrganizationIdOrderByFullNameAsc(mentorship.getOrganization().getId())) {
 			notificationService.create(
-					member, NotificationCategory.MEETING_REMINDER, Texts.get(member, "notification.coordinatorReminder.title"),
-					Texts.get(member, "notification.coordinatorReminder.body", program, pair), "/mentorships?tab=active");
+					member, NotificationCategory.MEETING_REMINDER,
+					Texts.get(member, "notification.coordinatorReminder.title"),
+					Texts.get(member, "notification.coordinatorReminder.body", program, pair),
+					"/mentorships?tab=active");
 		}
 	}
 
-	private CoordinatorMentorshipResponse row(Mentorship mentorship, Program program, Snapshot snapshot, Context context) {
+	private CoordinatorMentorshipResponse row(Mentorship mentorship, Program program, Snapshot snapshot,
+			Context context) {
 		UUID mentorId = mentorship.getMentor().getId();
 		UUID organizationId = mentorship.getOrganization().getId();
 		String pairKey = CoordinatorProgramService.pairKey(mentorId, organizationId);
 		Instant last = snapshot.lastMeetingByPair().get(pairKey);
-		List<Meeting> meetings = pairMeetings(mentorship, snapshot);
+		List<Meeting> meetings = pairMeetings(mentorship, program, snapshot);
 		Instant next = meetings.stream()
 				.filter(meeting -> meeting.getStatus() == MeetingStatus.SCHEDULED
 						&& meeting.getScheduledAt() != null
@@ -225,17 +230,17 @@ public class CoordinatorMentorshipService {
 				program.getMeetingFrequencyDays(),
 				program.getStaleAfterDays());
 		return switch (bucket) {
-			case HEALTHY -> CoordinatorMentorshipHealth.HEALTHY;
-			case FOLLOW_UP -> CoordinatorMentorshipHealth.FOLLOW_UP;
-			case RISKY -> CoordinatorMentorshipHealth.RISKY;
+		case HEALTHY -> CoordinatorMentorshipHealth.HEALTHY;
+		case FOLLOW_UP -> CoordinatorMentorshipHealth.FOLLOW_UP;
+		case RISKY -> CoordinatorMentorshipHealth.RISKY;
 		};
 	}
 
 	private Context context(List<Program> scope, Snapshot snapshot) {
 		Map<UUID, Program> programOf = new LinkedHashMap<>();
 		for (Program program : scope) {
-			for (ProgramStartup startup : snapshot.startups().getOrDefault(program.getId(), List.of())) {
-				programOf.putIfAbsent(startup.getOrganizationId(), program);
+			for (UUID organizationId : CoordinatorProgramService.activityTeams(snapshot, program)) {
+				programOf.putIfAbsent(organizationId, program);
 			}
 		}
 		if (programOf.isEmpty()) {
@@ -265,7 +270,8 @@ public class CoordinatorMentorshipService {
 						MentorshipRequest::getCreatedAt,
 						Comparator.nullsLast(Comparator.reverseOrder())))
 				.forEach(request -> topics.putIfAbsent(
-						CoordinatorProgramService.pairKey(request.getMentor().getId(), request.getOrganization().getId()),
+						CoordinatorProgramService.pairKey(request.getMentor().getId(),
+								request.getOrganization().getId()),
 						request.getSupportArea()));
 		return new Context(programOf, openActions, liveNoted, topics);
 	}
@@ -276,7 +282,8 @@ public class CoordinatorMentorshipService {
 		Mentorship mentorship = mentorshipRepository.findById(mentorshipId)
 				.orElseThrow(() -> new ResourceNotFoundException("Mentorship not found: " + mentorshipId));
 		Map<UUID, Program> managed = programService.managedPrograms(actor).stream()
-				.collect(Collectors.toMap(Program::getId, program -> program, (first, second) -> first, LinkedHashMap::new));
+				.collect(Collectors.toMap(Program::getId, program -> program, (first, second) -> first,
+						LinkedHashMap::new));
 		if (mentorship.getProgram() != null) {
 			Program program = managed.get(mentorship.getProgram().getId());
 			if (program == null) {
@@ -298,10 +305,12 @@ public class CoordinatorMentorshipService {
 		return new Scoped(mentorship, program);
 	}
 
-	private static List<Meeting> pairMeetings(Mentorship mentorship, Snapshot snapshot) {
+	/** The pair's meetings that count in the mentorship's program; a team can work with one mentor in two programs. */
+	private static List<Meeting> pairMeetings(Mentorship mentorship, Program program, Snapshot snapshot) {
 		UUID mentorId = mentorship.getMentor().getId();
 		return snapshot.meetingsByOrganization().getOrDefault(mentorship.getOrganization().getId(), List.of()).stream()
 				.filter(meeting -> meeting.getMentor() != null && meeting.getMentor().getId().equals(mentorId))
+				.filter(meeting -> CoordinatorProgramService.countsIn(meeting, program, snapshot))
 				.toList();
 	}
 

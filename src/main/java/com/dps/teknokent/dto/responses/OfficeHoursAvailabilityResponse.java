@@ -7,6 +7,8 @@ import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.UUID;
 
+import org.jspecify.annotations.Nullable;
+
 import com.dps.teknokent.entity.OfficeHoursException;
 import com.dps.teknokent.entity.OfficeHoursOneOff;
 import com.dps.teknokent.entity.OfficeHoursRule;
@@ -29,7 +31,7 @@ public record OfficeHoursAvailabilityResponse(
 	}
 
 	/** Hours on one date, with Turkey's offset. */
-	public record OneOff(UUID id, OffsetDateTime startsAt, OffsetDateTime endsAt, String place) {
+	public record OneOff(UUID id, OffsetDateTime startsAt, OffsetDateTime endsAt, @Nullable String place) {
 		public static OneOff fromEntity(OfficeHoursOneOff oneOff) {
 			return new OneOff(oneOff.getId(), oneOff.getStartsAt().atZone(MeetingSlotTimes.APP_ZONE).toOffsetDateTime(),
 					oneOff.getEndsAt().atZone(MeetingSlotTimes.APP_ZONE).toOffsetDateTime(), oneOff.getPlace());
@@ -39,7 +41,8 @@ public record OfficeHoursAvailabilityResponse(
 	public record DateOff(UUID id, LocalDate startsOn, LocalDate endsOn, String reason) {
 
 		public static DateOff fromEntity(OfficeHoursException exception) {
-			return new DateOff(exception.getId(), exception.getStartsOn(), exception.getEndsOn(), exception.getReason());
+			return new DateOff(exception.getId(), exception.getStartsOn(), exception.getEndsOn(),
+					exception.getReason());
 		}
 	}
 }

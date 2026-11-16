@@ -4,9 +4,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
 import java.util.UUID;
 
 import org.springframework.beans.factory.annotation.Autowired;
@@ -76,6 +74,12 @@ public class OfficeHoursAvailabilityService {
 	@Transactional(readOnly = true)
 	public OfficeHoursAvailabilityResponse find(UUID instructorId) {
 		requireInstructor(instructorId);
+		return read(instructorId);
+	}
+
+	/** Someone's office hours, once the caller is known to be an academic (Moodle or Menton). */
+	@Transactional(readOnly = true)
+	public OfficeHoursAvailabilityResponse read(UUID instructorId) {
 		OfficeHoursSettings settings = settingsRepository.findById(instructorId).orElseGet(OfficeHoursSettings::new);
 		return response(instructorId, settings);
 	}
@@ -83,17 +87,25 @@ public class OfficeHoursAvailabilityService {
 	@Transactional
 	public OfficeHoursAvailabilityResponse update(UUID instructorId, UpdateOfficeHoursAvailabilityRequest request) {
 		requireInstructor(instructorId);
-		validateRules(request.rules());
-		validateExceptions(request.exceptions());
-		if (request.oneOffs() != null) {
-			validateOneOffs(request.oneOffs(), request.exceptions());
+		return write(instructorId, request);
+	}
+
+	/** Saves someone's office hours as a whole, once the caller is known to be an academic. */
+	@Transactional
+	public OfficeHoursAvailabilityResponse write(UUID instructorId, UpdateOfficeHoursAvailabilityRequest request) {
+		AvailabilityRules.validateRules(request.rules());
+		AvailabilityRules.validateExceptions(request.exceptions());
+		List<OfficeHoursOneOffRequest> oneOffs = request.oneOffs();
+		if (oneOffs != null) {
+			validateOneOffs(oneOffs, request.exceptions());
 		}
 		Instant now = clock.instant();
 
 		ruleRepository.deleteAll(ruleRepository.findByInstructorIdOrderByDayOfWeekAscStartTimeAsc(instructorId));
 		exceptionRepository.deleteAll(exceptionRepository.findByInstructorIdOrderByStartsOnAsc(instructorId));
 		// Deletes must reach the database first: the replacements may reuse the same unique day/time and dates.
-		if (request.oneOffs() != null) {
+		// One-offs left out of the request stay as saved, so a client that doesn't know them loses none.
+		if (oneOffs != null) {
 			oneOffRepository.deleteAll(oneOffRepository.findByInstructorIdOrderByStartsAtAsc(instructorId));
 			oneOffRepository.flush();
 		}
@@ -114,9 +126,8 @@ public class OfficeHoursAvailabilityService {
 		ruleRepository.saveAll(request.rules().stream().map(rule -> newRule(instructorId, rule, now)).toList());
 		exceptionRepository.saveAll(request.exceptions().stream()
 				.map(exception -> newException(instructorId, exception)).toList());
-		if (request.oneOffs() != null) {
-			oneOffRepository.saveAll(request.oneOffs().stream().map(oneOff -> newOneOff(instructorId, oneOff))
-					.toList());
+		if (oneOffs != null) {
+			oneOffRepository.saveAll(oneOffs.stream().map(oneOff -> newOneOff(instructorId, oneOff)).toList());
 			oneOffRepository.flush();
 		}
 		ruleRepository.flush();
@@ -143,45 +154,11 @@ public class OfficeHoursAvailabilityService {
 						.stream().map(OfficeHoursAvailabilityResponse.OneOff::fromEntity).toList());
 	}
 
-	/** The same checks a mentor's weekly availability gets. */
-	static void validateRules(List<CreateMentorAvailabilityRuleRequest> rules) {
-		Set<String> seen = new HashSet<>();
-		for (CreateMentorAvailabilityRuleRequest rule : rules) {
-			if (!rule.endTime().isAfter(rule.startTime())) {
-				throw new InvalidRequestException("Availability must end after it starts");
-			}
-			if (!seen.add(rule.dayOfWeek() + ":" + rule.startTime())) {
-				throw new InvalidRequestException("Duplicate weekly availability rule");
-			}
-		}
-		for (CreateMentorAvailabilityRuleRequest left : rules) {
-			for (CreateMentorAvailabilityRuleRequest right : rules) {
-				if (left == right || left.dayOfWeek() != right.dayOfWeek()) {
-					continue;
-				}
-				if (left.startTime().isBefore(right.endTime()) && right.startTime().isBefore(left.endTime())) {
-					throw new InvalidRequestException("Weekly availability ranges cannot overlap");
-				}
-			}
-		}
-	}
-
-	static void validateExceptions(List<MentorAvailabilityExceptionRequest> exceptions) {
-		Set<String> seen = new HashSet<>();
-		for (MentorAvailabilityExceptionRequest exception : exceptions) {
-			if (exception.endsOn().isBefore(exception.startsOn())) {
-				throw new InvalidRequestException("Availability exception must end on or after it starts");
-			}
-			if (!seen.add(exception.startsOn() + ":" + exception.endsOn())) {
-				throw new InvalidRequestException("Duplicate availability exception dates");
-			}
-		}
-	}
-
 	/**
-	 * One-off hours end after they start, last at least the shortest meeting, don't overlap each other, and don't
-	 * fall on a day off: the day off would hide them, so the academic lifts it first. Past ones are kept as sent,
-	 * since every save sends the whole list back.
+	 * One-off hours end after they start, last at least the shortest meeting, end on the day they start (so a stray
+	 * end date can't turn one entry into months of slots), don't overlap each other, and don't fall on a day off: the
+	 * day off would hide them, so the academic lifts it first. Past ones are kept as sent, since every save sends the
+	 * whole list back.
 	 */
 	static void validateOneOffs(List<OfficeHoursOneOffRequest> oneOffs,
 			List<MentorAvailabilityExceptionRequest> exceptions) {
@@ -190,16 +167,21 @@ public class OfficeHoursAvailabilityService {
 				throw new InvalidRequestException("One-off hours must last at least 15 minutes");
 			}
 			LocalDate day = oneOff.startsAt().atZoneSameInstant(MeetingSlotTimes.APP_ZONE).toLocalDate();
+			Instant nextMidnight = day.plusDays(1).atStartOfDay(MeetingSlotTimes.APP_ZONE).toInstant();
+			if (oneOff.endsAt().toInstant().isAfter(nextMidnight)) {
+				throw new InvalidRequestException("One-off hours must end on the day they start");
+			}
 			boolean away = exceptions.stream()
 					.anyMatch(range -> !day.isBefore(range.startsOn()) && !day.isAfter(range.endsOn()));
 			if (away) {
 				throw new InvalidRequestException("One-off hours cannot fall on a day off");
 			}
 		}
-		for (OfficeHoursOneOffRequest left : oneOffs) {
-			for (OfficeHoursOneOffRequest right : oneOffs) {
-				if (left != right && left.startsAt().isBefore(right.endsAt())
-						&& right.startsAt().isBefore(left.endsAt())) {
+		for (int first = 0; first < oneOffs.size(); first++) {
+			for (int second = first + 1; second < oneOffs.size(); second++) {
+				OfficeHoursOneOffRequest left = oneOffs.get(first);
+				OfficeHoursOneOffRequest right = oneOffs.get(second);
+				if (left.startsAt().isBefore(right.endsAt()) && right.startsAt().isBefore(left.endsAt())) {
 					throw new InvalidRequestException("One-off hours cannot overlap");
 				}
 			}

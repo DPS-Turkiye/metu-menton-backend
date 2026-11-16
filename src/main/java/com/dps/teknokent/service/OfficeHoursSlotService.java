@@ -7,26 +7,33 @@ import java.time.LocalDate;
 import java.time.ZonedDateTime;
 import java.time.temporal.TemporalAdjusters;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
+import org.jspecify.annotations.Nullable;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.dps.teknokent.domain.OfficeHoursRequestStatus;
 import com.dps.teknokent.entity.OfficeHoursException;
 import com.dps.teknokent.entity.OfficeHoursMeeting;
 import com.dps.teknokent.entity.OfficeHoursOneOff;
+import com.dps.teknokent.entity.OfficeHoursRequest;
 import com.dps.teknokent.entity.OfficeHoursRule;
 import com.dps.teknokent.entity.OfficeHoursSettings;
 import com.dps.teknokent.repository.OfficeHoursExceptionRepository;
 import com.dps.teknokent.repository.OfficeHoursMeetingRepository;
 import com.dps.teknokent.repository.OfficeHoursOneOffRepository;
+import com.dps.teknokent.repository.OfficeHoursRequestRepository;
 import com.dps.teknokent.repository.OfficeHoursRuleRepository;
 import com.dps.teknokent.repository.OfficeHoursSettingsRepository;
 import com.dps.teknokent.util.MeetingSlotTimes;
@@ -42,6 +49,8 @@ public class OfficeHoursSlotService {
 
 	static final int HORIZON_WEEKS = 8;
 	/** Meetings never run longer than the 480-minute slot limit, so this is far enough back to catch overlaps. */
+	private static final Set<OfficeHoursRequestStatus> HOLDING = Set.of(OfficeHoursRequestStatus.PENDING,
+			OfficeHoursRequestStatus.MORE_INFO_REQUESTED, OfficeHoursRequestStatus.COUNTER_PROPOSED);
 	private static final Duration LOOK_BACK = Duration.ofHours(9);
 
 	public record Slot(Instant startsAt, int durationMinutes) {
@@ -51,30 +60,65 @@ public class OfficeHoursSlotService {
 	private final OfficeHoursExceptionRepository exceptionRepository;
 	private final OfficeHoursMeetingRepository meetingRepository;
 	private final OfficeHoursSettingsRepository settingsRepository;
+	private final OfficeHoursRequestRepository requestRepository;
 	private final OfficeHoursOneOffRepository oneOffRepository;
 	private final Clock clock;
 
 	@Autowired
 	public OfficeHoursSlotService(OfficeHoursRuleRepository ruleRepository,
 			OfficeHoursExceptionRepository exceptionRepository, OfficeHoursMeetingRepository meetingRepository,
-			OfficeHoursSettingsRepository settingsRepository, OfficeHoursOneOffRepository oneOffRepository) {
-		this(ruleRepository, exceptionRepository, meetingRepository, settingsRepository, oneOffRepository,
-				Clock.systemUTC());
+			OfficeHoursSettingsRepository settingsRepository, OfficeHoursRequestRepository requestRepository,
+			OfficeHoursOneOffRepository oneOffRepository) {
+		this(ruleRepository, exceptionRepository, meetingRepository, settingsRepository, requestRepository,
+				oneOffRepository, Clock.systemUTC());
 	}
 
 	OfficeHoursSlotService(OfficeHoursRuleRepository ruleRepository, OfficeHoursExceptionRepository exceptionRepository,
 			OfficeHoursMeetingRepository meetingRepository, OfficeHoursSettingsRepository settingsRepository,
-			OfficeHoursOneOffRepository oneOffRepository, Clock clock) {
+			OfficeHoursRequestRepository requestRepository, OfficeHoursOneOffRepository oneOffRepository,
+			Clock clock) {
 		this.ruleRepository = ruleRepository;
 		this.exceptionRepository = exceptionRepository;
 		this.meetingRepository = meetingRepository;
 		this.settingsRepository = settingsRepository;
+		this.requestRepository = requestRepository;
 		this.oneOffRepository = oneOffRepository;
 		this.clock = clock;
 	}
 
+	/** The slots a student can still ask for: the academic's hours, minus booked meetings and held times. */
 	@Transactional(readOnly = true)
 	public List<Slot> openSlots(UUID instructorId) {
+		Set<Instant> held = heldTimes(instructorId, null);
+		return calendarSlots(instructorId).stream().filter(slot -> !held.contains(slot.startsAt())).toList();
+	}
+
+	/**
+	 * Times open requests hold, so no one else is offered them (FR-OH-16): what a request waiting on the academic
+	 * asks for, and what the academic offered on one waiting on the student. {@code exceptRequestId}'s own times
+	 * don't count.
+	 */
+	@Transactional(readOnly = true)
+	public Set<Instant> heldTimes(UUID instructorId, @Nullable UUID exceptRequestId) {
+		return requestRepository.findByInstructorIdAndStatusIn(instructorId, HOLDING).stream()
+				.filter(request -> !request.getId().equals(exceptRequestId))
+				.flatMap(OfficeHoursSlotService::timesHeldBy)
+				.collect(Collectors.toSet());
+	}
+
+	private static Stream<Instant> timesHeldBy(OfficeHoursRequest request) {
+		String joined = request.getStatus() == OfficeHoursRequestStatus.COUNTER_PROPOSED
+				? request.getProposedSlots()
+				: request.getPreferredSlots();
+		if (joined == null || joined.isBlank()) {
+			return Stream.empty();
+		}
+		return Arrays.stream(joined.split(",")).map(String::trim).map(MeetingSlotTimes::parseMachineSlot)
+				.filter(Objects::nonNull);
+	}
+
+	/** The academic's hours as slots, minus booked meetings; times other requests hold are still in. */
+	public List<Slot> calendarSlots(UUID instructorId) {
 		Instant now = clock.instant();
 		Instant earliest = now.plus(MeetingSlotTimes.MIN_BOOKING_LEAD);
 		ZonedDateTime start = now.atZone(MeetingSlotTimes.APP_ZONE);
@@ -92,8 +136,8 @@ public class OfficeHoursSlotService {
 					continue;
 				}
 				ZonedDateTime end = day.with(rule.getEndTime());
-				for (ZonedDateTime at = day.with(rule.getStartTime());
-						!at.plusMinutes(rule.getSlotMinutes()).isAfter(end); at = at.plusMinutes(rule.getSlotMinutes())) {
+				for (ZonedDateTime at = day.with(rule.getStartTime()); !at.plusMinutes(rule.getSlotMinutes())
+						.isAfter(end); at = at.plusMinutes(rule.getSlotMinutes())) {
 					Instant startsAt = at.toInstant();
 					Duration length = Duration.ofMinutes(rule.getSlotMinutes());
 					if (!startsAt.isBefore(earliest) && !overlaps(meetings, startsAt, length, buffer)) {
@@ -112,8 +156,8 @@ public class OfficeHoursSlotService {
 					|| isAway(away, oneOff.getStartsAt().atZone(MeetingSlotTimes.APP_ZONE).toLocalDate())) {
 				continue;
 			}
-			for (Instant startsAt = oneOff.getStartsAt(); !startsAt.plus(oneOffLength).isAfter(oneOff.getEndsAt());
-					startsAt = startsAt.plus(oneOffLength)) {
+			for (Instant startsAt = oneOff.getStartsAt(); !startsAt.plus(oneOffLength)
+					.isAfter(oneOff.getEndsAt()); startsAt = startsAt.plus(oneOffLength)) {
 				if (!startsAt.isBefore(earliest) && !overlaps(meetings, startsAt, oneOffLength, buffer)
 						&& offered.add(startsAt)) {
 					slots.add(new Slot(startsAt, oneOffMinutes));
@@ -124,10 +168,13 @@ public class OfficeHoursSlotService {
 		return slots;
 	}
 
-	/** The open slot starting at this moment, if there is one; a time typed by hand has none. */
+	/**
+	 * The academic's slot starting at this moment, if there is one; a time typed by hand has none. Held times still
+	 * count here: a request's own time has to keep its slot's length when it is accepted.
+	 */
 	@Transactional(readOnly = true)
 	public Optional<Slot> openSlotAt(UUID instructorId, Instant startsAt) {
-		return openSlots(instructorId).stream().filter(slot -> slot.startsAt().equals(startsAt)).findFirst();
+		return calendarSlots(instructorId).stream().filter(slot -> slot.startsAt().equals(startsAt)).findFirst();
 	}
 
 	/**
@@ -157,7 +204,8 @@ public class OfficeHoursSlotService {
 	}
 
 	private List<OfficeHoursMeeting> upcomingMeetings(UUID instructorId, Instant now) {
-		return meetingRepository.findByInstructorIdAndScheduledAtAfter(instructorId, now.minus(LOOK_BACK));
+		return meetingRepository.findByInstructorIdAndCancelledAtIsNullAndScheduledAtAfter(instructorId,
+				now.minus(LOOK_BACK));
 	}
 
 	private Duration buffer(UUID instructorId) {

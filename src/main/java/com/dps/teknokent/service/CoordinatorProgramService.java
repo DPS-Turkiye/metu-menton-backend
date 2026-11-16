@@ -17,8 +17,11 @@ import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import org.jspecify.annotations.Nullable;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
 
 import com.dps.teknokent.domain.ActionItemStatus;
 import com.dps.teknokent.domain.BottleneckStatus;
@@ -74,8 +77,10 @@ import com.dps.teknokent.repository.ProgramRepository;
 import com.dps.teknokent.repository.ProgramStartupRepository;
 import com.dps.teknokent.repository.StoredDocumentRepository;
 import com.dps.teknokent.repository.TeamChangeRequestRepository;
+import com.dps.teknokent.security.AdminAccess;
 import com.dps.teknokent.util.EmailDomains;
 import com.dps.teknokent.util.MeetingSlotTimes;
+import com.dps.teknokent.util.ProgramActivity;
 import com.dps.teknokent.util.ProgramCalendar;
 import com.dps.teknokent.util.ProgramCoordination;
 import com.dps.teknokent.util.Texts;
@@ -92,8 +97,10 @@ public class CoordinatorProgramService {
 
 	// Same definitions as the admin overview: PLANNED or ACTIVE means the team has a mentor.
 	private static final Set<MentorshipStatus> MATCHED = EnumSet.of(MentorshipStatus.ACTIVE, MentorshipStatus.PLANNED);
-	private static final List<BottleneckStatus> OPEN_BOTTLENECKS = List.of(BottleneckStatus.OPEN, BottleneckStatus.IN_PROGRESS);
-	private static final List<ActionItemStatus> CLOSED_ACTIONS = List.of(ActionItemStatus.COMPLETED, ActionItemStatus.CANCELLED);
+	private static final List<BottleneckStatus> OPEN_BOTTLENECKS = List.of(BottleneckStatus.OPEN,
+			BottleneckStatus.IN_PROGRESS);
+	private static final List<ActionItemStatus> CLOSED_ACTIONS = List.of(ActionItemStatus.COMPLETED,
+			ActionItemStatus.CANCELLED);
 	private static final int RISKY_TOPIC_LIMIT = 3;
 	private static final int AWAITING_TEAM_LIMIT = 5;
 	private static final int UPCOMING_EVENT_LIMIT = 6;
@@ -131,7 +138,8 @@ public class CoordinatorProgramService {
 	 * Risky once the team has gone {@code staleAfterDays} without meeting its mentor; needs follow-up once
 	 * the target meeting interval has passed or the team has an open bottleneck or overdue action.
 	 */
-	public static HealthBucket classify(long daysSinceContact, boolean hasOpenIssue, int meetingFrequencyDays, int staleAfterDays) {
+	public static HealthBucket classify(long daysSinceContact, boolean hasOpenIssue, int meetingFrequencyDays,
+			int staleAfterDays) {
 		if (daysSinceContact >= staleAfterDays) {
 			return HealthBucket.RISKY;
 		}
@@ -230,12 +238,15 @@ public class CoordinatorProgramService {
 				kept.add(input.id());
 			}
 		}
-		programPhaseRepository.deleteAll(saved.values().stream().filter(phase -> !kept.contains(phase.getId())).toList());
+		programPhaseRepository
+				.deleteAll(saved.values().stream().filter(phase -> !kept.contains(phase.getId())).toList());
 		// Positions are unique per program and Hibernate runs inserts before updates; parking the kept phases on
 		// negative positions first lets every row take its new place without a collision.
 		int parked = -1;
-		for (UUID id : kept) {
-			saved.get(id).setPosition(parked--);
+		for (ProgramPhase phase : saved.values()) {
+			if (kept.contains(phase.getId())) {
+				phase.setPosition(parked--);
+			}
 		}
 		programPhaseRepository.flush();
 		List<ProgramPhase> phases = new ArrayList<>();
@@ -243,9 +254,11 @@ public class CoordinatorProgramService {
 		int position = 0;
 		for (ReplaceProgramPhasesRequest.PhaseInput input : inputs) {
 			// The same id sent twice keeps the phase once; the second becomes a new phase.
-			boolean keeps = input.id() != null && kept.contains(input.id()) && placed.add(input.id());
-			ProgramPhase phase = keeps ? saved.get(input.id()) : new ProgramPhase();
-			if (!keeps) {
+			ProgramPhase phase = input.id() != null && kept.contains(input.id()) && placed.add(input.id())
+					? saved.get(input.id())
+					: null;
+			if (phase == null) {
+				phase = new ProgramPhase();
 				phase.setId(UUID.randomUUID());
 				phase.setProgramId(programId);
 			}
@@ -267,23 +280,24 @@ public class CoordinatorProgramService {
 		if (documentId == null || documentId.equals(program.getSyllabusDocumentId())) {
 			return;
 		}
-		storedDocumentRepository.findById(documentId)
+		boolean ownProgramFile = storedDocumentRepository.findById(documentId)
 				.filter(document -> actorId.equals(document.getUserId()) && isProgramFile(document.getKind()))
-				.orElseThrow(() -> new ResourceNotFoundException("Syllabus not found: " + documentId));
+				.isPresent();
+		if (!ownProgramFile) {
+			throw new ResourceNotFoundException("Syllabus not found: " + documentId);
+		}
 		program.setSyllabusDocumentId(documentId);
 		programRepository.save(program);
 	}
 
-	private static boolean isProgramFile(String kind) {
-		return DocumentKind.WEEKLY_PROGRAM.value().equals(kind) || DocumentKind.SYLLABUS.value().equals(kind);
+	private static boolean isProgramFile(DocumentKind kind) {
+		return kind == DocumentKind.WEEKLY_PROGRAM || kind == DocumentKind.SYLLABUS;
 	}
 
 	/** Taslak → Aktif. Only an admin launches, and only a program with an approved coordinator to run it. */
 	@Transactional
 	public CoordinatorProgramResponse.Detail launch(UUID actorId, UUID programId) {
-		if (!requireCoordinatorOrAdmin(actorId).has(UserRole.ADMIN)) {
-			throw new InvalidRequestException("Only an admin launches a program.");
-		}
+		AdminAccess.requireAdmin(requireCoordinatorOrAdmin(actorId));
 		Program program = requireManagedProgram(actorId, programId);
 		if (program.getStatus() != ProgramStatus.DRAFT) {
 			throw new InvalidRequestException("This program has already been launched.");
@@ -372,12 +386,10 @@ public class CoordinatorProgramService {
 			}
 		}
 		Set<UUID> organizationIds = programOf.keySet();
-		List<Meeting> meetings = organizationIds.isEmpty()
-				? List.of()
-				: meetingRepository.findByOrganizationIdInOrderByScheduledAtDesc(organizationIds);
+		List<Meeting> meetings = programMeetings(scope, snapshot);
 		return new CoordinatorOverviewResponse(
 				options,
-				overviewMetrics(programOf, idsOf(scope), snapshot),
+				overviewMetrics(scope, programOf, snapshot),
 				nextMeeting(meetings, snapshot.now()),
 				agenda(scope, organizationIds, meetings, snapshot),
 				new CoordinatorOverviewResponse.Actions(
@@ -386,29 +398,26 @@ public class CoordinatorProgramService {
 						missingNotes(meetings, snapshot.now())));
 	}
 
-	private static Set<UUID> idsOf(List<Program> programs) {
-		return programs.stream().map(Program::getId).collect(Collectors.toSet());
-	}
-
 	private CoordinatorOverviewResponse.Metrics overviewMetrics(
-			Map<UUID, Program> programOf, Set<UUID> scopeIds, Snapshot snapshot) {
+			List<Program> scope, Map<UUID, Program> programOf, Snapshot snapshot) {
 		Set<UUID> matchedMentorships = new HashSet<>();
 		Set<UUID> mentoredTeams = new HashSet<>();
 		Set<UUID> activeMentors = new HashSet<>();
 		int stale = 0;
 		int bottlenecks = 0;
-		for (Map.Entry<UUID, Program> entry : programOf.entrySet()) {
-			UUID organizationId = entry.getKey();
+		for (UUID organizationId : programOf.keySet()) {
 			bottlenecks += snapshot.openBottlenecks().getOrDefault(organizationId, List.of()).size();
-			for (Mentorship mentorship : mentorshipsOf(snapshot, scopeIds, organizationId)) {
-				if (!MATCHED.contains(mentorship.getStatus())) {
+		}
+		for (Program program : scope) {
+			for (Mentorship mentorship : programMentorships(snapshot, program)) {
+				// One made before V82 has no program and comes up under each of its team's programs.
+				if (!MATCHED.contains(mentorship.getStatus()) || !matchedMentorships.add(mentorship.getId())) {
 					continue;
 				}
-				matchedMentorships.add(mentorship.getId());
-				mentoredTeams.add(organizationId);
+				mentoredTeams.add(mentorship.getOrganization().getId());
 				activeMentors.add(mentorship.getMentor().getId());
 				if (mentorship.getStatus() == MentorshipStatus.ACTIVE
-						&& daysSinceContact(mentorship, snapshot) >= entry.getValue().getStaleAfterDays()) {
+						&& daysSinceContact(mentorship, snapshot) >= program.getStaleAfterDays()) {
 					stale++;
 				}
 			}
@@ -417,7 +426,8 @@ public class CoordinatorProgramService {
 		int overdue = organizationIds.isEmpty()
 				? 0
 				: actionItemRepository
-						.findByOrganizationIdInAndStatusNotInAndDueDateBefore(organizationIds, CLOSED_ACTIONS, snapshot.today())
+						.findByOrganizationIdInAndStatusNotInAndDueDateBefore(organizationIds, CLOSED_ACTIONS,
+								snapshot.today())
 						.size();
 		Instant slowAfter = snapshot.now().minus(SLOW_REPLY_DAYS, ChronoUnit.DAYS);
 		int slowMentors = organizationIds.isEmpty()
@@ -439,7 +449,7 @@ public class CoordinatorProgramService {
 				slowMentors);
 	}
 
-	private static CoordinatorOverviewResponse.NextMeeting nextMeeting(List<Meeting> meetings, Instant now) {
+	private static CoordinatorOverviewResponse.@Nullable NextMeeting nextMeeting(List<Meeting> meetings, Instant now) {
 		Meeting next = meetings.stream()
 				.filter(meeting -> meeting.getStatus() == MeetingStatus.SCHEDULED
 						&& meeting.getScheduledAt() != null
@@ -529,13 +539,13 @@ public class CoordinatorProgramService {
 	}
 
 	private List<CoordinatorOverviewResponse.PendingMentor> pendingMentors(List<Program> scope, Snapshot snapshot) {
-		List<ProgramMentor> pending = new ArrayList<>();
-		Map<UUID, Program> programById = new HashMap<>();
+		record Waiting(ProgramMentor membership, Program program) {
+		}
+		List<Waiting> pending = new ArrayList<>();
 		for (Program program : scope) {
-			programById.put(program.getId(), program);
 			for (ProgramMentor membership : snapshot.mentors().getOrDefault(program.getId(), List.of())) {
 				if (membership.getStatus() == ProgramMentorStatus.PENDING) {
-					pending.add(membership);
+					pending.add(new Waiting(membership, program));
 				}
 			}
 		}
@@ -543,13 +553,15 @@ public class CoordinatorProgramService {
 			return List.of();
 		}
 		Map<UUID, AppUser> mentors = appUserRepository
-				.findAllById(pending.stream().map(ProgramMentor::getMentorId).collect(Collectors.toSet()))
+				.findAllById(pending.stream().map(waiting -> waiting.membership().getMentorId())
+						.collect(Collectors.toSet()))
 				.stream()
 				.collect(Collectors.toMap(AppUser::getId, Function.identity()));
 		return pending.stream()
-				.map(membership -> {
+				.map(waiting -> {
+					ProgramMentor membership = waiting.membership();
+					Program program = waiting.program();
 					AppUser mentor = mentors.get(membership.getMentorId());
-					Program program = programById.get(membership.getProgramId());
 					LocalDate since = membership.getCreatedAt() == null
 							? snapshot.today()
 							: membership.getCreatedAt().atZone(MeetingSlotTimes.APP_ZONE).toLocalDate();
@@ -652,18 +664,13 @@ public class CoordinatorProgramService {
 						program.getEligibleEmailDomain(),
 						program.isRosterOnly(),
 						program.isIndividualMentees()),
-				health(program, startups, snapshot),
+				health(program, snapshot),
 				awaitingTeams,
 				upcoming,
 				new CoordinatorProgramResponse.TeamDistribution(startups.size() - awaiting.size(), awaiting.size()),
-				mentorDistribution(snapshot.mentors().getOrDefault(program.getId(), List.of())),
+				mentorDistribution(program, snapshot.mentors().getOrDefault(program.getId(), List.of())),
 				coordinatorsOf(program),
-				missingNotes(
-						startups.stream()
-								.flatMap(startup -> snapshot.meetingsByOrganization()
-										.getOrDefault(startup.getOrganizationId(), List.of()).stream())
-								.toList(),
-						snapshot.now()).size(),
+				missingNotes(programMeetings(List.of(program), snapshot), snapshot.now()).size(),
 				syllabusOf(program),
 				pendingApprovalCount(program.getId()));
 	}
@@ -682,13 +689,14 @@ public class CoordinatorProgramService {
 		return Math.toIntExact(people + mentors + startups + teamChanges);
 	}
 
-	private CoordinatorProgramResponse.Syllabus syllabusOf(Program program) {
+	private CoordinatorProgramResponse.@Nullable Syllabus syllabusOf(Program program) {
 		if (program.getSyllabusDocumentId() == null) {
 			return null;
 		}
 		return storedDocumentRepository.findById(program.getSyllabusDocumentId())
 				.map(document -> new CoordinatorProgramResponse.Syllabus(
-						document.getId(), document.getOriginalFilename(), document.getSizeBytes(), document.getCreatedAt(),
+						document.getId(), document.getOriginalFilename(), document.getSizeBytes(),
+						document.getCreatedAt(),
 						document.getKind()))
 				.orElse(null);
 	}
@@ -699,9 +707,10 @@ public class CoordinatorProgramService {
 		Map<UUID, AppUser> users = appUserRepository.findAllById(ids).stream()
 				.collect(Collectors.toMap(AppUser::getId, Function.identity()));
 		return ids.stream()
-				.filter(id -> users.containsKey(id) && users.get(id).has(UserRole.COORDINATOR))
-				.map(id -> new CoordinatorProgramResponse.CoordinatorRef(
-						id, users.get(id).getFullName(), id.equals(program.getCreatedBy())))
+				.map(users::get)
+				.filter(user -> user != null && user.has(UserRole.COORDINATOR))
+				.map(user -> new CoordinatorProgramResponse.CoordinatorRef(
+						user.getId(), user.getFullName(), user.getId().equals(program.getCreatedBy())))
 				.toList();
 	}
 
@@ -710,14 +719,9 @@ public class CoordinatorProgramService {
 		List<ProgramMentor> mentors = snapshot.mentors().getOrDefault(program.getId(), List.of());
 		List<ProgramPhase> phases = snapshot.phases().getOrDefault(program.getId(), List.of());
 		List<ProgramStartup> awaiting = awaitingMatch(program, startups, snapshot);
-		int activeMentorships = 0;
-		for (ProgramStartup startup : startups) {
-			for (Mentorship mentorship : mentorshipsOf(snapshot, Set.of(program.getId()), startup.getOrganizationId())) {
-				if (MATCHED.contains(mentorship.getStatus())) {
-					activeMentorships++;
-				}
-			}
-		}
+		int activeMentorships = (int) programMentorships(snapshot, program).stream()
+				.filter(mentorship -> MATCHED.contains(mentorship.getStatus()))
+				.count();
 		Integer oldestWaiting = awaiting.stream()
 				.map(startup -> waitingDays(startup, snapshot.today()))
 				.max(Integer::compare)
@@ -739,7 +743,7 @@ public class CoordinatorProgramService {
 				(int) mentors.stream().filter(m -> m.getStatus() == ProgramMentorStatus.ACCEPTED).count(),
 				(int) mentors.stream().filter(m -> m.getStatus() == ProgramMentorStatus.PENDING).count(),
 				activeMentorships,
-				health(program, startups, snapshot).risky(),
+				health(program, snapshot).risky(),
 				awaiting.size(),
 				oldestWaiting,
 				current == null ? null : toPhase(current),
@@ -748,33 +752,33 @@ public class CoordinatorProgramService {
 				ProgramCalendar.totalWeeks(program.getStartDate(), program.getEndDate()));
 	}
 
-	private CoordinatorProgramResponse.Health health(Program program, List<ProgramStartup> startups, Snapshot snapshot) {
+	private CoordinatorProgramResponse.Health health(Program program, Snapshot snapshot) {
 		int healthy = 0;
 		int followUp = 0;
 		int risky = 0;
 		Map<String, Set<UUID>> topicTeams = new LinkedHashMap<>();
-		for (ProgramStartup startup : startups) {
-			UUID organizationId = startup.getOrganizationId();
+		// Every mentorship the card counts as active, a team that left the program included.
+		for (Mentorship mentorship : programMentorships(snapshot, program)) {
+			if (mentorship.getStatus() != MentorshipStatus.ACTIVE) {
+				continue;
+			}
+			UUID organizationId = mentorship.getOrganization().getId();
 			List<Bottleneck> openIssues = snapshot.openBottlenecks().getOrDefault(organizationId, List.of());
-			boolean hasOpenIssue = !openIssues.isEmpty() || snapshot.overdueActionOrganizations().contains(organizationId);
-			for (Mentorship mentorship : mentorshipsOf(snapshot, Set.of(program.getId()), organizationId)) {
-				if (mentorship.getStatus() != MentorshipStatus.ACTIVE) {
-					continue;
-				}
-				HealthBucket bucket = classify(
-						daysSinceContact(mentorship, snapshot),
-						hasOpenIssue,
-						program.getMeetingFrequencyDays(),
-						program.getStaleAfterDays());
-				switch (bucket) {
-					case HEALTHY -> healthy++;
-					case FOLLOW_UP -> followUp++;
-					case RISKY -> risky++;
-				}
-				if (bucket != HealthBucket.HEALTHY) {
-					for (Bottleneck issue : openIssues) {
-						topicTeams.computeIfAbsent(issue.getTitle(), key -> new HashSet<>()).add(organizationId);
-					}
+			boolean hasOpenIssue = !openIssues.isEmpty()
+					|| snapshot.overdueActionOrganizations().contains(organizationId);
+			HealthBucket bucket = classify(
+					daysSinceContact(mentorship, snapshot),
+					hasOpenIssue,
+					program.getMeetingFrequencyDays(),
+					program.getStaleAfterDays());
+			switch (bucket) {
+			case HEALTHY -> healthy++;
+			case FOLLOW_UP -> followUp++;
+			case RISKY -> risky++;
+			}
+			if (bucket != HealthBucket.HEALTHY) {
+				for (Bottleneck issue : openIssues) {
+					topicTeams.computeIfAbsent(issue.getTitle(), key -> new HashSet<>()).add(organizationId);
 				}
 			}
 		}
@@ -786,7 +790,9 @@ public class CoordinatorProgramService {
 		return new CoordinatorProgramResponse.Health(healthy, followUp, risky, topics);
 	}
 
-	private CoordinatorProgramResponse.MentorDistribution mentorDistribution(List<ProgramMentor> memberships) {
+	private CoordinatorProgramResponse.MentorDistribution mentorDistribution(
+			Program program,
+			List<ProgramMentor> memberships) {
 		int pending = (int) memberships.stream().filter(m -> m.getStatus() == ProgramMentorStatus.PENDING).count();
 		List<UUID> accepted = memberships.stream()
 				.filter(m -> m.getStatus() == ProgramMentorStatus.ACCEPTED)
@@ -809,8 +815,9 @@ public class CoordinatorProgramService {
 		int idle = 0;
 		for (UUID mentorId : accepted) {
 			long teams = load.getOrDefault(mentorId, 0L);
-			Integer limit = capacity.get(mentorId);
-			if (limit != null && teams >= limit) {
+			// Same rule as the Mentor Havuzu: the mentor's own limit, otherwise the program's default.
+			int limit = capacity.getOrDefault(mentorId, program.getDefaultMentorCapacity());
+			if (teams >= limit) {
 				full++;
 			} else if (teams == 0) {
 				idle++;
@@ -823,7 +830,8 @@ public class CoordinatorProgramService {
 
 	private List<ProgramStartup> awaitingMatch(Program program, List<ProgramStartup> startups, Snapshot snapshot) {
 		return startups.stream()
-				.filter(startup -> mentorshipsOf(snapshot, Set.of(program.getId()), startup.getOrganizationId()).stream()
+				.filter(startup -> mentorshipsOf(snapshot, Set.of(program.getId()), startup.getOrganizationId())
+						.stream()
 						.noneMatch(mentorship -> MATCHED.contains(mentorship.getStatus())))
 				.toList();
 	}
@@ -865,10 +873,10 @@ public class CoordinatorProgramService {
 				.collect(Collectors.groupingBy(ProgramStartup::getProgramId));
 		Map<UUID, List<ProgramMentor>> mentors = programMentorRepository.findByProgramIdIn(programIds).stream()
 				.collect(Collectors.groupingBy(ProgramMentor::getProgramId));
-		Set<UUID> organizationIds = startups.values().stream()
-				.flatMap(List::stream)
-				.map(ProgramStartup::getOrganizationId)
-				.collect(Collectors.toSet());
+		Map<UUID, List<UUID>> formerTeams = teamsThatLeft(programIds, startups);
+		Set<UUID> organizationIds = new HashSet<>();
+		startups.values().forEach(rows -> rows.forEach(row -> organizationIds.add(row.getOrganizationId())));
+		formerTeams.values().forEach(organizationIds::addAll);
 		if (organizationIds.isEmpty()) {
 			return new Snapshot(today, now, coordinators, phases, startups, mentors, Map.of(), Map.of(), Map.of(),
 					Map.of(), Map.of(), Set.of());
@@ -905,8 +913,27 @@ public class CoordinatorProgramService {
 				.map(item -> item.getOrganization().getId())
 				.collect(Collectors.toSet());
 		return new Snapshot(today, now, coordinators, phases, teams, mentors, organizations, mentorships,
-				lastMeeting, meetings.stream().collect(Collectors.groupingBy(meeting -> meeting.getOrganization().getId())),
-				openBottlenecks, overdue);
+				lastMeeting,
+				meetings.stream().collect(Collectors.groupingBy(meeting -> meeting.getOrganization().getId())),
+				openBottlenecks, overdue, formerTeams);
+	}
+
+	/**
+	 * Per program, the teams that made a mentorship in it and are no longer in it: an admin moved them to another
+	 * program, or a coordinator removed them. What they did in the program still counts there.
+	 */
+	private Map<UUID, List<UUID>> teamsThatLeft(List<UUID> programIds, Map<UUID, List<ProgramStartup>> startups) {
+		Map<UUID, Set<UUID>> current = new HashMap<>();
+		startups.forEach((programId, rows) -> current.put(programId, rows.stream()
+				.map(ProgramStartup::getOrganizationId)
+				.collect(Collectors.toSet())));
+		Map<UUID, List<UUID>> left = new HashMap<>();
+		for (MentorshipRepository.ProgramTeam team : mentorshipRepository.findTeamsWithMentorshipIn(programIds)) {
+			if (!current.getOrDefault(team.getProgramId(), Set.of()).contains(team.getOrganizationId())) {
+				left.computeIfAbsent(team.getProgramId(), id -> new ArrayList<>()).add(team.getOrganizationId());
+			}
+		}
+		return left;
 	}
 
 	public List<Program> managedPrograms(AppUser actor) {
@@ -922,10 +949,17 @@ public class CoordinatorProgramService {
 				: managed.stream().filter(program -> program.getStatus() != ProgramStatus.COMPLETED).toList();
 	}
 
+	/**
+	 * A coordinator or an admin whose account is approved. A deactivated coordinator's browser session lives on until
+	 * the frontend re-checks it, so the role alone must not open program data.
+	 */
 	public AppUser requireCoordinatorOrAdmin(UUID actorId) {
 		AppUser actor = domainLookupService.requireUser(actorId);
 		if (!actor.has(UserRole.COORDINATOR) && !actor.has(UserRole.ADMIN)) {
 			throw new InvalidRequestException("Only a coordinator can manage programs.");
+		}
+		if (actor.getStatus() != UserAccountStatus.APPROVED) {
+			throw new ResponseStatusException(HttpStatus.FORBIDDEN, Texts.forRequest("error.accountNotApproved"));
 		}
 		return actor;
 	}
@@ -933,7 +967,8 @@ public class CoordinatorProgramService {
 	/** Program Ayarları belong to the program's coordinators; an admin only views them. */
 	public Program requireSettingsEditor(UUID actorId, UUID programId) {
 		if (requireCoordinatorOrAdmin(actorId).has(UserRole.ADMIN)) {
-			throw new InvalidRequestException("An admin views program settings; the program's coordinators change them.");
+			throw new InvalidRequestException(
+					"An admin views program settings; the program's coordinators change them.");
 		}
 		return requireEditableProgram(actorId, programId);
 	}
@@ -975,12 +1010,66 @@ public class CoordinatorProgramService {
 		return mentorship.getProgram() == null || programIds.contains(mentorship.getProgram().getId());
 	}
 
+	/**
+	 * The program's mentorships: its teams' own (see {@link #mentorshipsOf}), and the ones a team made here before
+	 * it left the program. A former team's mentorship with no program does not count: the team is not here.
+	 */
+	static List<Mentorship> programMentorships(Snapshot snapshot, Program program) {
+		List<Mentorship> all = new ArrayList<>();
+		for (ProgramStartup startup : snapshot.startups().getOrDefault(program.getId(), List.of())) {
+			all.addAll(mentorshipsOf(snapshot, Set.of(program.getId()), startup.getOrganizationId()));
+		}
+		for (UUID organizationId : snapshot.formerTeams().getOrDefault(program.getId(), List.of())) {
+			snapshot.mentorships().getOrDefault(organizationId, List.of()).stream()
+					.filter(mentorship -> mentorship.getProgram() != null
+							&& mentorship.getProgram().getId().equals(program.getId()))
+					.forEach(all::add);
+		}
+		return all;
+	}
+
+	/** The teams whose meetings can count in the program: the ones in it, then the ones that left it. */
+	static List<UUID> activityTeams(Snapshot snapshot, Program program) {
+		List<UUID> teams = new ArrayList<>();
+		snapshot.startups().getOrDefault(program.getId(), List.of())
+				.forEach(startup -> teams.add(startup.getOrganizationId()));
+		teams.addAll(snapshot.formerTeams().getOrDefault(program.getId(), List.of()));
+		return teams;
+	}
+
+	/** Whether the meeting counts in the program (see {@link ProgramActivity#countsIn}). */
+	static boolean countsIn(Meeting meeting, Program program, Snapshot snapshot) {
+		UUID organizationId = meeting.getOrganization().getId();
+		boolean teamIsIn = snapshot.startups().getOrDefault(program.getId(), List.of()).stream()
+				.anyMatch(startup -> startup.getOrganizationId().equals(organizationId));
+		return ProgramActivity.countsIn(meeting, program.getId(), teamIsIn,
+				snapshot.mentorships().getOrDefault(organizationId, List.of()));
+	}
+
+	/** The meetings that count in these programs, newest first; each once. */
+	static List<Meeting> programMeetings(List<Program> programs, Snapshot snapshot) {
+		Map<UUID, Meeting> meetings = new LinkedHashMap<>();
+		for (Program program : programs) {
+			for (UUID organizationId : activityTeams(snapshot, program)) {
+				for (Meeting meeting : snapshot.meetingsByOrganization().getOrDefault(organizationId, List.of())) {
+					if (countsIn(meeting, program, snapshot)) {
+						meetings.putIfAbsent(meeting.getId(), meeting);
+					}
+				}
+			}
+		}
+		return meetings.values().stream()
+				.sorted(Comparator.comparing(
+						Meeting::getScheduledAt, Comparator.nullsLast(Comparator.reverseOrder())))
+				.toList();
+	}
+
 	static String organizationName(Snapshot snapshot, UUID organizationId) {
 		Organization organization = snapshot.organizations().get(organizationId);
 		return organization == null ? Texts.forRequest("label.team") : organization.getName();
 	}
 
-	private static String blankToNull(String value) {
+	private static @Nullable String blankToNull(@Nullable String value) {
 		return value == null || value.isBlank() ? null : value.trim();
 	}
 
@@ -1005,8 +1094,11 @@ public class CoordinatorProgramService {
 				event.getDescription());
 	}
 
-	/** Everything the summaries need, fetched once per call for a set of programs. */
-	/** {@code coordinators}: the coordinator each program names, by program id. */
+	/**
+	 * Everything the summaries need, fetched once per call for a set of programs. {@code coordinators}: the
+	 * coordinator each program names, by program id. {@code formerTeams}: per program, the teams that made a
+	 * mentorship in it and have since left it (see {@link #programMentorships}).
+	 */
 	public record Snapshot(
 			LocalDate today,
 			Instant now,
@@ -1019,6 +1111,25 @@ public class CoordinatorProgramService {
 			Map<String, Instant> lastMeetingByPair,
 			Map<UUID, List<Meeting>> meetingsByOrganization,
 			Map<UUID, List<Bottleneck>> openBottlenecks,
-			Set<UUID> overdueActionOrganizations) {
+			Set<UUID> overdueActionOrganizations,
+			Map<UUID, List<UUID>> formerTeams) {
+
+		/** A snapshot of programs that no team has left. */
+		public Snapshot(
+				LocalDate today,
+				Instant now,
+				Map<UUID, AppUser> coordinators,
+				Map<UUID, List<ProgramPhase>> phases,
+				Map<UUID, List<ProgramStartup>> startups,
+				Map<UUID, List<ProgramMentor>> mentors,
+				Map<UUID, Organization> organizations,
+				Map<UUID, List<Mentorship>> mentorships,
+				Map<String, Instant> lastMeetingByPair,
+				Map<UUID, List<Meeting>> meetingsByOrganization,
+				Map<UUID, List<Bottleneck>> openBottlenecks,
+				Set<UUID> overdueActionOrganizations) {
+			this(today, now, coordinators, phases, startups, mentors, organizations, mentorships, lastMeetingByPair,
+					meetingsByOrganization, openBottlenecks, overdueActionOrganizations, Map.of());
+		}
 	}
 }

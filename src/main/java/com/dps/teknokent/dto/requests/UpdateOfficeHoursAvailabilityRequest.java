@@ -18,6 +18,6 @@ public record UpdateOfficeHoursAvailabilityRequest(
 		@Min(1) @Max(50) Integer studentCapacity,
 		@NotNull @Min(15) @Max(480) Integer defaultMeetingDurationMinutes,
 		@NotNull @Min(0) @Max(240) Integer meetingBufferMinutes,
-		/** Hours on single dates. Left out, the saved ones stay, so a client that doesn't know them loses none. */
+		/* Hours on single dates. Left out, the saved ones stay, so a client that doesn't know them loses none. */
 		@Size(max = 30) List<@Valid OfficeHoursOneOffRequest> oneOffs) {
 }

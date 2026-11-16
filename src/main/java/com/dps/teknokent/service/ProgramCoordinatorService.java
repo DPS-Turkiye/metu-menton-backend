@@ -2,7 +2,6 @@ package com.dps.teknokent.service;
 
 import java.time.Instant;
 import java.util.List;
-import java.util.Set;
 import java.util.UUID;
 
 import org.springframework.stereotype.Service;
@@ -19,6 +18,7 @@ import com.dps.teknokent.exception.InvalidRequestException;
 import com.dps.teknokent.exception.ResourceNotFoundException;
 import com.dps.teknokent.repository.AppUserRepository;
 import com.dps.teknokent.repository.ProgramCoordinatorRepository;
+import com.dps.teknokent.security.AdminAccess;
 import com.dps.teknokent.util.ProgramCoordination;
 import com.dps.teknokent.util.Texts;
 
@@ -38,18 +38,6 @@ public class ProgramCoordinatorService {
 	@Transactional(readOnly = true)
 	public List<CoordinatorProgramResponse.CoordinatorRef> list(UUID actorId, UUID programId) {
 		return refs(programService.requireManagedProgram(actorId, programId));
-	}
-
-	/** Approved coordinators who could be added, i.e. not already running this program. */
-	@Transactional(readOnly = true)
-	public List<CoordinatorProgramResponse.CoordinatorRef> candidates(UUID actorId, UUID programId) {
-		Program program = programService.requireManagedProgram(actorId, programId);
-		Set<UUID> current = Set.copyOf(ProgramCoordination.coordinatorIds(program, programCoordinatorRepository));
-		return appUserRepository.findByPermissionAndStatusOrderByFullNameAsc(UserRole.COORDINATOR, UserAccountStatus.APPROVED)
-				.stream()
-				.filter(user -> !current.contains(user.getId()))
-				.map(user -> new CoordinatorProgramResponse.CoordinatorRef(user.getId(), user.getFullName(), false))
-				.toList();
 	}
 
 	@Transactional
@@ -73,13 +61,14 @@ public class ProgramCoordinatorService {
 			NewCoordinatorInput invite) {
 		requireAdmin(actorId);
 		Program program = programService.requireManagedProgram(actorId, programId);
-		AdminCoordinatorService.CheckedInvite checked =
-				adminCoordinatorService.checkNewProgramCoordinator(actorId, invite.email(), invite.fullName());
+		AdminCoordinatorService.CheckedInvite checked = adminCoordinatorService.checkNewProgramCoordinator(actorId,
+				invite.email(), invite.fullName());
 		if (checked.existing() != null
 				&& ProgramCoordination.coordinates(program, checked.existing().getId(), programCoordinatorRepository)) {
 			throw new InvalidRequestException("This coordinator already runs the program.");
 		}
-		return attach(actorId, program, adminCoordinatorService.coordinatorForNewProgram(actorId, checked, program.getName()));
+		return attach(actorId, program,
+				adminCoordinatorService.coordinatorForNewProgram(actorId, checked, program.getName()));
 	}
 
 	private List<CoordinatorProgramResponse.CoordinatorRef> attach(UUID actorId, Program program, AppUser user) {
@@ -120,9 +109,7 @@ public class ProgramCoordinatorService {
 
 	/** The admin assigns and changes a program's coordinators; coordinators only see them. */
 	private void requireAdmin(UUID actorId) {
-		if (!programService.requireCoordinatorOrAdmin(actorId).has(UserRole.ADMIN)) {
-			throw new InvalidRequestException("Only an admin changes a program's coordinators.");
-		}
+		AdminAccess.requireAdmin(appUserRepository.findById(actorId).orElse(null));
 	}
 
 	private List<CoordinatorProgramResponse.CoordinatorRef> refs(Program program) {

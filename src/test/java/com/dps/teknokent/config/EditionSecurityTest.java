@@ -7,11 +7,14 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.util.UUID;
+
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
 /**
@@ -49,6 +52,8 @@ class EditionSecurityTest {
 		void keepsTheTeknokentEndpointsBehindTheirUsualChecks() throws Exception {
 			mockMvc.perform(get("/api/assistant/bots")).andExpect(status().isUnauthorized());
 			mockMvc.perform(post("/api/auth/register/mentor")).andExpect(status().isUnauthorized());
+			mockMvc.perform(post("/api/admin/users/" + UUID.randomUUID() + "/delete"))
+					.andExpect(status().isUnauthorized());
 		}
 	}
 
@@ -65,6 +70,18 @@ class EditionSecurityTest {
 			mockMvc.perform(get("/api/assistant/bots")).andExpect(status().isNotFound());
 			mockMvc.perform(post("/api/auth/register/mentor")).andExpect(status().isNotFound());
 			mockMvc.perform(post("/api/auth/institution/otg/start").with(httpBasic("test", "test")))
+					.andExpect(status().isNotFound());
+		}
+
+		/** User deletion is Teknokent-only for now: ODTÜ answers 404 before anyone is looked up or changed. */
+		@Test
+		void closesUserDeletion() throws Exception {
+			String path = "/api/admin/users/" + UUID.randomUUID() + "/delete";
+			mockMvc.perform(
+					post(path).contentType(MediaType.APPLICATION_JSON).content("{\"confirmEmail\":\"a@b.test\"}"))
+					.andExpect(status().isNotFound());
+			mockMvc.perform(post(path).with(httpBasic("test", "test"))
+					.contentType(MediaType.APPLICATION_JSON).content("{\"confirmEmail\":\"a@b.test\"}"))
 					.andExpect(status().isNotFound());
 		}
 

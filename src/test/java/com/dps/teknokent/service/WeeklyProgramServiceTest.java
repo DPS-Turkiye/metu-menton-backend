@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.time.LocalDate;
@@ -23,7 +24,9 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import com.dps.teknokent.domain.AiFeature;
 import com.dps.teknokent.domain.DocumentKind;
+import com.dps.teknokent.domain.OcrMode;
 import com.dps.teknokent.domain.WeeklyProgramWarning;
 import com.dps.teknokent.dto.requests.ReadWeeklyProgramRequest;
 import com.dps.teknokent.dto.requests.ReplaceProgramPhasesRequest;
@@ -35,6 +38,7 @@ import com.dps.teknokent.entity.Program;
 import com.dps.teknokent.entity.ProgramPhase;
 import com.dps.teknokent.entity.ProgramWeek;
 import com.dps.teknokent.entity.StoredDocument;
+import com.dps.teknokent.exception.AiFeatureDisabledException;
 import com.dps.teknokent.exception.ConflictException;
 import com.dps.teknokent.exception.InvalidRequestException;
 import com.dps.teknokent.exception.ResourceNotFoundException;
@@ -46,8 +50,9 @@ import com.dps.teknokent.service.PdfDocumentTextExtractor.ExtractionResult;
 import com.dps.teknokent.util.JsonUtils;
 import com.dps.teknokent.util.MeetingSlotTimes;
 import com.dps.teknokent.util.ProgramCalendar;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 @ExtendWith(MockitoExtension.class)
 class WeeklyProgramServiceTest {
@@ -88,7 +93,7 @@ class WeeklyProgramServiceTest {
 	void setUp() {
 		service = new WeeklyProgramService(coordinatorProgramService, programWeekPlanService, programPhaseRepository,
 				programWeekRepository, storedDocumentRepository, objectStorage, textExtractor, piiRedactionService,
-				aiProviderClient, jsonUtils);
+				aiProviderClient, TestAiFeatures.allOn());
 		program = new Program();
 		program.setId(PROGRAM_ID);
 		program.setStartDate(START);
@@ -129,6 +134,18 @@ class WeeklyProgramServiceTest {
 		assertThat(proposal.notes()).containsExactly("9 Ocak Cumartesi — Demo Day");
 		assertThat(proposal.existing()).isEqualTo(new WeeklyProgramProposalResponse.Existing(0, 0,
 				ProgramCalendar.currentWeek(START, END, LocalDate.now(MeetingSlotTimes.APP_ZONE))));
+	}
+
+	@Test
+	void refusesBeforeReadingTheFileWhenSyllabusReadingIsSwitchedOff() {
+		editing();
+		WeeklyProgramService switchedOff = new WeeklyProgramService(coordinatorProgramService, programWeekPlanService,
+				programPhaseRepository, programWeekRepository, storedDocumentRepository, objectStorage, textExtractor,
+				piiRedactionService, aiProviderClient, TestAiFeatures.allOnExcept(AiFeature.SYLLABUS));
+
+		assertThatThrownBy(() -> switchedOff.read(COORDINATOR_ID, PROGRAM_ID, readRequest()))
+				.isInstanceOf(AiFeatureDisabledException.class);
+		verifyNoInteractions(storedDocumentRepository, objectStorage, textExtractor, aiProviderClient);
 	}
 
 	@Test
@@ -212,12 +229,13 @@ class WeeklyProgramServiceTest {
 	@Test
 	void anotherCoordinatorsUploadOrAnotherKindOfFileReadsAsMissing() {
 		editing();
-		when(storedDocumentRepository.findById(DOCUMENT_ID)).thenReturn(Optional.of(weeklyProgram(OTHER_COORDINATOR_ID)));
+		when(storedDocumentRepository.findById(DOCUMENT_ID))
+				.thenReturn(Optional.of(weeklyProgram(OTHER_COORDINATOR_ID)));
 		assertThatThrownBy(() -> service.read(COORDINATOR_ID, PROGRAM_ID, readRequest()))
 				.isInstanceOf(ResourceNotFoundException.class);
 
 		StoredDocument cv = weeklyProgram(COORDINATOR_ID);
-		cv.setKind(DocumentKind.CV.value());
+		cv.setKind(DocumentKind.CV);
 		when(storedDocumentRepository.findById(DOCUMENT_ID)).thenReturn(Optional.of(cv));
 		assertThatThrownBy(() -> service.read(COORDINATOR_ID, PROGRAM_ID, readRequest()))
 				.isInstanceOf(ResourceNotFoundException.class);
@@ -228,7 +246,8 @@ class WeeklyProgramServiceTest {
 	void theProgramsOwnFileCanBeReadAgainByACoCoordinator() {
 		program.setSyllabusDocumentId(DOCUMENT_ID);
 		editing();
-		when(storedDocumentRepository.findById(DOCUMENT_ID)).thenReturn(Optional.of(weeklyProgram(OTHER_COORDINATOR_ID)));
+		when(storedDocumentRepository.findById(DOCUMENT_ID))
+				.thenReturn(Optional.of(weeklyProgram(OTHER_COORDINATOR_ID)));
 		stubText("Hafta 1", "Hafta 1", 1);
 		when(aiProviderClient.weeklyProgram(anyString(), any(), any(), any())).thenReturn(lookAlikeAnswer());
 
@@ -258,7 +277,8 @@ class WeeklyProgramServiceTest {
 	@Test
 	void aPlanThatChangedSinceTheReadIsNotOverwritten() {
 		editing();
-		when(programPhaseRepository.findByProgramIdOrderByPositionAsc(PROGRAM_ID)).thenReturn(List.of(new ProgramPhase()));
+		when(programPhaseRepository.findByProgramIdOrderByPositionAsc(PROGRAM_ID))
+				.thenReturn(List.of(new ProgramPhase()));
 		when(programWeekRepository.findByProgramIdOrderByWeekNumberAsc(PROGRAM_ID)).thenReturn(List.of());
 
 		assertThatThrownBy(() -> service.save(COORDINATOR_ID, PROGRAM_ID, new SaveWeeklyProgramRequest(null,
@@ -299,15 +319,16 @@ class WeeklyProgramServiceTest {
 		service.save(COORDINATOR_ID, PROGRAM_ID, new SaveWeeklyProgramRequest(null, DOCUMENT_ID,
 				List.of(weekInput(1, "Yeni 1"), weekInput(3, "Yeni 3"), weekInput(4, "Yeni 4")), List.of(
 						new SaveWeeklyProgramRequest.PhaseInput("Problem", null, 1, 4),
-						new SaveWeeklyProgramRequest.PhaseInput("Pazar", null, 5, 6)), 1, 3, true));
+						new SaveWeeklyProgramRequest.PhaseInput("Pazar", null, 5, 6)),
+				1, 3, true));
 
-		@SuppressWarnings("unchecked")
+		@SuppressWarnings("unchecked") // ArgumentCaptor.forClass takes the raw collection class.
 		ArgumentCaptor<List<ReplaceProgramPhasesRequest.PhaseInput>> phases = ArgumentCaptor.forClass(List.class);
 		verify(coordinatorProgramService).writePhases(eq(PROGRAM_ID), phases.capture());
 		assertThat(phases.getValue()).extracting(ReplaceProgramPhasesRequest.PhaseInput::name)
 				.containsExactly("Eski Keşif", "Problem", "Pazar");
 		assertThat(phases.getValue().get(1).startDate()).isEqualTo(today);
-		@SuppressWarnings("unchecked")
+		@SuppressWarnings("unchecked") // ArgumentCaptor.forClass takes the raw collection class.
 		ArgumentCaptor<List<ReplaceProgramWeeksRequest.WeekInput>> weeks = ArgumentCaptor.forClass(List.class);
 		verify(programWeekPlanService).writeWeeks(eq(program), eq(COORDINATOR_ID), weeks.capture());
 		assertThat(weeks.getValue()).extracting(ReplaceProgramWeeksRequest.WeekInput::title)
@@ -328,7 +349,7 @@ class WeeklyProgramServiceTest {
 		service.save(COORDINATOR_ID, PROGRAM_ID, new SaveWeeklyProgramRequest(null, DOCUMENT_ID,
 				List.of(weekInput(9, "Yeni 9")), List.of(), 0, 2, true));
 
-		@SuppressWarnings("unchecked")
+		@SuppressWarnings("unchecked") // ArgumentCaptor.forClass takes the raw collection class.
 		ArgumentCaptor<List<ReplaceProgramWeeksRequest.WeekInput>> weeks = ArgumentCaptor.forClass(List.class);
 		verify(programWeekPlanService).writeWeeks(eq(program), eq(COORDINATOR_ID), weeks.capture());
 		assertThat(weeks.getValue()).extracting(ReplaceProgramWeeksRequest.WeekInput::title)
@@ -368,7 +389,8 @@ class WeeklyProgramServiceTest {
 				List.of(phase("Keşif", START, LocalDate.of(2026, 11, 9)),
 						phase("Şimdiki", LocalDate.of(2026, 11, 10), LocalDate.of(2026, 11, 30))),
 				List.of(
-						new ReplaceProgramPhasesRequest.PhaseInput("Yeni geçmiş", START, LocalDate.of(2026, 11, 2), null, null),
+						new ReplaceProgramPhasesRequest.PhaseInput("Yeni geçmiş", START, LocalDate.of(2026, 11, 2),
+								null, null),
 						new ReplaceProgramPhasesRequest.PhaseInput("Yeni şimdiki", LocalDate.of(2026, 11, 3),
 								LocalDate.of(2026, 11, 23), null, null),
 						new ReplaceProgramPhasesRequest.PhaseInput("Yeni sonraki", LocalDate.of(2026, 11, 24),
@@ -388,8 +410,9 @@ class WeeklyProgramServiceTest {
 	}
 
 	private void stubText(String raw, String redacted, int pages) {
-		when(objectStorage.get("weekly-key")).thenReturn(new byte[] { 1 });
-		when(textExtractor.extract(any(), eq("auto"))).thenReturn(new ExtractionResult(raw, pages, List.of(), false));
+		when(objectStorage.require("weekly-key")).thenReturn(new byte[] { 1 });
+		when(textExtractor.extract(any(), eq(OcrMode.AUTO)))
+				.thenReturn(new ExtractionResult(raw, pages, List.of(), false));
 		when(piiRedactionService.redact(raw)).thenReturn(new RedactionResult(redacted, Map.of(), 0));
 	}
 
@@ -401,7 +424,7 @@ class WeeklyProgramServiceTest {
 		StoredDocument document = new StoredDocument();
 		document.setId(DOCUMENT_ID);
 		document.setUserId(ownerId);
-		document.setKind(DocumentKind.WEEKLY_PROGRAM.value());
+		document.setKind(DocumentKind.WEEKLY_PROGRAM);
 		document.setS3Key("weekly-key");
 		return document;
 	}
