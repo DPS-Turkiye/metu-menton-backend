@@ -75,6 +75,7 @@ public class AiProviderClient {
 	 */
 	public JsonNode weeklyProgram(String redactedDocumentText, LocalDate programStart, LocalDate programEnd,
 			JsonNode schema) {
+		aiFeatures.require(AiFeature.SYLLABUS);
 		Integer totalWeeks = ProgramCalendar.totalWeeks(programStart, programEnd);
 		String instructions = """
 				The supplied text is a program's week-by-week schedule (often a table with one row per week). Read it
