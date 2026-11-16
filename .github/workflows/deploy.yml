@@ -1,9 +1,9 @@
 name: Deploy
 
+# Disabled in METUMenton: the steps below still target Teknokent's AWS (ECR, EC2, SSM).
+# Manual-only with a hard stop until it is rewritten for ODTÜ's own servers.
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_dispatch:
 
 permissions:
   id-token: write
@@ -18,6 +18,11 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
+      - name: Hard stop
+        run: |
+          echo "::error::No ODTÜ deploy target yet; this workflow must not deploy to Teknokent AWS"
+          exit 1
+
       - name: Checkout
         uses: actions/checkout@v7
 
