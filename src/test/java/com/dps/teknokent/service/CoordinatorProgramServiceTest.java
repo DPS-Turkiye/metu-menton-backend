@@ -20,6 +20,7 @@ import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.IntStream;
@@ -54,6 +55,7 @@ import com.dps.teknokent.dto.requests.ReplaceProgramPhasesRequest;
 import com.dps.teknokent.dto.requests.UpdateProgramDetailsRequest;
 import com.dps.teknokent.dto.responses.CoordinatorOverviewResponse;
 import com.dps.teknokent.dto.responses.CoordinatorProgramResponse;
+import com.dps.teknokent.dto.responses.ProgramCountsResponse;
 import com.dps.teknokent.dto.responses.ProgramEventResponse;
 import com.dps.teknokent.entity.ActionItem;
 import com.dps.teknokent.entity.AppUser;
@@ -133,6 +135,8 @@ class CoordinatorProgramServiceTest {
 	private MentorshipRequestRepository mentorshipRequestRepository;
 	@Mock
 	private TeamChangeRequestRepository teamChangeRequestRepository;
+	@Mock
+	private ProgramParticipantCounts participantCounts;
 	@InjectMocks
 	private CoordinatorProgramService service;
 
@@ -191,7 +195,20 @@ class CoordinatorProgramServiceTest {
 		assertThat(summary.currentPhase().name()).isEqualTo("Mentorluk dönemi");
 		assertThat(summary.currentWeek()).isEqualTo(6);
 		assertThat(summary.totalWeeks()).isEqualTo(16);
+		assertThat(summary.counts()).isEqualTo(ProgramCountsResponse.NONE);
 		verify(programRepository, never()).findAllByOrderByCreatedAtDesc();
+	}
+
+	@Test
+	void aPeerProgramsCardCarriesItsParticipantCounts() {
+		when(domainLookupService.requireUser(COORDINATOR_ID)).thenReturn(user(COORDINATOR_ID, UserRole.COORDINATOR));
+		Program program = program(COORDINATOR_ID);
+		program.setProgramType(ProgramType.PEER_MENTORING);
+		when(programRepository.findByCreatedByOrderByCreatedAtDesc(COORDINATOR_ID)).thenReturn(List.of(program));
+		ProgramCountsResponse counts = new ProgramCountsResponse(new ProgramCountsResponse.Peer(312, 38, 14, 2), null);
+		when(participantCounts.of(List.of(program))).thenReturn(Map.of(program.getId(), counts));
+
+		assertThat(service.list(COORDINATOR_ID).getFirst().counts()).isEqualTo(counts);
 	}
 
 	@Test

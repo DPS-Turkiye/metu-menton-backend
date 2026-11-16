@@ -84,7 +84,7 @@ public class ProgramOfficeHoursService {
 	/** PostgreSQL takes at most 32767 bind parameters, so long id lists are looked up in slices. */
 	static final int LOOKUP_CHUNK = 1000;
 
-	private static final Set<OfficeHoursRequestStatus> AWAITING_DECISION = Set.of(OfficeHoursRequestStatus.PENDING,
+	static final Set<OfficeHoursRequestStatus> AWAITING_DECISION = Set.of(OfficeHoursRequestStatus.PENDING,
 			OfficeHoursRequestStatus.MORE_INFO_REQUESTED);
 	private static final Locale TURKISH = Locale.forLanguageTag("tr");
 	/** Names and faculties in Turkish alphabetical order ("Çağrı" after "Can"). */

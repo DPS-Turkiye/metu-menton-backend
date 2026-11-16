@@ -10,13 +10,13 @@ Never commit `.env`: it holds real keys.
 
 | Variable | Purpose |
 |---|---|
-| `APP_EDITION` | `TEKNOKENT` (default) or `ODTU`. Leave it out rather than blank; blank stops the app. |
+| `APP_EDITION` | `TEKNOKENT` or `ODTU`, required: a missing, blank or unknown value stops the app. |
 | `SPRING_PROFILES_ACTIVE` | `dev` locally (permissive CORS for localhost). |
 | `SERVER_PORT`, `APP_PORT` | Port inside the container, and on the host for compose. |
 | `SECURITY_USERNAME`, `SECURITY_PASSWORD` | The frontend proxy's service credentials (HTTP Basic). |
 | `SWAGGER_ENABLED` | `true` serves the API docs at `/api/docs`. Off in production. |
 | `APP_PUBLIC_URL` | The frontend's address, used in e-mail links. |
-| `APP_VERSION` | Set by the deploy workflow on released images; turns on the placeholder-secret check. |
+| `APP_VERSION` | Set by the deploy workflow on released images (`--build-arg APP_VERSION=<tag>`); a release refuses placeholder secrets even on the `dev` profile, and any build outside `dev` refuses them too. |
 
 ## Data
 
@@ -36,7 +36,7 @@ Never commit `.env`: it holds real keys.
 | `REGISTRATION_ALLOWED_EMAIL_DOMAINS` | Comma-separated domains allowed to sign up (subdomains count); empty allows any. |
 | `INSTITUTION_LOGIN_DEV_STUB` | `true` replaces the ODTÜ login with a persona picker. Local only. |
 | `OTG_LOGIN_ENABLED`, `OTG_ISSUER`, `OTG_USERINFO_URL`, `OTG_CLIENT_ID`, `OTG_CLIENT_SECRET`, `OTG_REDIRECT_URI` | "OTG ile giriş yap". The secret is server-side only. |
-| `LTI_PLATFORM_ISSUER`, `LTI_CLIENT_ID`, `LTI_DEPLOYMENT_IDS`, `LTI_PLATFORM_AUTH_URL`, `LTI_PLATFORM_JWKS_URL`, `LTI_TOOL_LAUNCH_URL`, `LTI_TOOL_PRIVATE_KEY` | Office hours from Moodle over LTI 1.3; an empty issuer keeps LTI off. |
+| `LTI_PLATFORM_ISSUER`, `LTI_CLIENT_ID`, `LTI_DEPLOYMENT_IDS`, `LTI_PLATFORM_AUTH_URL`, `LTI_PLATFORM_JWKS_URL`, `LTI_TOOL_LAUNCH_URL`, `LTI_TOOL_PRIVATE_KEY` | Office hours from Moodle over LTI 1.3; an empty issuer keeps LTI off. Once LTI is configured, an empty `LTI_TOOL_PRIVATE_KEY` stops start-up outside the `dev` profile. |
 
 ## AI
 
@@ -45,8 +45,8 @@ Never commit `.env`: it holds real keys.
 | `AI_PROVIDER` | `openai` (default) or `openrouter`; anything else stops start-up. |
 | `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `OPENAI_MODEL`, `OPENAI_EMBEDDING_MODEL` | OpenAI. |
 | `OPENROUTER_API_KEY`, `OPENROUTER_BASE_URL`, `OPENROUTER_MODEL`, `OPENROUTER_REPORT_MODEL`, `OPENROUTER_EMBEDDING_MODEL`, `OPENROUTER_APP_NAME` | OpenRouter. |
-| `AI_PROFILE_PARSING_ENABLED`, `AI_SYLLABUS_ENABLED`, `AI_MATCHING_ENABLED`, `AI_MEETING_REPORT_ENABLED`, `AI_TASK_HANDOVER_ENABLED` | Per-feature switches, all on when unset (see [AI features](ai.md)). |
-| `MATCHING_PGVECTOR_ENABLED` | Use the pgvector shortlist before ranking. |
+| `AI_PROFILE_PARSING_ENABLED`, `AI_SYLLABUS_ENABLED`, `AI_MATCHING_ENABLED`, `AI_MEETING_REPORT_ENABLED`, `AI_TASK_HANDOVER_ENABLED` | Per-feature switches; unset follows the edition: on in TEKNOKENT, locked off in ODTU, where `true` stops start-up (see [AI features](ai.md)). |
+| `MATCHING_PGVECTOR_ENABLED` | Use the pgvector shortlist before ranking; unset follows AI matching (locked off in ODTU). |
 | `TESSERACT_EXECUTABLE`, `TESSERACT_LANGUAGES`, `TESSERACT_TIMEOUT_SECONDS` | Local OCR for scanned PDFs; the image ships Turkish and English. |
 
 ## Meetings, realtime and notifications
