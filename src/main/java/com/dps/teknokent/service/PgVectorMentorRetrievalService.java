@@ -9,7 +9,6 @@ import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
@@ -22,14 +21,12 @@ import lombok.RequiredArgsConstructor;
 public class PgVectorMentorRetrievalService {
 	private final JdbcTemplate jdbcTemplate;
 	private final AiProviderClient aiProviderClient;
-
-	@Value("${matching.pgvector.enabled:true}")
-	private boolean enabled;
+	private final AiFeatures aiFeatures;
 
 	public List<MentorProfileResponse> shortlist(
 			String queryText, List<MentorProfileResponse> mentors, String provider, String model, int limit)
 			throws Exception {
-		if (!enabled) {
+		if (!aiFeatures.pgvectorEnabled()) {
 			throw new IllegalStateException("pgvector matching is disabled");
 		}
 		if (mentors.isEmpty()) {

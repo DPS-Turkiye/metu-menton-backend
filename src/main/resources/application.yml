@@ -86,13 +86,14 @@ springdoc:
 
 ai:
   provider: ${AI_PROVIDER:openai}
-  # One switch per feature that sends data to the AI provider; all on unless a deployment turns one off.
+  # One switch per feature that sends data to the AI provider. Unset follows the edition (AiFeatures): on in
+  # TEKNOKENT, off in ODTU, where switching one on stops the startup.
   features:
-    profile-parsing: ${AI_PROFILE_PARSING_ENABLED:true}
-    syllabus: ${AI_SYLLABUS_ENABLED:true}
-    matching: ${AI_MATCHING_ENABLED:true}
-    meeting-report: ${AI_MEETING_REPORT_ENABLED:true}
-    task-handover: ${AI_TASK_HANDOVER_ENABLED:true}
+    profile-parsing: ${AI_PROFILE_PARSING_ENABLED:}
+    syllabus: ${AI_SYLLABUS_ENABLED:}
+    matching: ${AI_MATCHING_ENABLED:}
+    meeting-report: ${AI_MEETING_REPORT_ENABLED:}
+    task-handover: ${AI_TASK_HANDOVER_ENABLED:}
   openai:
     api-key: ${OPENAI_API_KEY:}
     base-url: ${OPENAI_BASE_URL:https://api.openai.com/v1}
@@ -107,9 +108,10 @@ ai:
     app-name: ${OPENROUTER_APP_NAME:TeamTNT Spring Backend}
 
 app:
-  # Which deployment this is: TEKNOKENT (startup mentoring, the default) or ODTU (office hours + İŞKUR). Each
-  # edition answers 404 for the other one's endpoints and accepts only its own program types.
-  edition: ${APP_EDITION:TEKNOKENT}
+  # Which deployment this is: TEKNOKENT (startup mentoring) or ODTU (office hours + İŞKUR). Each edition answers 404
+  # for the other one's endpoints and accepts only its own program types. No default: a missing value stops the
+  # start-up, so a server that loses the variable never comes up as the other edition.
+  edition: ${APP_EDITION:}
   firebase:
     project-id: ${FIREBASE_PROJECT_ID:}
     credentials-json: ${FIREBASE_CREDENTIALS_JSON:}
@@ -178,7 +180,8 @@ profile-parsing:
 
 matching:
   pgvector:
-    enabled: ${MATCHING_PGVECTOR_ENABLED:true}
+    # Unset follows AI matching: on in TEKNOKENT, off in ODTU (where switching it on stops the startup).
+    enabled: ${MATCHING_PGVECTOR_ENABLED:}
 
 meeting:
   provider:

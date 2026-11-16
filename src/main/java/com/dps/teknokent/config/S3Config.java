@@ -21,7 +21,7 @@ import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 public class S3Config {
 
 	@Bean
-	S3Client s3Client(S3Properties properties, @Value("${app.edition:TEKNOKENT}") String edition) {
+	S3Client s3Client(S3Properties properties, @Value("${app.edition:}") String edition) {
 		requireOwnStoreFor(Edition.parse(edition), properties);
 		// The SDK default has no cap on a whole call (retries included). 30 s, not less: the backend itself uploads
 		// documents of up to 50 MB.
