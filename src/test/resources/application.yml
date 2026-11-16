@@ -32,6 +32,7 @@ meeting:
   transcript-bot:
     enabled: false
 app:
+  edition: TEKNOKENT
   notifications:
     reminders:
       enabled: false

@@ -10,7 +10,7 @@ Never commit `.env`: it holds real keys.
 
 | Variable | Purpose |
 |---|---|
-| `APP_EDITION` | `TEKNOKENT` (default) or `ODTU`. Leave it out rather than blank; blank stops the app. |
+| `APP_EDITION` | `TEKNOKENT` or `ODTU`, required: a missing, blank or unknown value stops the app. |
 | `SPRING_PROFILES_ACTIVE` | `dev` locally (permissive CORS for localhost). |
 | `SERVER_PORT`, `APP_PORT` | Port inside the container, and on the host for compose. |
 | `SECURITY_USERNAME`, `SECURITY_PASSWORD` | The frontend proxy's service credentials (HTTP Basic). |
