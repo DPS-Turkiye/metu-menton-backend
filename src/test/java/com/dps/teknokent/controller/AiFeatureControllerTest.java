@@ -14,9 +14,10 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import com.dps.teknokent.config.SecurityConfig;
 import com.dps.teknokent.service.AiFeatures;
+import com.dps.teknokent.service.EditionService;
 
 @WebMvcTest(AiFeatureController.class)
-@Import({ SecurityConfig.class, AiFeatures.class })
+@Import({ SecurityConfig.class, AiFeatures.class, EditionService.class })
 @TestPropertySource(properties = { "ai.features.syllabus=false", "ai.features.task-handover=false" })
 class AiFeatureControllerTest {
 

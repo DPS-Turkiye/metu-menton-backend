@@ -10,7 +10,7 @@ Never commit `.env`: it holds real keys.
 
 | Variable | Purpose |
 |---|---|
-| `APP_EDITION` | `TEKNOKENT` (default) or `ODTU`. Leave it out rather than blank; blank stops the app. |
+| `APP_EDITION` | `TEKNOKENT` or `ODTU`, required: a missing, blank or unknown value stops the app. |
 | `SPRING_PROFILES_ACTIVE` | `dev` locally (permissive CORS for localhost). |
 | `SERVER_PORT`, `APP_PORT` | Port inside the container, and on the host for compose. |
 | `SECURITY_USERNAME`, `SECURITY_PASSWORD` | The frontend proxy's service credentials (HTTP Basic). |
@@ -45,8 +45,8 @@ Never commit `.env`: it holds real keys.
 | `AI_PROVIDER` | `openai` (default) or `openrouter`; anything else stops start-up. |
 | `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `OPENAI_MODEL`, `OPENAI_EMBEDDING_MODEL` | OpenAI. |
 | `OPENROUTER_API_KEY`, `OPENROUTER_BASE_URL`, `OPENROUTER_MODEL`, `OPENROUTER_REPORT_MODEL`, `OPENROUTER_EMBEDDING_MODEL`, `OPENROUTER_APP_NAME` | OpenRouter. |
-| `AI_PROFILE_PARSING_ENABLED`, `AI_SYLLABUS_ENABLED`, `AI_MATCHING_ENABLED`, `AI_MEETING_REPORT_ENABLED`, `AI_TASK_HANDOVER_ENABLED` | Per-feature switches, all on when unset (see [AI features](ai.md)). |
-| `MATCHING_PGVECTOR_ENABLED` | Use the pgvector shortlist before ranking. |
+| `AI_PROFILE_PARSING_ENABLED`, `AI_SYLLABUS_ENABLED`, `AI_MATCHING_ENABLED`, `AI_MEETING_REPORT_ENABLED`, `AI_TASK_HANDOVER_ENABLED` | Per-feature switches; unset follows the edition: on in TEKNOKENT, locked off in ODTU, where `true` stops start-up (see [AI features](ai.md)). |
+| `MATCHING_PGVECTOR_ENABLED` | Use the pgvector shortlist before ranking; unset follows AI matching (locked off in ODTU). |
 | `TESSERACT_EXECUTABLE`, `TESSERACT_LANGUAGES`, `TESSERACT_TIMEOUT_SECONDS` | Local OCR for scanned PDFs; the image ships Turkish and English. |
 
 ## Meetings, realtime and notifications

@@ -36,7 +36,8 @@ import jakarta.persistence.EntityManager;
 // it, which the unpooled embedded database has already closed.
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @Import({ WeeklyProgramService.class, CoordinatorProgramService.class, ProgramWeekPlanService.class,
-		DomainLookupService.class, LocalPiiRedactionService.class, AiFeatures.class })
+		DomainLookupService.class, LocalPiiRedactionService.class, AiFeatures.class,
+		EditionService.class })
 class WeeklyProgramPersistenceTest {
 
 	// Starts in the future, so the save never meets "keep the past".

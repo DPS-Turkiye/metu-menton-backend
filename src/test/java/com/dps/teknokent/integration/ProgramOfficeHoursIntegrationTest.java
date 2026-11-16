@@ -173,8 +173,9 @@ class ProgramOfficeHoursIntegrationTest {
 		coordinator.setStatus(UserAccountStatus.PENDING);
 		appUsers.saveAndFlush(coordinator);
 
-		call(list(), coordinator).andExpect(status().isBadRequest());
-		call(detail(), coordinator).andExpect(status().isBadRequest());
+		// The shared program guard refuses an account that is not approved, before the program is looked at.
+		call(list(), coordinator).andExpect(status().isForbidden());
+		call(detail(), coordinator).andExpect(status().isForbidden());
 	}
 
 	@Test

@@ -45,4 +45,12 @@ class EditionTest {
 	void refusesAMissingEdition() {
 		assertThatThrownBy(() -> Edition.parse(null)).isInstanceOf(IllegalStateException.class);
 	}
+
+	@Test
+	void onlyTeknokentRunsAiFeatures() {
+		for (AiFeature feature : AiFeature.values()) {
+			assertThat(Edition.TEKNOKENT.allowsAi(feature)).isTrue();
+			assertThat(Edition.ODTU.allowsAi(feature)).isFalse();
+		}
+	}
 }
