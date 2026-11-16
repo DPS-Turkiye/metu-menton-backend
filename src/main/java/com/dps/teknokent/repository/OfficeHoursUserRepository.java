@@ -25,11 +25,14 @@ public interface OfficeHoursUserRepository extends JpaRepository<OfficeHoursUser
 	@Query("select person from OfficeHoursUser person where person.id = :id")
 	Optional<OfficeHoursUser> findForUpdate(@Param("id") UUID id);
 
-	/** The Menton side of {@link #insertIfAbsent}: two first visits at once leave one row for the account. */
+	/**
+	 * The Menton side of {@link #insertIfAbsent}: two first visits at once leave one row for the account. The
+	 * language is only Moodle's; a Menton account's mail follows app_user's.
+	 */
 	@Modifying
 	@Query(value = """
-			INSERT INTO office_hours_user (id, app_user_id, full_name, created_at, last_launch_at)
-			VALUES (:id, :appUserId, :fullName, :now, :now)
+			INSERT INTO office_hours_user (id, app_user_id, full_name, preferred_language, created_at, last_launch_at)
+			VALUES (:id, :appUserId, :fullName, 'TR', :now, :now)
 			ON CONFLICT DO NOTHING
 			""", nativeQuery = true)
 	int insertForAccountIfAbsent(@Param("id") UUID id, @Param("appUserId") UUID appUserId,
@@ -41,8 +44,8 @@ public interface OfficeHoursUserRepository extends JpaRepository<OfficeHoursUser
 	 */
 	@Modifying
 	@Query(value = """
-			INSERT INTO office_hours_user (id, issuer, subject, full_name, created_at, last_launch_at)
-			VALUES (:id, :issuer, :subject, :fullName, :now, :now)
+			INSERT INTO office_hours_user (id, issuer, subject, full_name, preferred_language, created_at, last_launch_at)
+			VALUES (:id, :issuer, :subject, :fullName, 'TR', :now, :now)
 			ON CONFLICT (issuer, subject) DO NOTHING
 			""", nativeQuery = true)
 	int insertIfAbsent(@Param("id") UUID id, @Param("issuer") String issuer, @Param("subject") String subject,
