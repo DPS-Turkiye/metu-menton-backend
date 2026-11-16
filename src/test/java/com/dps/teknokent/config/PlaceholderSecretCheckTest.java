@@ -43,19 +43,73 @@ class PlaceholderSecretCheckTest {
 		assertThatCode(() -> new PlaceholderSecretCheck(environment)).doesNotThrowAnyException();
 	}
 
-	// docker compose, dev/editions, the tests and CI all run with the template's values.
+	// docker compose and dev/editions run the template's values with the dev profile it sets.
 	@Test
-	void aLocalBuildStartsWithThePlaceholdersFromTheTemplate() {
-		MockEnvironment placeholders = new MockEnvironment()
-				.withProperty("spring.security.user.password", "change-me")
-				.withProperty("spring.datasource.password", "change-me")
-				.withProperty("app.realtime.token-secret", "change-me");
+	void aLocalBuildOnTheDevProfileStartsWithThePlaceholdersFromTheTemplate() {
+		MockEnvironment placeholders = placeholders();
+		placeholders.setActiveProfiles("dev");
 
 		assertThatCode(() -> new PlaceholderSecretCheck(placeholders)).doesNotThrowAnyException();
 		assertThatCode(() -> new PlaceholderSecretCheck(placeholders.withProperty("APP_VERSION", "local")))
 				.doesNotThrowAnyException();
 		assertThatCode(() -> new PlaceholderSecretCheck(placeholders.withProperty("APP_VERSION", " ")))
 				.doesNotThrowAnyException();
+	}
+
+	// An image built by hand on a server leaves APP_VERSION at "local"; only the dev profile may keep placeholders.
+	@Test
+	void aBuildWithoutAVersionOutsideTheDevProfileRefusesThePlaceholders() {
+		assertThatThrownBy(() -> new PlaceholderSecretCheck(placeholders()))
+				.isInstanceOf(IllegalStateException.class)
+				.hasMessageContaining("without APP_VERSION")
+				.hasMessageContaining("DATABASE_PASSWORD, REALTIME_TOKEN_SECRET, SECURITY_PASSWORD")
+				.hasMessageNotContaining("change-me");
+		MockEnvironment test = placeholders().withProperty("APP_VERSION", "local");
+		test.setActiveProfiles("test");
+		assertThatThrownBy(() -> new PlaceholderSecretCheck(test)).isInstanceOf(IllegalStateException.class);
+	}
+
+	@Test
+	void aBuildWithoutAVersionOutsideTheDevProfileStartsWithRealSecrets() {
+		assertThatCode(() -> new PlaceholderSecretCheck(realSecrets())).doesNotThrowAnyException();
+	}
+
+	@Test
+	void aReleaseRefusesThePlaceholdersEvenOnTheDevProfile() {
+		MockEnvironment release = placeholders().withProperty("APP_VERSION", "v1.42.0");
+		release.setActiveProfiles("dev");
+
+		assertThatThrownBy(() -> new PlaceholderSecretCheck(release))
+				.isInstanceOf(IllegalStateException.class)
+				.hasMessageContaining("v1.42.0");
+	}
+
+	@Test
+	void devNextToAnotherProfileIsNoDevMachine() {
+		MockEnvironment placeholders = placeholders();
+		placeholders.setActiveProfiles("prod", "dev");
+
+		assertThatThrownBy(() -> new PlaceholderSecretCheck(placeholders)).isInstanceOf(IllegalStateException.class);
+	}
+
+	@Test
+	void aBlankBasicPasswordOrRealtimeSecretIsRefusedButABlankDatabasePasswordIsNot() {
+		MockEnvironment blanks = new MockEnvironment()
+				.withProperty("spring.security.user.password", " ")
+				.withProperty("spring.datasource.password", "")
+				.withProperty("app.realtime.token-secret", "");
+
+		assertThat(PlaceholderSecretCheck.placeholderSecrets(blanks))
+				.containsExactly("REALTIME_TOKEN_SECRET", "SECURITY_PASSWORD");
+		assertThatThrownBy(() -> new PlaceholderSecretCheck(blanks))
+				.hasMessageContaining("REALTIME_TOKEN_SECRET, SECURITY_PASSWORD");
+	}
+
+	private static MockEnvironment placeholders() {
+		return new MockEnvironment()
+				.withProperty("spring.security.user.password", "change-me")
+				.withProperty("spring.datasource.password", "change-me")
+				.withProperty("app.realtime.token-secret", "change-me");
 	}
 
 	private static MockEnvironment realSecrets() {

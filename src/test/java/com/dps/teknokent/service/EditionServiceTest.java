@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
 import com.dps.teknokent.domain.Edition;
 import com.dps.teknokent.domain.ProgramType;
@@ -21,6 +22,17 @@ class EditionServiceTest {
 	@Test
 	void refusesABlankEditionAtStartup() {
 		assertThatThrownBy(() -> new EditionService("")).isInstanceOf(IllegalStateException.class);
+	}
+
+	// No default: a server that loses APP_EDITION must not come up as the other edition.
+	@Test
+	void anApplicationWithoutAnEditionDoesNotStart() {
+		ApplicationContextRunner runner = new ApplicationContextRunner().withUserConfiguration(EditionService.class);
+
+		runner.run(context -> assertThat(context).hasFailed()
+				.getFailure().rootCause().hasMessageContaining("APP_EDITION").hasMessageContaining("missing"));
+		runner.withPropertyValues("app.edition=ODTU")
+				.run(context -> assertThat(context.getBean(EditionService.class).current()).isEqualTo(Edition.ODTU));
 	}
 
 	@Test
