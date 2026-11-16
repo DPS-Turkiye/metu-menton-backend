@@ -19,8 +19,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.TestPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import com.dps.teknokent.config.SecurityConfig;
@@ -89,9 +89,9 @@ class BadgeControllerTest {
 		when(badgeService.awardGate(ACTOR, PROGRAM, STUDENT)).thenReturn(row(GateBadgeState.ACTIVE));
 
 		mockMvc.perform(post("/api/coordinator/programs/" + PROGRAM + "/badges/awards")
-						.with(user("proxy"))
-						.contentType(MediaType.APPLICATION_JSON)
-						.content("{\"actorId\":\"" + ACTOR + "\",\"userId\":\"" + STUDENT + "\"}"))
+				.with(user("proxy"))
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"actorId\":\"" + ACTOR + "\",\"userId\":\"" + STUDENT + "\"}"))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.state").value("ACTIVE"));
 		verify(badgeService).awardGate(ACTOR, PROGRAM, STUDENT);
@@ -100,29 +100,52 @@ class BadgeControllerTest {
 	@Test
 	void aRevokeWithoutAReasonNeverReachesTheService() throws Exception {
 		mockMvc.perform(post("/api/coordinator/programs/" + PROGRAM + "/badges/awards/" + AWARD + "/revoke")
-						.with(user("proxy"))
-						.contentType(MediaType.APPLICATION_JSON)
-						.content("{\"actorId\":\"" + ACTOR + "\",\"reason\":\"  \"}"))
+				.with(user("proxy"))
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"actorId\":\"" + ACTOR + "\",\"reason\":\"  \"}"))
 				.andExpect(status().isBadRequest());
 		verifyNoInteractions(badgeService);
 	}
 
 	@Test
 	void filtersTheRosterByState() throws Exception {
-		when(badgeService.roster(ACTOR, PROGRAM, GateBadgeState.ACTIVE)).thenReturn(List.of(row(GateBadgeState.ACTIVE)));
+		when(badgeService.roster(ACTOR, PROGRAM, GateBadgeState.ACTIVE))
+				.thenReturn(List.of(row(GateBadgeState.ACTIVE)));
 
 		mockMvc.perform(get("/api/coordinator/programs/" + PROGRAM + "/badges/roster")
-						.param("actorId", ACTOR.toString())
-						.param("state", "ACTIVE")
-						.with(user("proxy")))
+				.param("actorId", ACTOR.toString())
+				.param("state", "ACTIVE")
+				.with(user("proxy")))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$[0].userId").value(STUDENT.toString()));
 		verify(badgeService).roster(any(), any(), any());
 	}
 
+	@Test
+	void sendsEachRostersProfileAsKatilimcilarReadsIt() throws Exception {
+		GateBadgeRowResponse plain = row(GateBadgeState.ACTIVE);
+		GateBadgeRowResponse withProfile = new GateBadgeRowResponse(plain.userId(), plain.fullName(), plain.email(),
+				plain.programId(), plain.programName(), plain.state(), plain.awardId(), plain.source(),
+				plain.awardedAt(), plain.revokedAt(), plain.reason(), plain.training(),
+				new GateBadgeRowResponse.Profile("Endüstri Mühendisliği", 4, true,
+						List.of(com.dps.teknokent.domain.PeerTopicCategory.CAREER_INTERNSHIP), 3, 4));
+		when(badgeService.roster(ACTOR, PROGRAM, null)).thenReturn(List.of(withProfile));
+
+		mockMvc.perform(get("/api/coordinator/programs/" + PROGRAM + "/badges/roster")
+				.param("actorId", ACTOR.toString())
+				.with(user("proxy")))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$[0].profile.department").value("Endüstri Mühendisliği"))
+				.andExpect(jsonPath("$[0].profile.classYear").value(4))
+				.andExpect(jsonPath("$[0].profile.mentorProfile").value(true))
+				.andExpect(jsonPath("$[0].profile.categories[0]").value("CAREER_INTERNSHIP"))
+				.andExpect(jsonPath("$[0].profile.activeMentees").value(3))
+				.andExpect(jsonPath("$[0].profile.menteeCapacity").value(4));
+	}
+
 	private static GateBadgeRowResponse row(GateBadgeState state) {
 		return new GateBadgeRowResponse(STUDENT, "Zeynep Öğrenci", "zeynep@odtu-dev.invalid", PROGRAM,
 				"İŞKUR 2026 Bahar", state, AWARD, BadgeSource.COORDINATOR, Instant.parse("2026-11-08T10:00:00Z"),
-				null, null, GateBadgeRowResponse.Training.NONE);
+				null, null, GateBadgeRowResponse.Training.NONE, null);
 	}
 }

@@ -13,13 +13,16 @@ import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import com.dps.teknokent.domain.UserAccountStatus;
 import com.dps.teknokent.domain.UserRole;
 import com.dps.teknokent.entity.AppUser;
 import com.dps.teknokent.entity.Program;
 import com.dps.teknokent.entity.ProgramCoordinator;
+import com.dps.teknokent.entity.ProgramStartup;
 import com.dps.teknokent.repository.AppUserRepository;
 import com.dps.teknokent.repository.ProgramCoordinatorRepository;
 import com.dps.teknokent.repository.ProgramRepository;
+import com.dps.teknokent.repository.ProgramStartupRepository;
 
 /** A program is run by its creator plus any coordinators added to it; these answer "who runs what". */
 public final class ProgramCoordination {
@@ -30,6 +33,20 @@ public final class ProgramCoordination {
 	public static boolean coordinates(Program program, UUID userId, ProgramCoordinatorRepository coordinators) {
 		return program.getCreatedBy().equals(userId)
 				|| coordinators.existsByProgramIdAndUserId(program.getId(), userId);
+	}
+
+	/** Whether the user runs one of the programs the startup is in. */
+	public static boolean coordinatesStartup(
+			UUID organizationId,
+			UUID userId,
+			ProgramStartupRepository startups,
+			ProgramRepository programs,
+			ProgramCoordinatorRepository coordinators) {
+		List<UUID> programIds = startups.findByOrganizationIdOrderByCreatedAtAsc(organizationId).stream()
+				.map(ProgramStartup::getProgramId)
+				.toList();
+		return !programIds.isEmpty() && programs.findAllById(programIds).stream()
+				.anyMatch(program -> coordinates(program, userId, coordinators));
 	}
 
 	/** Programs the user created or was added to, newest first. */
@@ -88,7 +105,7 @@ public final class ProgramCoordination {
 						Comparator.nullsLast(Comparator.naturalOrder())))
 				.forEach(row -> {
 					List<UUID> ids = idsByProgram.get(row.getProgramId());
-					if (!ids.contains(row.getUserId())) {
+					if (ids != null && !ids.contains(row.getUserId())) {
 						ids.add(row.getUserId());
 					}
 				});
@@ -98,9 +115,10 @@ public final class ProgramCoordination {
 				.collect(Collectors.toMap(AppUser::getId, Function.identity()));
 		Map<UUID, List<AppUser>> runners = new HashMap<>();
 		for (Program program : programs) {
-			List<AppUser> known = idsByProgram.get(program.getId()).stream()
+			List<AppUser> known = idsByProgram.getOrDefault(program.getId(), List.of()).stream()
 					.map(byId::get)
-					.filter(user -> user != null)
+					// A deleted account's tombstone runs nothing and must not be sent the program's notifications.
+					.filter(user -> user != null && user.getStatus() != UserAccountStatus.DELETED)
 					.toList();
 			List<AppUser> running = known.stream().filter(user -> user.has(UserRole.COORDINATOR)).toList();
 			runners.put(program.getId(), running.isEmpty()

@@ -1,18 +1,22 @@
 package com.dps.teknokent.service;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import org.jspecify.annotations.Nullable;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
@@ -20,17 +24,23 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import com.dps.teknokent.domain.OfficeHoursMeetingAction;
 import com.dps.teknokent.domain.OfficeHoursMessageType;
+import com.dps.teknokent.domain.OfficeHoursRequestAction;
 import com.dps.teknokent.domain.OfficeHoursRequestStatus;
 import com.dps.teknokent.domain.OfficeHoursRole;
 import com.dps.teknokent.dto.requests.AcceptOfficeHoursSlotRequest;
+import com.dps.teknokent.dto.requests.CancelOfficeHoursMeetingRequest;
 import com.dps.teknokent.dto.requests.CreateOfficeHoursRequest;
 import com.dps.teknokent.dto.requests.DecideOfficeHoursRequest;
 import com.dps.teknokent.dto.requests.ReplyOfficeHoursRequest;
+import com.dps.teknokent.dto.responses.OfficeHoursCancellationResponse;
 import com.dps.teknokent.dto.responses.OfficeHoursMeetingResponse;
 import com.dps.teknokent.dto.responses.OfficeHoursPersonResponse;
 import com.dps.teknokent.dto.responses.OfficeHoursRequestResponse;
 import com.dps.teknokent.dto.responses.OfficeHoursSlotResponse;
+import com.dps.teknokent.dto.responses.OfficeHoursTimeResponse;
+import com.dps.teknokent.entity.OfficeHoursCourse;
 import com.dps.teknokent.entity.OfficeHoursEnrollment;
 import com.dps.teknokent.entity.OfficeHoursMeeting;
 import com.dps.teknokent.entity.OfficeHoursRequest;
@@ -40,15 +50,17 @@ import com.dps.teknokent.entity.OfficeHoursUser;
 import com.dps.teknokent.exception.ConflictException;
 import com.dps.teknokent.exception.InvalidRequestException;
 import com.dps.teknokent.exception.ResourceNotFoundException;
+import com.dps.teknokent.repository.OfficeHoursCourseRepository;
 import com.dps.teknokent.repository.OfficeHoursEnrollmentRepository;
 import com.dps.teknokent.repository.OfficeHoursMeetingRepository;
 import com.dps.teknokent.repository.OfficeHoursRequestMessageRepository;
 import com.dps.teknokent.repository.OfficeHoursRequestRepository;
 import com.dps.teknokent.repository.OfficeHoursSettingsRepository;
 import com.dps.teknokent.repository.OfficeHoursUserRepository;
+import com.dps.teknokent.service.OfficeHoursMailService.Event;
 import com.dps.teknokent.util.MeetingSlotTimes;
-import com.dps.teknokent.util.Texts;
 import com.dps.teknokent.util.TextUtils;
+import com.dps.teknokent.util.Texts;
 
 /**
  * Office hours booked the way a mentee books a mentor: the student sends a request with a note and up to three
@@ -58,6 +70,9 @@ import com.dps.teknokent.util.TextUtils;
  */
 @Service
 public class OfficeHoursBookingService {
+
+	/** FR-OH-14: closer than this, an academic must give a reason and the cancel is marked late. */
+	static final Duration LATE_CANCEL_WINDOW = Duration.ofHours(24);
 
 	private static final Set<OfficeHoursRequestStatus> OPEN = Set.of(OfficeHoursRequestStatus.PENDING,
 			OfficeHoursRequestStatus.MORE_INFO_REQUESTED, OfficeHoursRequestStatus.COUNTER_PROPOSED);
@@ -69,21 +84,25 @@ public class OfficeHoursBookingService {
 	private final OfficeHoursMeetingRepository meetingRepository;
 	private final OfficeHoursSettingsRepository settingsRepository;
 	private final OfficeHoursSlotService slotService;
+	private final OfficeHoursCourseRepository courseRepository;
+	private final OfficeHoursMailService mailService;
 	private final Clock clock;
 
 	@Autowired
 	public OfficeHoursBookingService(OfficeHoursEnrollmentRepository enrollmentRepository,
 			OfficeHoursUserRepository userRepository, OfficeHoursRequestRepository requestRepository,
 			OfficeHoursRequestMessageRepository messageRepository, OfficeHoursMeetingRepository meetingRepository,
-			OfficeHoursSettingsRepository settingsRepository, OfficeHoursSlotService slotService) {
+			OfficeHoursSettingsRepository settingsRepository, OfficeHoursSlotService slotService,
+			OfficeHoursCourseRepository courseRepository, OfficeHoursMailService mailService) {
 		this(enrollmentRepository, userRepository, requestRepository, messageRepository, meetingRepository,
-				settingsRepository, slotService, Clock.systemUTC());
+				settingsRepository, slotService, courseRepository, mailService, Clock.systemUTC());
 	}
 
 	OfficeHoursBookingService(OfficeHoursEnrollmentRepository enrollmentRepository,
 			OfficeHoursUserRepository userRepository, OfficeHoursRequestRepository requestRepository,
 			OfficeHoursRequestMessageRepository messageRepository, OfficeHoursMeetingRepository meetingRepository,
-			OfficeHoursSettingsRepository settingsRepository, OfficeHoursSlotService slotService, Clock clock) {
+			OfficeHoursSettingsRepository settingsRepository, OfficeHoursSlotService slotService,
+			OfficeHoursCourseRepository courseRepository, OfficeHoursMailService mailService, Clock clock) {
 		this.enrollmentRepository = enrollmentRepository;
 		this.userRepository = userRepository;
 		this.requestRepository = requestRepository;
@@ -91,6 +110,8 @@ public class OfficeHoursBookingService {
 		this.meetingRepository = meetingRepository;
 		this.settingsRepository = settingsRepository;
 		this.slotService = slotService;
+		this.courseRepository = courseRepository;
+		this.mailService = mailService;
 		this.clock = clock;
 	}
 
@@ -118,26 +139,30 @@ public class OfficeHoursBookingService {
 	/** A student sees their own requests in the course; an academic sees the ones sent to them there. */
 	@Transactional(readOnly = true)
 	public List<OfficeHoursRequestResponse> requests(UUID userId, UUID courseId) {
-		return responses(visibleRequests(userId, courseId));
+		OfficeHoursRole role = requireRole(userId, courseId, null);
+		return responses(visibleRequests(userId, courseId, role), role);
 	}
 
 	@Transactional(readOnly = true)
 	public List<OfficeHoursMeetingResponse> upcomingMeetings(UUID userId, UUID courseId) {
-		Instant now = clock.instant();
-		List<OfficeHoursRequest> mine = visibleRequests(userId, courseId);
+		List<OfficeHoursRequest> mine = visibleRequests(userId, courseId, requireRole(userId, courseId, null));
 		Map<UUID, OfficeHoursRequest> byId = mine.stream()
 				.collect(Collectors.toMap(OfficeHoursRequest::getId, Function.identity()));
 		List<OfficeHoursMeeting> meetings = meetingRepository.findByRequestIdIn(byId.keySet()).stream()
-				.filter(meeting -> meeting.getScheduledAt().isAfter(now))
+				.filter(this::isAhead)
 				.sorted((left, right) -> left.getScheduledAt().compareTo(right.getScheduledAt()))
 				.toList();
 		Map<UUID, OfficeHoursUser> people = people(meetings.stream()
 				.flatMap(meeting -> Stream.of(meeting.getStudentId(), meeting.getInstructorId())).toList());
+		Map<UUID, String> courseNames = courseNames(meetings.stream().map(OfficeHoursMeeting::getCourseId).toList());
 		return meetings.stream()
 				.map(meeting -> new OfficeHoursMeetingResponse(meeting.getId(), meeting.getRequestId(),
 						meeting.getScheduledAt(), meeting.getDurationMinutes(),
 						person(people.get(meeting.getStudentId())), person(people.get(meeting.getInstructorId())),
-						byId.get(meeting.getRequestId()).getTopic()))
+						Objects.requireNonNull(byId.get(meeting.getRequestId()),
+								"meetings are read by the ids of these requests").getTopic(),
+						OfficeHoursTimeResponse.of(meeting.getScheduledAt(), meeting.getDurationMinutes()),
+						courseNames.get(meeting.getCourseId()), List.of(OfficeHoursMeetingAction.CANCEL)))
 				.toList();
 	}
 
@@ -145,8 +170,22 @@ public class OfficeHoursBookingService {
 	public OfficeHoursRequestResponse create(UUID studentId, UUID courseId, CreateOfficeHoursRequest submission) {
 		requireRole(studentId, courseId, OfficeHoursRole.STUDENT);
 		requireRole(submission.instructorId(), courseId, OfficeHoursRole.INSTRUCTOR);
+		return responses(List.of(createRequest(studentId, courseId, submission)), OfficeHoursRole.STUDENT).getFirst();
+	}
+
+	/**
+	 * The request itself, once the caller may send it: in a course for Moodle, or with no course from Menton.
+	 * Same times, lead and student-limit rules either way. Checks no access: the caller must have.
+	 */
+	@Transactional
+	public OfficeHoursRequest createRequest(UUID studentId, @Nullable UUID courseId,
+			CreateOfficeHoursRequest submission) {
+		// One request to an academic at a time, from a course or from Menton: their open slots and student limit are
+		// read and taken under this lock.
+		userRepository.findForUpdate(submission.instructorId());
 		List<String> slots = submission.preferredSlots().stream().distinct().toList();
 		requireBookable(slots);
+		requireNotHeld(submission.instructorId(), slots, null);
 		Instant now = clock.instant();
 		requireRoomFor(studentId, submission.instructorId(), now);
 
@@ -161,13 +200,22 @@ public class OfficeHoursBookingService {
 		request.setPreferredSlots(String.join(",", slots));
 		request.setCreatedAt(now);
 		request.setUpdatedAt(now);
-		return responses(List.of(requestRepository.saveAndFlush(request))).getFirst();
+		OfficeHoursRequest saved = requestRepository.saveAndFlush(request);
+		mailService.requestChanged(saved, Event.NEW_REQUEST, null);
+		return saved;
 	}
 
 	@Transactional
 	public OfficeHoursRequestResponse decide(UUID instructorId, UUID courseId, UUID requestId,
 			DecideOfficeHoursRequest decision) {
-		OfficeHoursRequest request = requireRequest(requestId, courseId);
+		return responses(List.of(decide(requireRequest(requestId, courseId), instructorId, decision)),
+				OfficeHoursRole.INSTRUCTOR).getFirst();
+	}
+
+	/** The academic's answer to a request the caller has already found; only its own academic may answer. */
+	@Transactional
+	public OfficeHoursRequest decide(OfficeHoursRequest request, UUID instructorId,
+			DecideOfficeHoursRequest decision) {
 		if (!request.getInstructorId().equals(instructorId)) {
 			throw forbidden("Only the academic the request was sent to can answer it.");
 		}
@@ -176,49 +224,61 @@ public class OfficeHoursBookingService {
 			throw new InvalidRequestException("Only pending requests can be decided");
 		}
 		String message = TextUtils.normalizeOptional(decision.message());
-		switch (decision.status()) {
-			case ACCEPTED -> {
-				String slot = decision.slot() != null ? decision.slot() : firstFreePreferred(request);
-				if (slot == null || !slots(request.getPreferredSlots()).contains(slot)) {
-					throw new InvalidRequestException("Pick one of the times the student asked for");
-				}
-				requireBookable(List.of(slot));
-				request.setInstructorMessage(message);
-				request.setStatus(OfficeHoursRequestStatus.ACCEPTED);
-				book(request, slot);
+		Event event = switch (decision.status()) {
+		case ACCEPTED -> {
+			String slot = decision.slot() != null ? decision.slot() : firstFreePreferred(request);
+			if (slot == null || !slots(request.getPreferredSlots()).contains(slot)) {
+				throw new InvalidRequestException("Pick one of the times the student asked for");
 			}
-			case DECLINED -> {
-				request.setRejectionReason(message);
-				request.setStatus(OfficeHoursRequestStatus.DECLINED);
-			}
-			case MORE_INFO_REQUESTED -> {
-				if (message == null) {
-					throw new InvalidRequestException("Write the question for the student");
-				}
-				saveMessage(request, instructorId, OfficeHoursMessageType.INSTRUCTOR_QUESTION, message);
-				request.setStatus(OfficeHoursRequestStatus.MORE_INFO_REQUESTED);
-			}
-			case COUNTER_PROPOSED -> {
-				List<String> proposed = decision.proposedSlots() == null ? List.of()
-						: decision.proposedSlots().stream().distinct().toList();
-				if (proposed.isEmpty()) {
-					throw new InvalidRequestException("At least one proposed slot is required");
-				}
-				requireBookable(proposed);
-				request.setProposedSlots(String.join(",", proposed));
-				request.setInstructorMessage(message);
-				request.setStatus(OfficeHoursRequestStatus.COUNTER_PROPOSED);
-			}
-			default -> throw new InvalidRequestException(
-					"Decision status must be ACCEPTED, DECLINED, MORE_INFO_REQUESTED, or COUNTER_PROPOSED");
+			requireBookable(List.of(slot));
+			request.setInstructorMessage(message);
+			request.setStatus(OfficeHoursRequestStatus.ACCEPTED);
+			book(request, slot);
+			yield Event.ACCEPTED;
 		}
-		return save(request);
+		case DECLINED -> {
+			request.setRejectionReason(message);
+			request.setStatus(OfficeHoursRequestStatus.DECLINED);
+			yield Event.DECLINED;
+		}
+		case MORE_INFO_REQUESTED -> {
+			if (message == null) {
+				throw new InvalidRequestException("Write the question for the student");
+			}
+			saveMessage(request, instructorId, OfficeHoursMessageType.INSTRUCTOR_QUESTION, message);
+			request.setStatus(OfficeHoursRequestStatus.MORE_INFO_REQUESTED);
+			yield Event.MORE_INFO_REQUESTED;
+		}
+		case COUNTER_PROPOSED -> {
+			List<String> proposed = decision.proposedSlots() == null ? List.of()
+					: decision.proposedSlots().stream().distinct().toList();
+			if (proposed.isEmpty()) {
+				throw new InvalidRequestException("At least one proposed slot is required");
+			}
+			requireBookable(proposed);
+			requireNotHeld(request.getInstructorId(), proposed, request.getId());
+			request.setProposedSlots(String.join(",", proposed));
+			request.setInstructorMessage(message);
+			request.setStatus(OfficeHoursRequestStatus.COUNTER_PROPOSED);
+			yield Event.COUNTER_PROPOSED;
+		}
+		default -> throw new InvalidRequestException(
+				"Decision status must be ACCEPTED, DECLINED, MORE_INFO_REQUESTED, or COUNTER_PROPOSED");
+		};
+		return saveAndTell(request, event, message);
 	}
 
 	@Transactional
 	public OfficeHoursRequestResponse acceptProposedSlot(UUID studentId, UUID courseId, UUID requestId,
 			AcceptOfficeHoursSlotRequest acceptance) {
-		OfficeHoursRequest request = requireOwnRequest(studentId, courseId, requestId);
+		return responses(List.of(acceptProposedSlot(requireOwnRequest(studentId, courseId, requestId), acceptance)),
+				OfficeHoursRole.STUDENT).getFirst();
+	}
+
+	/** The student takes one of the academic's other times, on a request already known to be theirs. */
+	@Transactional
+	public OfficeHoursRequest acceptProposedSlot(OfficeHoursRequest request,
+			AcceptOfficeHoursSlotRequest acceptance) {
 		if (request.getStatus() != OfficeHoursRequestStatus.COUNTER_PROPOSED) {
 			throw new InvalidRequestException("Only counter-proposed requests can accept a slot");
 		}
@@ -228,7 +288,7 @@ public class OfficeHoursBookingService {
 		requireBookable(List.of(acceptance.slot()));
 		request.setStatus(OfficeHoursRequestStatus.ACCEPTED);
 		book(request, acceptance.slot());
-		return save(request);
+		return saveAndTell(request, Event.SLOT_CHOSEN, null);
 	}
 
 	@Transactional
@@ -238,19 +298,114 @@ public class OfficeHoursBookingService {
 		if (request.getStatus() != OfficeHoursRequestStatus.MORE_INFO_REQUESTED) {
 			throw new InvalidRequestException("Only a request with a question can be answered");
 		}
-		saveMessage(request, studentId, OfficeHoursMessageType.STUDENT_REPLY, TextUtils.trim(reply.message()));
+		String answer = TextUtils.trim(reply.message());
+		saveMessage(request, studentId, OfficeHoursMessageType.STUDENT_REPLY, answer);
 		request.setStatus(OfficeHoursRequestStatus.PENDING);
-		return save(request);
+		return responses(List.of(saveAndTell(request, Event.REPLIED, answer)), OfficeHoursRole.STUDENT).getFirst();
 	}
 
 	@Transactional
 	public OfficeHoursRequestResponse withdraw(UUID studentId, UUID courseId, UUID requestId) {
-		OfficeHoursRequest request = requireOwnRequest(studentId, courseId, requestId);
+		return responses(List.of(withdraw(requireOwnRequest(studentId, courseId, requestId))), OfficeHoursRole.STUDENT)
+				.getFirst();
+	}
+
+	/** The student takes back a request already known to be theirs, while it is still open. */
+	@Transactional
+	public OfficeHoursRequest withdraw(OfficeHoursRequest request) {
 		if (!OPEN.contains(request.getStatus())) {
 			throw new InvalidRequestException("Only an unanswered request can be withdrawn");
 		}
 		request.setStatus(OfficeHoursRequestStatus.WITHDRAWN);
-		return save(request);
+		return saveAndTell(request, Event.WITHDRAWN, null);
+	}
+
+	/**
+	 * Either side calls an accepted meeting off before it starts; the time is free again and the other side is told.
+	 */
+	@Transactional
+	public OfficeHoursRequestResponse cancel(UUID userId, UUID courseId, UUID requestId,
+			CancelOfficeHoursMeetingRequest cancellation) {
+		OfficeHoursRequest request = requireRequest(requestId, courseId);
+		OfficeHoursRole viewer = OfficeHoursRole.INSTRUCTOR;
+		if (request.getStudentId().equals(userId)) {
+			viewer = OfficeHoursRole.STUDENT;
+		}
+		return responses(List.of(cancel(request, userId, cancellation)), viewer).getFirst();
+	}
+
+	/** The cancel itself, on a request the caller has already found: from a course or from Menton. */
+	@Transactional
+	public OfficeHoursRequest cancel(OfficeHoursRequest request, UUID userId,
+			CancelOfficeHoursMeetingRequest cancellation) {
+		boolean student = request.getStudentId().equals(userId);
+		if (!student && !request.getInstructorId().equals(userId)) {
+			throw forbidden("Only the student and the academic of the meeting can cancel it.");
+		}
+		if (request.getStatus() != OfficeHoursRequestStatus.ACCEPTED) {
+			throw new ConflictException("Only an accepted meeting can be cancelled");
+		}
+		OfficeHoursMeeting meeting = meetingRepository.findByRequestId(request.getId())
+				.orElseThrow(() -> new ConflictException("Only an accepted meeting can be cancelled"));
+		Instant now = clock.instant();
+		if (!meeting.getScheduledAt().isAfter(now)) {
+			throw new ConflictException("A meeting that has started can no longer be cancelled");
+		}
+		String reason = TextUtils.normalizeOptional(cancellation.reason());
+		// FR-OH-14: the student was planning around it, so an academic calling it off this close has to say why.
+		if (!student && reason == null && isLateCancel(meeting.getScheduledAt(), now)) {
+			throw new InvalidRequestException(Texts.forRequest("error.officeHoursLateCancelReason"));
+		}
+		if (meetingRepository.cancelIfLive(meeting.getId(), now, userId, reason) != 1) {
+			throw new ConflictException("This meeting has just been cancelled.");
+		}
+		// The row is already written; the entity only mirrors it for the answer below.
+		meeting.setCancelledAt(now);
+		meeting.setCancelledBy(userId);
+		meeting.setCancellationReason(reason);
+		request.setStatus(OfficeHoursRequestStatus.CANCELLED);
+		return saveAndTell(request, cancelEvent(student), reason);
+	}
+
+	/** The other side hears about it: the academic when the student cancelled, and the other way round. */
+	private static Event cancelEvent(boolean byStudent) {
+		if (byStudent) {
+			return Event.CANCELLED_BY_STUDENT;
+		}
+		return Event.CANCELLED_BY_INSTRUCTOR;
+	}
+
+	/** How the meeting was called off, or null while it is still on. */
+	private static OfficeHoursRequestResponse.@Nullable Cancellation cancellation(
+			@Nullable OfficeHoursMeeting meeting) {
+		if (meeting == null || meeting.getCancelledAt() == null) {
+			return null;
+		}
+		return new OfficeHoursRequestResponse.Cancellation(meeting.getCancelledBy(), meeting.getCancellationReason(),
+				meeting.getCancelledAt(), isLateCancel(meeting.getScheduledAt(), meeting.getCancelledAt()));
+	}
+
+	/** A booked meeting that is still on and has not started: the only kind either side may cancel. */
+	boolean isAhead(@Nullable OfficeHoursMeeting meeting) {
+		return meeting != null && meeting.getCancelledAt() == null && meeting.getScheduledAt().isAfter(clock.instant());
+	}
+
+	/** How the meeting was called off, for the Menton screens, which name the side rather than the person. */
+	static @Nullable OfficeHoursCancellationResponse cancellationOf(@Nullable OfficeHoursMeeting meeting) {
+		if (meeting == null || meeting.getCancelledAt() == null) {
+			return null;
+		}
+		OfficeHoursRole by = OfficeHoursRole.INSTRUCTOR;
+		if (meeting.getStudentId().equals(meeting.getCancelledBy())) {
+			by = OfficeHoursRole.STUDENT;
+		}
+		return new OfficeHoursCancellationResponse(by, meeting.getCancellationReason(), meeting.getCancelledAt(),
+				isLateCancel(meeting.getScheduledAt(), meeting.getCancelledAt()));
+	}
+
+	/** Called off less than 24 hours before the start. Worked out from the times, so nothing else is stored. */
+	static boolean isLateCancel(Instant scheduledAt, Instant cancelledAt) {
+		return cancelledAt.isAfter(scheduledAt.minus(LATE_CANCEL_WINDOW));
 	}
 
 	/**
@@ -267,7 +422,7 @@ public class OfficeHoursBookingService {
 		Set<UUID> students = new HashSet<>();
 		requestRepository.findByInstructorIdAndStatusIn(instructorId, OPEN)
 				.forEach(open -> students.add(open.getStudentId()));
-		meetingRepository.findByInstructorIdAndScheduledAtAfter(instructorId, now)
+		meetingRepository.findByInstructorIdAndCancelledAtIsNullAndScheduledAtAfter(instructorId, now)
 				.forEach(meeting -> students.add(meeting.getStudentId()));
 		if (!students.contains(studentId) && students.size() >= capacity) {
 			throw new ConflictException("This academic has no room for another student right now.");
@@ -276,9 +431,14 @@ public class OfficeHoursBookingService {
 
 	private void book(OfficeHoursRequest request, String slot) {
 		Instant startsAt = MeetingSlotTimes.parseMachineSlot(slot);
+		// Slots are checked when they are saved; one that no longer reads is refused rather than booked blind.
+		if (startsAt == null) {
+			throw new InvalidRequestException("This time could not be read. Please choose another time");
+		}
 		int duration = meetingMinutes(request.getInstructorId(), startsAt);
 		if (slotService.clashesWithCalendar(request.getInstructorId(), startsAt, duration)) {
-			throw new ConflictException("This time overlaps a meeting already on the calendar. Please choose another time");
+			throw new ConflictException(
+					"This time overlaps a meeting already on the calendar. Please choose another time");
 		}
 		OfficeHoursMeeting meeting = new OfficeHoursMeeting();
 		meeting.setId(UUID.randomUUID());
@@ -304,15 +464,23 @@ public class OfficeHoursBookingService {
 	}
 
 	/** As for mentors, accepting without naming a time takes the student's first time that is still free. */
-	private String firstFreePreferred(OfficeHoursRequest request) {
+	private @Nullable String firstFreePreferred(OfficeHoursRequest request) {
 		return slots(request.getPreferredSlots()).stream()
 				.filter(slot -> {
 					Instant startsAt = MeetingSlotTimes.parseMachineSlot(slot);
-					return !slotService.clashesWithCalendar(request.getInstructorId(), startsAt,
+					return startsAt != null && !slotService.clashesWithCalendar(request.getInstructorId(), startsAt,
 							meetingMinutes(request.getInstructorId(), startsAt));
 				})
 				.findFirst()
 				.orElse(null);
+	}
+
+	/** A time another open request holds is not offered twice (FR-OH-16). */
+	private void requireNotHeld(UUID instructorId, List<String> slots, @Nullable UUID exceptRequestId) {
+		Set<Instant> held = slotService.heldTimes(instructorId, exceptRequestId);
+		if (slots.stream().map(MeetingSlotTimes::parseMachineSlot).anyMatch(held::contains)) {
+			throw new ConflictException("Another request is waiting on one of these times. Please choose another time");
+		}
 	}
 
 	private void requireBookable(List<String> slots) {
@@ -325,7 +493,7 @@ public class OfficeHoursBookingService {
 		}
 	}
 
-	private OfficeHoursRole requireRole(UUID userId, UUID courseId, OfficeHoursRole expected) {
+	private OfficeHoursRole requireRole(UUID userId, UUID courseId, @Nullable OfficeHoursRole expected) {
 		OfficeHoursEnrollment enrollment = enrollmentRepository.findByUserIdAndCourseId(userId, courseId)
 				.orElseThrow(() -> new ResourceNotFoundException("Course not found."));
 		if (expected != null && enrollment.getRole() != expected) {
@@ -337,8 +505,9 @@ public class OfficeHoursBookingService {
 	}
 
 	private OfficeHoursRequest requireRequest(UUID requestId, UUID courseId) {
+		// A Menton request has no course, so it never matches a course's route.
 		return requestRepository.findById(requestId)
-				.filter(request -> request.getCourseId().equals(courseId))
+				.filter(request -> courseId.equals(request.getCourseId()))
 				.orElseThrow(() -> new ResourceNotFoundException("Request not found."));
 	}
 
@@ -350,8 +519,7 @@ public class OfficeHoursBookingService {
 		return request;
 	}
 
-	private List<OfficeHoursRequest> visibleRequests(UUID userId, UUID courseId) {
-		OfficeHoursRole role = requireRole(userId, courseId, null);
+	private List<OfficeHoursRequest> visibleRequests(UUID userId, UUID courseId, OfficeHoursRole role) {
 		return role == OfficeHoursRole.STUDENT
 				? requestRepository.findByCourseIdAndStudentIdOrderByCreatedAtDesc(courseId, userId)
 				: requestRepository.findByCourseIdAndInstructorIdOrderByCreatedAtDesc(courseId, userId);
@@ -368,12 +536,20 @@ public class OfficeHoursBookingService {
 		messageRepository.save(message);
 	}
 
-	private OfficeHoursRequestResponse save(OfficeHoursRequest request) {
-		request.setUpdatedAt(clock.instant());
-		return responses(List.of(requestRepository.saveAndFlush(request))).getFirst();
+	/** Saves the change and queues the other side's e-mail in the same transaction, for Moodle and Menton alike. */
+	private OfficeHoursRequest saveAndTell(OfficeHoursRequest request, Event event, @Nullable String note) {
+		OfficeHoursRequest saved = saveEntity(request);
+		mailService.requestChanged(saved, event, note);
+		return saved;
 	}
 
-	private List<OfficeHoursRequestResponse> responses(List<OfficeHoursRequest> requests) {
+	private OfficeHoursRequest saveEntity(OfficeHoursRequest request) {
+		request.setUpdatedAt(clock.instant());
+		return requestRepository.saveAndFlush(request);
+	}
+
+	/** {@code viewer} is the caller's role in the course; it decides the allowed actions. */
+	private List<OfficeHoursRequestResponse> responses(List<OfficeHoursRequest> requests, OfficeHoursRole viewer) {
 		if (requests.isEmpty()) {
 			return List.of();
 		}
@@ -388,17 +564,64 @@ public class OfficeHoursBookingService {
 				.collect(Collectors.toMap(OfficeHoursMeeting::getRequestId, Function.identity()));
 		Map<UUID, OfficeHoursUser> people = people(requests.stream()
 				.flatMap(request -> Stream.of(request.getStudentId(), request.getInstructorId())).toList());
+		Map<UUID, String> courseNames = courseNames(requests.stream().map(OfficeHoursRequest::getCourseId).toList());
+		Map<UUID, Function<Instant, Integer>> lengths = new HashMap<>();
 		return requests.stream().map(request -> {
 			OfficeHoursMeeting meeting = meetings.get(request.getId());
+			Function<Instant, Integer> lengthOf = lengths.computeIfAbsent(request.getInstructorId(),
+					this::meetingLengths);
 			return new OfficeHoursRequestResponse(request.getId(), request.getCourseId(), request.getStatus(),
 					person(people.get(request.getStudentId())), person(people.get(request.getInstructorId())),
 					request.getTopic(), request.getExpectedOutcome(), slots(request.getPreferredSlots()),
 					slots(request.getProposedSlots()), request.getInstructorMessage(), request.getRejectionReason(),
 					messages.getOrDefault(request.getId(), List.of()),
-					meeting == null ? null : new OfficeHoursSlotResponse(meeting.getScheduledAt(),
-							meeting.getDurationMinutes()),
-					request.getCreatedAt());
+					meeting == null ? null
+							: new OfficeHoursSlotResponse(meeting.getScheduledAt(),
+									meeting.getDurationMinutes()),
+					cancellation(meeting),
+					request.getCreatedAt(), courseNames.get(request.getCourseId()),
+					timesOf(request.getPreferredSlots(), lengthOf),
+					timesOf(request.getProposedSlots(), lengthOf),
+					OfficeHoursRequestAction.allowedFor(viewer, request.getStatus(), isAhead(meeting)));
 		}).toList();
+	}
+
+	/**
+	 * Stored times ("yyyy-MM-ddTHH:mm" in Turkey time, comma-separated) as ranges, each as long as the meeting it
+	 * would book: its open slot's own length, or the academic's default for a time typed by hand. The Menton routes
+	 * show times the same way.
+	 */
+	public List<OfficeHoursTimeResponse> timesOf(UUID instructorId, String joined) {
+		return timesOf(joined, meetingLengths(instructorId));
+	}
+
+	/** Each stored time as a range of the length {@code lengthOf} gives its start. */
+	public static List<OfficeHoursTimeResponse> timesOf(String joined, Function<Instant, Integer> lengthOf) {
+		return slots(joined).stream()
+				.map(MeetingSlotTimes::parseMachineSlot)
+				.filter(Objects::nonNull)
+				.map(startsAt -> OfficeHoursTimeResponse.of(startsAt, lengthOf.apply(startsAt)))
+				.toList();
+	}
+
+	/**
+	 * The academic's meeting length by start: a calendar slot's own length (held or not, as {@code openSlotAt} reads
+	 * it), the default for anything else. The slots are worked out once, so many stored times cost one look.
+	 */
+	public Function<Instant, Integer> meetingLengths(UUID instructorId) {
+		Map<Instant, Integer> open = slotService.calendarSlots(instructorId).stream()
+				.collect(Collectors.toMap(OfficeHoursSlotService.Slot::startsAt,
+						OfficeHoursSlotService.Slot::durationMinutes,
+						(first, second) -> first));
+		int fallback = slotService.defaultMeetingMinutes(instructorId);
+		return startsAt -> open.getOrDefault(startsAt, fallback);
+	}
+
+	/** Course-free requests (booked from Menton, without a Moodle course) have no name and are skipped. */
+	private Map<UUID, String> courseNames(Collection<UUID> ids) {
+		Set<UUID> courseIds = ids.stream().filter(Objects::nonNull).collect(Collectors.toSet());
+		return courseRepository.findAllById(courseIds).stream()
+				.collect(Collectors.toMap(OfficeHoursCourse::getId, OfficeHoursCourse::getTitle));
 	}
 
 	private Map<UUID, OfficeHoursUser> people(Collection<UUID> ids) {
@@ -406,11 +629,11 @@ public class OfficeHoursBookingService {
 				.collect(Collectors.toMap(OfficeHoursUser::getId, Function.identity()));
 	}
 
-	private static OfficeHoursPersonResponse person(OfficeHoursUser user) {
+	private static @Nullable OfficeHoursPersonResponse person(@Nullable OfficeHoursUser user) {
 		return user == null ? null : new OfficeHoursPersonResponse(user.getId(), user.getFullName());
 	}
 
-	private static List<String> slots(String joined) {
+	static List<String> slots(String joined) {
 		if (joined == null || joined.isBlank()) {
 			return List.of();
 		}

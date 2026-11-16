@@ -15,6 +15,9 @@ public enum Edition {
 	TEKNOKENT(
 			EnumSet.of(ProgramType.STARTUP_MENTORING),
 			List.of(
+					"/api/admin/programs/*/mentors/*/remove",
+					"/api/admin/programs/*/startups/*/move",
+					"/api/admin/users/*/delete",
 					"/api/assistant/**",
 					"/api/auth/institution/otg/**",
 					"/api/auth/register/mentor/**",
@@ -39,6 +42,7 @@ public enum Edition {
 					"/api/office-hours/**",
 					"/api/coordinator/programs/*/academics/**",
 					"/api/coordinator/programs/*/badges/**",
+					"/api/coordinator/programs/*/office-hours/**",
 					"/api/coordinator/programs/*/peer-categories/**",
 					"/api/coordinator/programs/*/training/**",
 					"/api/users/*/badges/**"));

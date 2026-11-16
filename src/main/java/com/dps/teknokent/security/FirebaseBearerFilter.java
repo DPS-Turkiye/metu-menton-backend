@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -41,6 +42,19 @@ public class FirebaseBearerFilter extends OncePerRequestFilter {
 	private static final String NOTIFICATIONS_PATH = "/api/notifications";
 	/** Acts only for the token's own user on meetings they take part in (see AssistantMeetingAccessService). */
 	private static final String ASSISTANT_PATH_PREFIX = "/api/assistant/";
+	/**
+	 * The one admin action that must come with the admin's own token: it takes its actor from the token and from
+	 * nowhere else, so it trusts no id in the request. The other /api/admin paths do, and stay off this list.
+	 */
+	private static final Pattern USER_DELETION_PATH = Pattern.compile(
+			"/api/admin/users/[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}/delete");
+	/**
+	 * Reading a weekly program PDF takes its actor from the token, so the coordinator's own token may reach it
+	 * and the read counts against that person's parse budget. The save and every other coordinator path stay
+	 * on the proxy.
+	 */
+	private static final Pattern WEEKLY_PROGRAM_READ_PATH = Pattern.compile(
+			"/api/coordinator/programs/[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}/weekly-program/read");
 
 	private final FirebaseTokenVerifier firebaseTokenVerifier;
 	private final AppUserRepository appUserRepository;
@@ -80,10 +94,20 @@ public class FirebaseBearerFilter extends OncePerRequestFilter {
 			return;
 		}
 
+		// A deleted account's tombstone has no uid and a placeholder address, so neither lookup finds it; the
+		// filter keeps that true even if a row were ever left half-erased.
 		Optional<AppUser> account = appUserRepository.findByFirebaseUid(identity.get().uid())
-				.or(() -> findClaimableByEmail(identity.get()));
+				.or(() -> findClaimableByEmail(identity.get()))
+				.filter(user -> user.getStatus() != UserAccountStatus.DELETED);
 		if (account.isEmpty()) {
 			if (isProfileParsePreview(request)) {
+				// Firebase lets anyone make e-mail/password logins at will, so a token alone would buy unlimited
+				// OCR and paid AI parses, one budget per throwaway login. The sign-up page verifies the address
+				// before its CV step, and registering needs a verified address anyway.
+				if (!identity.get().emailVerified()) {
+					write(response, HttpServletResponse.SC_FORBIDDEN, "Verify your e-mail address first");
+					return;
+				}
 				authenticate(identity.get(), List.of(new SimpleGrantedAuthority("ROLE_REGISTERING")));
 				filterChain.doFilter(request, response);
 				return;
@@ -182,6 +206,8 @@ public class FirebaseBearerFilter extends OncePerRequestFilter {
 				|| NOTIFICATIONS_PATH.equals(uri)
 				|| uri.startsWith(NOTIFICATIONS_PATH + "/")
 				|| uri.startsWith(ASSISTANT_PATH_PREFIX)
+				|| ("POST".equalsIgnoreCase(request.getMethod()) && USER_DELETION_PATH.matcher(uri).matches())
+				|| ("POST".equalsIgnoreCase(request.getMethod()) && WEEKLY_PROGRAM_READ_PATH.matcher(uri).matches())
 				|| isOwnMentorProfileUpdate(request, user)
 				|| isOwnUserProfileUpdate(request, user);
 	}
@@ -207,7 +233,7 @@ public class FirebaseBearerFilter extends OncePerRequestFilter {
 
 	/**
 	 * The signup CV step parses a file before the applicant has an account at
-	 * all, and again while they are PENDING, so a token alone has to open it.
+	 * all, and again while they are PENDING, so a token with a verified address has to open it.
 	 * Safe to widen this far because the endpoint persists nothing — no stored
 	 * document, no profile_analysis row — so there is no organization to scope
 	 * and nothing to leak between startups. It is not public, because it runs

@@ -1,9 +1,9 @@
 name: Deploy
 
+# Disabled in METUMenton: the steps below still target Teknokent's AWS (ECR, EC2, SSM).
+# Manual-only with a hard stop until it is rewritten for ODTÜ's own servers.
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_dispatch:
 
 permissions:
   id-token: write
@@ -18,19 +18,25 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
+      - name: Hard stop
+        run: |
+          echo "::error::No ODTÜ deploy target yet; this workflow must not deploy to Teknokent AWS"
+          exit 1
+
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Cache Maven dependencies
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: .ci/m2
           key: ${{ runner.os }}-maven-${{ hashFiles('pom.xml') }}
           restore-keys: |
             ${{ runner.os }}-maven-
 
-      - name: Run tests
-        run: ./mvnw -B clean test
+      # The same gate as CI: zero-warning build, tests, format, lint and the coverage floor.
+      - name: Verify
+        run: ./mvnw -B clean verify
         env:
           MVNW_M2_HOST_DIR: .ci/m2
 

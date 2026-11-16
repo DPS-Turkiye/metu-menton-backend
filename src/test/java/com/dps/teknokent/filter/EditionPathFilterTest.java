@@ -29,6 +29,7 @@ class EditionPathFilterTest {
 				"/api/badges/mine",
 				"/api/badges/",
 				"/api/institution/me/advisees",
+				"/api/institution/me/advisees/" + ID + "/profile",
 				"/api/auth/institution/odtu/start",
 				"/api/auth/institution/odtu/dev-personas",
 				"/api/admin/academics",
@@ -39,6 +40,8 @@ class EditionPathFilterTest {
 				"/api/office-hours/requests",
 				"/api/coordinator/programs/" + ID + "/academics",
 				"/api/coordinator/programs/" + ID + "/badges/awards",
+				"/api/coordinator/programs/" + ID + "/office-hours/appointments",
+				"/api/coordinator/programs/" + ID + "/office-hours/appointments/" + ID,
 				"/api/coordinator/programs/" + ID + "/peer-categories",
 				"/api/coordinator/programs/" + ID + "/training",
 				"/api/users/" + ID + "/badges");
@@ -47,6 +50,9 @@ class EditionPathFilterTest {
 	/** Served only by the Teknokent deployment. */
 	static Stream<String> teknokentPaths() {
 		return Stream.of(
+				"/api/admin/programs/" + ID + "/mentors/" + ID + "/remove",
+				"/api/admin/programs/" + ID + "/startups/" + ID + "/move",
+				"/api/admin/users/" + ID + "/delete",
 				"/api/assistant/bots",
 				"/api/assistant/transcripts/google_meet/abc-defg-hij",
 				"/api/auth/institution/otg/start",

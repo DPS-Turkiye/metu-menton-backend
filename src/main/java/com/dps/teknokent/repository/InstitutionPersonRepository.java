@@ -6,6 +6,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
 
 import com.dps.teknokent.entity.InstitutionPerson;
 
@@ -15,8 +16,19 @@ public interface InstitutionPersonRepository extends JpaRepository<InstitutionPe
 
 	Optional<InstitutionPerson> findFirstByUserIdOrderBySyncedAtDesc(UUID userId);
 
+	List<InstitutionPerson> findByUserIdIn(Collection<UUID> userIds);
+
+	boolean existsByUserId(UUID userId);
+
 	List<InstitutionPerson> findByAcademicTrueOrderByFullNameAsc();
 
 	List<InstitutionPerson> findByInstitutionAndPersistentIdInOrderByFullNameAsc(String institution,
 			Collection<String> persistentIds);
+
+	/** The faculties of the active academicians, for a filter list. */
+	@Query("""
+			select distinct person.faculty from InstitutionPerson person
+			where person.academic = true and person.active = true and person.faculty is not null
+			order by person.faculty""")
+	List<String> findAcademicFaculties();
 }

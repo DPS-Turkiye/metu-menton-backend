@@ -7,12 +7,15 @@ import java.util.Deque;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
+import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.dps.teknokent.domain.DocumentKind;
 import com.dps.teknokent.domain.NotificationCategory;
 import com.dps.teknokent.domain.UserRole;
 import com.dps.teknokent.dto.requests.AttachDocumentRequestUploadRequest;
@@ -27,6 +30,7 @@ import com.dps.teknokent.entity.MentorshipRequest;
 import com.dps.teknokent.entity.Organization;
 import com.dps.teknokent.entity.Program;
 import com.dps.teknokent.entity.ProgramStartup;
+import com.dps.teknokent.entity.ProgramTeamMove;
 import com.dps.teknokent.entity.StoredDocument;
 import com.dps.teknokent.exception.InvalidRequestException;
 import com.dps.teknokent.exception.ResourceNotFoundException;
@@ -37,6 +41,7 @@ import com.dps.teknokent.repository.MentorshipRepository;
 import com.dps.teknokent.repository.ProgramCoordinatorRepository;
 import com.dps.teknokent.repository.ProgramRepository;
 import com.dps.teknokent.repository.ProgramStartupRepository;
+import com.dps.teknokent.repository.ProgramTeamMoveRepository;
 import com.dps.teknokent.repository.StoredDocumentRepository;
 import com.dps.teknokent.util.ProgramCoordination;
 import com.dps.teknokent.util.TextUtils;
@@ -57,6 +62,7 @@ public class DocumentRequestService {
 	private final ProgramRepository programRepository;
 	private final ProgramCoordinatorRepository programCoordinatorRepository;
 	private final ProgramStartupRepository programStartupRepository;
+	private final ProgramTeamMoveRepository programTeamMoveRepository;
 	private final AppUserRepository appUserRepository;
 	private final DomainLookupService domainLookupService;
 	private final NotificationService notificationService;
@@ -78,15 +84,17 @@ public class DocumentRequestService {
 		return toResponses(items);
 	}
 
-	/** Every document request addressed to a startup, whoever asked — the Dosyalar tab's checklist. */
+	/**
+	 * Every document request addressed to a startup, whoever asked — the Dosyalar tab's checklist. Its team and admins
+	 * read it, and so does a coordinator of a program the startup is in; coordinating another program is not enough.
+	 */
 	@Transactional(readOnly = true)
 	public List<DocumentRequestItemResponse> listForOrganization(UUID organizationId, UUID actorId) {
 		domainLookupService.requireOrganization(organizationId);
 		AppUser actor = domainLookupService.requireUser(actorId);
 		boolean teamMember = actor.getOrganization() != null
 				&& organizationId.equals(actor.getOrganization().getId());
-		boolean staff = actor.has(UserRole.ADMIN) || actor.has(UserRole.COORDINATOR);
-		if (!teamMember && !staff) {
+		if (!teamMember && !actor.has(UserRole.ADMIN) && !coordinatesStartup(actor, organizationId)) {
 			throw new InvalidRequestException("Only the startup's team can list its document requests");
 		}
 		return toResponses(itemRepository.findByOrganizationIdOrderByCreatedAtDescSortOrderAsc(organizationId));
@@ -97,7 +105,7 @@ public class DocumentRequestService {
 			UUID mentorshipRequestId,
 			UUID actorId,
 			List<String> titles,
-			LocalDate dueDate) {
+			@Nullable LocalDate dueDate) {
 		MentorshipRequest request = domainLookupService.requireMentorshipRequest(mentorshipRequestId);
 		AppUser actor = requireMentorActor(actorId, request.getMentor().getId());
 		itemRepository.deleteByMentorshipRequestId(request.getId());
@@ -119,7 +127,7 @@ public class DocumentRequestService {
 			UUID meetingId,
 			UUID actorId,
 			List<String> titles,
-			LocalDate dueDate) {
+			@Nullable LocalDate dueDate) {
 		Meeting meeting = domainLookupService.requireMeeting(meetingId);
 		AppUser actor = requireMeetingMentor(actorId, meeting);
 		itemRepository.deleteByMeetingId(meeting.getId());
@@ -145,7 +153,7 @@ public class DocumentRequestService {
 			UUID mentorshipId,
 			UUID actorId,
 			List<String> titles,
-			LocalDate dueDate) {
+			@Nullable LocalDate dueDate) {
 		Mentorship mentorship = mentorshipRepository.findById(mentorshipId)
 				.orElseThrow(() -> new ResourceNotFoundException("Mentorship not found: " + mentorshipId));
 		AppUser actor = requireMentorActor(actorId, mentorship.getMentor().getId());
@@ -177,7 +185,7 @@ public class DocumentRequestService {
 			UUID programId,
 			UUID actorId,
 			List<String> titles,
-			LocalDate dueDate) {
+			@Nullable LocalDate dueDate) {
 		Program program = programRepository.findById(programId)
 				.orElseThrow(() -> new ResourceNotFoundException("Program not found: " + programId));
 		AppUser actor = domainLookupService.requireUser(actorId);
@@ -188,7 +196,8 @@ public class DocumentRequestService {
 		List<String> normalized = normalizeTitles(titles);
 
 		Map<UUID, Map<String, Deque<DocumentRequestItem>>> existing = new HashMap<>();
-		for (DocumentRequestItem item : itemRepository.findByProgramIdOrderBySortOrderAscCreatedAtAsc(program.getId())) {
+		for (DocumentRequestItem item : itemRepository
+				.findByProgramIdOrderBySortOrderAscCreatedAtAsc(program.getId())) {
 			existing.computeIfAbsent(item.getOrganization().getId(), id -> new HashMap<>())
 					.computeIfAbsent(item.getTitle(), title -> new ArrayDeque<>())
 					.add(item);
@@ -216,10 +225,19 @@ public class DocumentRequestService {
 			}
 			current.values().forEach(leftovers::addAll);
 			existing.remove(organization.getId());
-			notifyDocumentsRequested(organization, actor, added, "notification.documentsRequestedByCoordinator.title", "/startup/files");
+			notifyDocumentsRequested(organization, actor, added, "notification.documentsRequestedByCoordinator.title",
+					"/startup/files");
 		}
-		// Startups that have left the program no longer owe its documents.
-		existing.values().forEach(byTitle -> byTitle.values().forEach(leftovers::addAll));
+		// Startups that have left the program no longer owe its documents. One an admin moved to another program
+		// keeps what it uploaded here: that stays as this program's history.
+		Set<UUID> movedAway = programTeamMoveRepository.findByFromProgramId(program.getId()).stream()
+				.map(ProgramTeamMove::getOrganizationId)
+				.collect(Collectors.toSet());
+		existing.forEach((organizationId, byTitle) -> {
+			if (!movedAway.contains(organizationId)) {
+				byTitle.values().forEach(leftovers::addAll);
+			}
+		});
 		if (!leftovers.isEmpty()) {
 			itemRepository.deleteAll(leftovers);
 		}
@@ -322,6 +340,7 @@ public class DocumentRequestService {
 		AppUser actor = domainLookupService.requireUser(request.actorId());
 		assertCanAttach(actor, item);
 		StoredDocument document = storedDocumentRepository.findById(request.storedDocumentId())
+				.filter(found -> found.getKind() != DocumentKind.PEER_EVIDENCE)
 				.orElseThrow(() -> new ResourceNotFoundException(
 						"Stored document not found: " + request.storedDocumentId()));
 		if (document.getUserId() != null && !document.getUserId().equals(actor.getId())) {
@@ -355,10 +374,10 @@ public class DocumentRequestService {
 			AppUser actor,
 			Organization organization,
 			List<String> titles,
-			LocalDate dueDate,
-			MentorshipRequest request,
-			Meeting meeting,
-			Mentorship mentorship) {
+			@Nullable LocalDate dueDate,
+			@Nullable MentorshipRequest request,
+			@Nullable Meeting meeting,
+			@Nullable Mentorship mentorship) {
 		itemRepository.flush();
 		List<DocumentRequestItem> saved = new ArrayList<>();
 		for (int order = 0; order < titles.size(); order++) {
@@ -376,7 +395,7 @@ public class DocumentRequestService {
 			Organization organization,
 			String title,
 			int order,
-			LocalDate dueDate) {
+			@Nullable LocalDate dueDate) {
 		DocumentRequestItem item = new DocumentRequestItem();
 		item.setId(UUID.randomUUID());
 		item.setTitle(title);
@@ -403,6 +422,11 @@ public class DocumentRequestService {
 			normalized.add(trimmed);
 		}
 		return normalized;
+	}
+
+	private boolean coordinatesStartup(AppUser actor, UUID organizationId) {
+		return actor.has(UserRole.COORDINATOR) && ProgramCoordination.coordinatesStartup(organizationId, actor.getId(),
+				programStartupRepository, programRepository, programCoordinatorRepository);
 	}
 
 	private AppUser requireMentorActor(UUID actorId, UUID mentorId) {
