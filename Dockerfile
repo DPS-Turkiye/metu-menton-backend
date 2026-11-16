@@ -17,7 +17,7 @@ ENV APP_VERSION=$APP_VERSION
 WORKDIR /app
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-eng tesseract-ocr-tur \
+    && apt-get install -y --no-install-recommends curl tesseract-ocr tesseract-ocr-eng tesseract-ocr-tur \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd -r spring \
     && useradd -r -g spring spring
@@ -29,6 +29,11 @@ RUN chown -R spring:spring /app
 USER spring:spring
 
 EXPOSE 8080
+
+# /api/health answers 503 unless the database and Redis are up. The start period covers Flyway on an empty
+# database (every migration from V1) before the first check counts.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=180s --retries=3 \
+    CMD curl -fsS -o /dev/null "http://localhost:${SERVER_PORT:-8080}/api/health" || exit 1
 
 # Heap is half the machine's memory, so a bigger instance needs no image change; the other half is for
 # the OS, Docker and the JVM's own non-heap memory (a 2 GiB t3.small gets ~1 GiB, was a fixed 512 MB).

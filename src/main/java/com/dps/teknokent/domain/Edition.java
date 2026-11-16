@@ -14,6 +14,7 @@ public enum Edition {
 
 	TEKNOKENT(
 			EnumSet.of(ProgramType.STARTUP_MENTORING),
+			EnumSet.allOf(AiFeature.class),
 			List.of(
 					"/api/admin/programs/*/mentors/*/remove",
 					"/api/admin/programs/*/startups/*/move",
@@ -27,8 +28,11 @@ public enum Edition {
 					"/api/organizations/*/bottlenecks/**",
 					"/api/organizations/*/progress/**")),
 
+	// No ODTÜ data goes to an AI provider: CV, syllabus and matching stay off by decision, and the meeting report
+	// and task handover too until ODTÜ agrees to an outside provider (and its prerequisites ship).
 	ODTU(
 			EnumSet.of(ProgramType.PEER_MENTORING, ProgramType.OFFICE_HOURS),
+			EnumSet.noneOf(AiFeature.class),
 			List.of(
 					"/api/peer-mentoring/**",
 					"/api/student/**",
@@ -48,15 +52,22 @@ public enum Edition {
 					"/api/users/*/badges/**"));
 
 	private final Set<ProgramType> programTypes;
+	private final Set<AiFeature> aiFeatures;
 	private final List<String> ownPaths;
 
-	Edition(Set<ProgramType> programTypes, List<String> ownPaths) {
+	Edition(Set<ProgramType> programTypes, Set<AiFeature> aiFeatures, List<String> ownPaths) {
 		this.programTypes = programTypes;
+		this.aiFeatures = aiFeatures;
 		this.ownPaths = ownPaths;
 	}
 
 	public boolean allows(ProgramType type) {
 		return type != null && programTypes.contains(type);
+	}
+
+	/** False for an AI feature this edition never runs, whatever its switch says. */
+	public boolean allowsAi(AiFeature feature) {
+		return aiFeatures.contains(feature);
 	}
 
 	/** Path patterns only this edition serves; every other edition answers 404 for them. */
@@ -77,7 +88,8 @@ public enum Edition {
 	 */
 	public static Edition parse(String value) {
 		if (value == null || value.isBlank()) {
-			throw new IllegalStateException("app.edition (APP_EDITION) is blank; set it to TEKNOKENT or ODTU.");
+			throw new IllegalStateException(
+					"app.edition (APP_EDITION) is missing or blank; set it to TEKNOKENT or ODTU.");
 		}
 		try {
 			return valueOf(value.trim().toUpperCase(Locale.ROOT));

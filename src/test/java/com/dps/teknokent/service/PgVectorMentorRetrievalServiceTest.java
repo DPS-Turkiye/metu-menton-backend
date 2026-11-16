@@ -23,7 +23,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.PreparedStatementSetter;
 import org.springframework.jdbc.core.RowMapper;
-import org.springframework.test.util.ReflectionTestUtils;
 
 import com.dps.teknokent.dto.responses.MentorEvidenceResponse;
 import com.dps.teknokent.dto.responses.MentorProfileResponse;
@@ -42,13 +41,13 @@ class PgVectorMentorRetrievalServiceTest {
 
 	@BeforeEach
 	void setUp() {
-		service = new PgVectorMentorRetrievalService(jdbcTemplate, aiProviderClient);
-		ReflectionTestUtils.setField(service, "enabled", true);
+		service = new PgVectorMentorRetrievalService(jdbcTemplate, aiProviderClient, TestAiFeatures.allOn());
 	}
 
 	@Test
 	void shortlist_throwsWhenPgVectorMatchingIsDisabled() {
-		ReflectionTestUtils.setField(service, "enabled", false);
+		service = new PgVectorMentorRetrievalService(jdbcTemplate, aiProviderClient,
+				TestAiFeatures.withoutPgvector());
 
 		assertThatThrownBy(() -> service.shortlist("startup need", List.of(), "openai",
 				"text-embedding-3-small", 5))

@@ -17,7 +17,7 @@ public class EditionService {
 
 	private final Edition edition;
 
-	public EditionService(@Value("${app.edition:TEKNOKENT}") String edition) {
+	public EditionService(@Value("${app.edition:}") String edition) {
 		this.edition = Edition.parse(edition);
 		log.info("Running as the {} edition", this.edition);
 	}

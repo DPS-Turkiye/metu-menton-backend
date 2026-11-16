@@ -14,9 +14,9 @@ Browser ──► Next.js frontend (Amplify) ──► this backend ──► Po
 
 ## Two editions
 
-One codebase runs as two deployments, picked by `APP_EDITION`:
+One codebase runs as two deployments, picked by `APP_EDITION` (required; the app does not start without it):
 
-- **TEKNOKENT** (default): startup mentoring: programs, teams, mentors, mentorship requests, meetings and the meeting
+- **TEKNOKENT**: startup mentoring: programs, teams, mentors, mentorship requests, meetings and the meeting
   assistant.
 - **ODTU**: ODTÜ office hours (launched from Moodle over LTI 1.3) and İŞKUR peer mentoring with daily, weekly and
   meeting reports.
