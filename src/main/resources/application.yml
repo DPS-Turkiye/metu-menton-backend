@@ -130,14 +130,24 @@ app:
       enabled: ${NOTIFICATION_REMINDERS_ENABLED:true}
       interval-ms: ${NOTIFICATION_REMINDERS_INTERVAL_MS:60000}
   s3:
-    region: ${AWS_REGION:}
+    # No endpoint: AWS S3, with the AWS region and keys unless the AWS_S3_* ones are set. An endpoint: an
+    # S3-compatible store such as MinIO, which only ever gets its own AWS_S3_* keys (S3Properties). The public
+    # endpoint is the address presigned links are signed for.
+    region: ${AWS_S3_REGION:}
     bucket: ${AWS_S3_BUCKET:}
-    access-key-id: ${AWS_ACCESS_KEY_ID:}
-    secret-access-key: ${AWS_SECRET_ACCESS_KEY:}
+    endpoint: ${AWS_S3_ENDPOINT:}
+    public-endpoint: ${AWS_S3_PUBLIC_ENDPOINT:}
+    access-key-id: ${AWS_S3_ACCESS_KEY_ID:}
+    secret-access-key: ${AWS_S3_SECRET_ACCESS_KEY:}
+    aws-region: ${AWS_REGION:}
+    aws-access-key-id: ${AWS_ACCESS_KEY_ID:}
+    aws-secret-access-key: ${AWS_SECRET_ACCESS_KEY:}
   registration:
     allowed-email-domains: ${REGISTRATION_ALLOWED_EMAIL_DOMAINS:}
   mail:
     region: ${AWS_REGION:eu-central-1}
+    access-key-id: ${AWS_ACCESS_KEY_ID:}
+    secret-access-key: ${AWS_SECRET_ACCESS_KEY:}
     from: ${MAIL_FROM:}
     public-url: ${APP_PUBLIC_URL:https://menton.com.tr}
   realtime:
