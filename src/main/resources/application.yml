@@ -146,6 +146,9 @@ app:
     aws-secret-access-key: ${AWS_SECRET_ACCESS_KEY:}
   registration:
     allowed-email-domains: ${REGISTRATION_ALLOWED_EMAIL_DOMAINS:}
+  bootstrap:
+    # ROLE:email:firebaseUid,... (ADMIN or COORDINATOR): staff accounts created at startup when missing (StaffBootstrap).
+    staff: ${APP_BOOTSTRAP_STAFF:}
   mail:
     region: ${AWS_REGION:eu-central-1}
     access-key-id: ${AWS_ACCESS_KEY_ID:}
