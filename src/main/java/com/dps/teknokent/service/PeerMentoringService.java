@@ -80,7 +80,7 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class PeerMentoringService {
 
-	private static final Set<MentorshipRequestStatus> OPEN = EnumSet.of(MentorshipRequestStatus.PENDING,
+	static final Set<MentorshipRequestStatus> OPEN = EnumSet.of(MentorshipRequestStatus.PENDING,
 			MentorshipRequestStatus.MORE_INFO_REQUESTED, MentorshipRequestStatus.COUNTER_PROPOSED);
 	private static final Locale TR = Locale.forLanguageTag("tr");
 	/** "Bu hafta müsait": a free slot within the next seven days. */

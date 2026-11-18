@@ -43,6 +43,7 @@ import com.dps.teknokent.dto.requests.ReplaceProgramPhasesRequest;
 import com.dps.teknokent.dto.requests.UpdateProgramDetailsRequest;
 import com.dps.teknokent.dto.responses.CoordinatorOverviewResponse;
 import com.dps.teknokent.dto.responses.CoordinatorProgramResponse;
+import com.dps.teknokent.dto.responses.ProgramCountsResponse;
 import com.dps.teknokent.dto.responses.ProgramEventResponse;
 import com.dps.teknokent.dto.responses.ProgramPhaseResponse;
 import com.dps.teknokent.entity.ActionItem;
@@ -127,6 +128,7 @@ public class CoordinatorProgramService {
 	private final MeetingNoteRepository meetingNoteRepository;
 	private final MentorshipRequestRepository mentorshipRequestRepository;
 	private final TeamChangeRequestRepository teamChangeRequestRepository;
+	private final ProgramParticipantCounts participantCounts;
 
 	public enum HealthBucket {
 		HEALTHY,
@@ -153,7 +155,8 @@ public class CoordinatorProgramService {
 	public List<CoordinatorProgramResponse> list(UUID actorId) {
 		List<Program> programs = managedPrograms(requireCoordinatorOrAdmin(actorId));
 		Snapshot snapshot = snapshot(programs);
-		return programs.stream().map(program -> summarize(program, snapshot)).toList();
+		Map<UUID, ProgramCountsResponse> counts = participantCounts.of(programs);
+		return programs.stream().map(program -> summarize(program, snapshot, counts)).toList();
 	}
 
 	@Transactional(readOnly = true)
@@ -633,7 +636,7 @@ public class CoordinatorProgramService {
 
 	private CoordinatorProgramResponse.Detail detailOf(Program program) {
 		Snapshot snapshot = snapshot(List.of(program));
-		CoordinatorProgramResponse summary = summarize(program, snapshot);
+		CoordinatorProgramResponse summary = summarize(program, snapshot, participantCounts.of(List.of(program)));
 		List<ProgramStartup> startups = snapshot.startups().getOrDefault(program.getId(), List.of());
 		List<ProgramStartup> awaiting = awaitingMatch(program, startups, snapshot);
 		List<CoordinatorProgramResponse.AwaitingTeam> awaitingTeams = awaiting.stream()
@@ -714,7 +717,8 @@ public class CoordinatorProgramService {
 				.toList();
 	}
 
-	private CoordinatorProgramResponse summarize(Program program, Snapshot snapshot) {
+	private CoordinatorProgramResponse summarize(Program program, Snapshot snapshot,
+			Map<UUID, ProgramCountsResponse> counts) {
 		List<ProgramStartup> startups = snapshot.startups().getOrDefault(program.getId(), List.of());
 		List<ProgramMentor> mentors = snapshot.mentors().getOrDefault(program.getId(), List.of());
 		List<ProgramPhase> phases = snapshot.phases().getOrDefault(program.getId(), List.of());
@@ -749,7 +753,8 @@ public class CoordinatorProgramService {
 				current == null ? null : toPhase(current),
 				phases.stream().map(CoordinatorProgramService::toPhase).toList(),
 				ProgramCalendar.currentWeek(program.getStartDate(), program.getEndDate(), snapshot.today()),
-				ProgramCalendar.totalWeeks(program.getStartDate(), program.getEndDate()));
+				ProgramCalendar.totalWeeks(program.getStartDate(), program.getEndDate()),
+				counts.getOrDefault(program.getId(), ProgramCountsResponse.NONE));
 	}
 
 	private CoordinatorProgramResponse.Health health(Program program, Snapshot snapshot) {

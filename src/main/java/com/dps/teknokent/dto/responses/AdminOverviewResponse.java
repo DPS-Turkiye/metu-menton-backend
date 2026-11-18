@@ -33,6 +33,9 @@ public record AdminOverviewResponse(
 			ProgramStatus status,
 			ProgramType type,
 			Instant createdAt,
+			/* The planned run; null while a draft has none. */
+			@Nullable LocalDate startDate,
+			@Nullable LocalDate endDate,
 			/* The first coordinator; null when the program has none yet ("Atanmadı"). */
 			@Nullable UUID coordinatorId,
 			/* Every coordinator, comma-separated; an admin who created the program is not listed. */
@@ -43,7 +46,9 @@ public record AdminOverviewResponse(
 			int acceptedMentorCount,
 			int pendingMentorCount,
 			List<StartupRow> startups,
-			List<MentorMembershipRow> mentors) {
+			List<MentorMembershipRow> mentors,
+			/* A peer or Office Hours program's participants; both parts null for a startup program. */
+			ProgramCountsResponse counts) {
 	}
 
 	public record StartupRow(
