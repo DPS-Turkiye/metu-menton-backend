@@ -42,6 +42,7 @@ import com.dps.teknokent.dto.requests.CreateProgramEventRequest;
 import com.dps.teknokent.dto.requests.ExtractSyllabusPhasesRequest;
 import com.dps.teknokent.dto.requests.NewCoordinatorInput;
 import com.dps.teknokent.dto.responses.CoordinatorProgramResponse;
+import com.dps.teknokent.dto.responses.ProgramCountsResponse;
 import com.dps.teknokent.dto.responses.ProgramEligibleEmailResponse;
 import com.dps.teknokent.dto.responses.ProgramEventResponse;
 import com.dps.teknokent.dto.responses.SyllabusPhasesResponse;
@@ -99,7 +100,11 @@ class CoordinatorProgramControllerTest {
 				.with(user("test-user")))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$[0].name").value("METU Stars 2026"))
-				.andExpect(jsonPath("$[0].lifecycle").value("ACTIVE"));
+				.andExpect(jsonPath("$[0].lifecycle").value("ACTIVE"))
+				.andExpect(jsonPath("$[0].counts.peer.students").value(312))
+				.andExpect(jsonPath("$[0].counts.peer.peerMentors").value(38))
+				.andExpect(jsonPath("$[0].counts.peer.openRequests").value(14))
+				.andExpect(jsonPath("$[0].counts.peer.activeCategories").value(2));
 	}
 
 	@Test
@@ -463,6 +468,7 @@ class CoordinatorProgramControllerTest {
 				PROGRAM_ID, "METU Stars 2026", ProgramStatus.ACTIVE, ProgramLifecycle.ACTIVE,
 				ProgramType.STARTUP_MENTORING,
 				null, null, null,
-				ACTOR_ID, "Elif Demir", 42, 28, 3, 64, 6, 5, 4, null, List.of(), null, null);
+				ACTOR_ID, "Elif Demir", 42, 28, 3, 64, 6, 5, 4, null, List.of(), null, null,
+				new ProgramCountsResponse(new ProgramCountsResponse.Peer(312, 38, 14, 2), null));
 	}
 }

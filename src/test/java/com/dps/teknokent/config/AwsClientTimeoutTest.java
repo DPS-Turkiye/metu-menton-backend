@@ -21,7 +21,8 @@ class AwsClientTimeoutTest {
 
 	@Test
 	void s3GivesUpOnAWholeCallAfterThirtySeconds() {
-		try (S3Client s3 = new S3Config().s3Client("eu-central-1", "", "")) {
+		try (S3Client s3 = new S3Config().s3Client(new S3Properties("", "", "", "", "", "", "eu-central-1", "", ""),
+				"TEKNOKENT")) {
 			assertThat(s3.serviceClientConfiguration().overrideConfiguration().apiCallTimeout())
 					.contains(Duration.ofSeconds(30));
 		}

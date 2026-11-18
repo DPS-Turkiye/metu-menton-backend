@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Both editions side by side from this checkout, each with its own Postgres and Redis (never your usual stack's):
 #   TEKNOKENT  app :8080  postgres :5435  redis :6381   (compose project menton-teknokent, your .env)
-#   ODTU       app :8090  postgres :5434  redis :6380   (compose project menton-odtu, .env.odtu)
+#   ODTU       app :8090  postgres :5434  redis :6380  minio :9000   (compose project menton-odtu, .env.odtu)
 # Stop with dev/editions/down.sh; add --volumes there to drop both databases.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
@@ -13,12 +13,14 @@ fi
 
 # .env.odtu = .env minus the keys the ODTÜ stack overrides, plus those overrides.
 overrides=dev/editions/odtu.env
-keys=$(grep -E '^[A-Z_]+=' "$overrides" | cut -d= -f1 | paste -sd'|' -)
+keys=$(grep -E '^[A-Z0-9_]+=' "$overrides" | cut -d= -f1 | paste -sd'|' -)
 { grep -vE "^(${keys})=" .env; echo; cat "$overrides"; } > .env.odtu
 
 export APP_IMAGE=menton-editions-app:local
 APP_PORT=8080 DATABASE_PORT=5435 REDIS_PORT=6381 APP_ENV_FILE=.env \
   docker compose -p menton-teknokent up -d --build app
+APP_PORT=8090 DATABASE_PORT=5434 REDIS_PORT=6380 APP_ENV_FILE=.env.odtu \
+  docker compose -p menton-odtu --profile minio up -d --wait minio
 APP_PORT=8090 DATABASE_PORT=5434 REDIS_PORT=6380 APP_ENV_FILE=.env.odtu \
   docker compose -p menton-odtu up -d app
 

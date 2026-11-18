@@ -50,5 +50,8 @@ app:
   s3:
     region: eu-central-1
     bucket: test-bucket
+    # An S3-compatible store, as an ODTÜ deployment has: the ODTU edition refuses a bucket on AWS S3 (S3Config).
+    # Nothing calls it; the AWS path is covered by S3ConfigTest.
+    endpoint: http://localhost:9000
     access-key-id: test
     secret-access-key: test

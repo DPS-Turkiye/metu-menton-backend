@@ -37,6 +37,7 @@ import com.dps.teknokent.domain.UserAccountStatus;
 import com.dps.teknokent.domain.UserRole;
 import com.dps.teknokent.dto.responses.AdminOverviewResponse;
 import com.dps.teknokent.dto.responses.MentorshipResponse;
+import com.dps.teknokent.dto.responses.ProgramCountsResponse;
 import com.dps.teknokent.entity.AppUser;
 import com.dps.teknokent.entity.Bottleneck;
 import com.dps.teknokent.entity.Meeting;
@@ -89,6 +90,8 @@ class AdminOverviewServiceTest {
 	private ProgramCoordinatorRepository programCoordinatorRepository;
 	@Mock
 	private LoginProvisioner loginProvisioner;
+	@Mock
+	private ProgramParticipantCounts participantCounts;
 
 	@InjectMocks
 	private AdminOverviewService service;
@@ -139,6 +142,22 @@ class AdminOverviewServiceTest {
 		assertThat(programs.get(2).coordinatorIds()).isEmpty();
 		assertThat(programs.get(2).coordinatorId()).isNull();
 		assertThat(programs).extracting(row -> row.type()).containsOnly(ProgramType.STARTUP_MENTORING);
+		assertThat(programs).extracting(row -> row.counts()).containsOnly(ProgramCountsResponse.NONE);
+	}
+
+	@Test
+	void anOfficeHoursProgramsRowCarriesItsParticipantCounts() {
+		AppUser admin = person("Platform Yöneticisi", UserRole.ADMIN);
+		Program officeHours = program("ODTÜ Office Hours", admin.getId());
+		officeHours.setProgramType(ProgramType.OFFICE_HOURS);
+		when(domainLookupService.requireUser(admin.getId())).thenReturn(admin);
+		when(appUserRepository.findByStatusNot(UserAccountStatus.DELETED)).thenReturn(List.of(admin));
+		when(programRepository.findAllByOrderByCreatedAtDesc()).thenReturn(List.of(officeHours));
+		ProgramCountsResponse counts = new ProgramCountsResponse(null,
+				new ProgramCountsResponse.OfficeHours(2410, 1280, 86));
+		when(participantCounts.of(List.of(officeHours))).thenReturn(Map.of(officeHours.getId(), counts));
+
+		assertThat(service.overview(admin.getId()).programs().getFirst().counts()).isEqualTo(counts);
 	}
 
 	@Test
