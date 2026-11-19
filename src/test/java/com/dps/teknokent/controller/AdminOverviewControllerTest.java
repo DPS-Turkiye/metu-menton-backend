@@ -28,6 +28,7 @@ import com.dps.teknokent.domain.ProgramMentorStatus;
 import com.dps.teknokent.domain.ProgramStatus;
 import com.dps.teknokent.domain.ProgramType;
 import com.dps.teknokent.dto.responses.AdminOverviewResponse;
+import com.dps.teknokent.dto.responses.ProgramCountsResponse;
 import com.dps.teknokent.service.AdminOverviewService;
 
 @WebMvcTest(AdminOverviewController.class)
@@ -51,9 +52,11 @@ class AdminOverviewControllerTest {
 	void writesStatusesTypesAndSeveritiesAsTheirNames() throws Exception {
 		when(adminOverviewService.overview(ACTOR_ID)).thenReturn(new AdminOverviewResponse(
 				List.of(new AdminOverviewResponse.ProgramRow(PROGRAM_ID, "METU Stars 2026", ProgramStatus.ACTIVE,
-						ProgramType.STARTUP_MENTORING, AT, null, null, List.of(), 0, 0, 1, List.of(),
+						ProgramType.STARTUP_MENTORING, AT, LocalDate.parse("2026-02-01"), null, null, null, List.of(),
+						0, 0, 1, List.of(),
 						List.of(new AdminOverviewResponse.MentorMembershipRow(MENTOR_ID, "Kemal Arslan",
-								"kemal@mentor.test", ProgramMentorStatus.PENDING)))),
+								"kemal@mentor.test", ProgramMentorStatus.PENDING)),
+						new ProgramCountsResponse(null, new ProgramCountsResponse.OfficeHours(2410, 1280, 86)))),
 				List.of(),
 				List.of(new AdminOverviewResponse.MentorshipRow(UUID.randomUUID(), MENTOR_ID, "Kemal Arslan", ORG_ID,
 						"Vega", MentorshipStatus.ACTIVE, LocalDate.parse("2026-09-01"), null, 40, 3L, 1, 2,
@@ -70,6 +73,10 @@ class AdminOverviewControllerTest {
 				.andExpect(jsonPath("$.programs[0].status").value("ACTIVE"))
 				.andExpect(jsonPath("$.programs[0].type").value("STARTUP_MENTORING"))
 				.andExpect(jsonPath("$.programs[0].mentors[0].status").value("PENDING"))
+				.andExpect(jsonPath("$.programs[0].startDate").value("2026-02-01"))
+				.andExpect(jsonPath("$.programs[0].counts.officeHours.academicians").value(2410))
+				.andExpect(jsonPath("$.programs[0].counts.officeHours.withAvailability").value(1280))
+				.andExpect(jsonPath("$.programs[0].counts.officeHours.awaitingDecision").value(86))
 				.andExpect(jsonPath("$.mentorships[0].status").value("ACTIVE"))
 				.andExpect(jsonPath("$.requests[0].status").value("MORE_INFO_REQUESTED"))
 				.andExpect(jsonPath("$.bottlenecks[0].severity").value("HIGH"))

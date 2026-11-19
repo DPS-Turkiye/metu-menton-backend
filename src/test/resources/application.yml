@@ -8,7 +8,9 @@ spring:
       name: test
       password: test
   datasource:
-    url: jdbc:h2:mem:testdb;MODE=PostgreSQL;DATABASE_TO_LOWER=true;DEFAULT_NULL_ORDERING=HIGH
+    # One in-memory database per Spring test context: with create-drop, a context the test-context cache evicts
+    # drops its schema on close, and a database shared by name would vanish under the contexts still using it.
+    url: jdbc:h2:mem:test-${random.uuid};MODE=PostgreSQL;DATABASE_TO_LOWER=true;DEFAULT_NULL_ORDERING=HIGH
     driver-class-name: org.h2.Driver
     username: sa
     password:
@@ -30,6 +32,7 @@ meeting:
   transcript-bot:
     enabled: false
 app:
+  edition: TEKNOKENT
   notifications:
     reminders:
       enabled: false
@@ -47,5 +50,8 @@ app:
   s3:
     region: eu-central-1
     bucket: test-bucket
+    # An S3-compatible store, as an ODTÜ deployment has: the ODTU edition refuses a bucket on AWS S3 (S3Config).
+    # Nothing calls it; the AWS path is covered by S3ConfigTest.
+    endpoint: http://localhost:9000
     access-key-id: test
     secret-access-key: test

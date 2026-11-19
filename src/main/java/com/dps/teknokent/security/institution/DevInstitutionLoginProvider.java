@@ -22,6 +22,7 @@ import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.dps.teknokent.config.AppProfiles;
 import com.dps.teknokent.domain.IdentityKind;
 import com.dps.teknokent.domain.InstitutionDataSource;
 import com.dps.teknokent.domain.StudyLevel;
@@ -47,7 +48,7 @@ public class DevInstitutionLoginProvider implements InstitutionLoginProvider {
 
 	public static final String ID = "odtu";
 	static final String PERSONA_PARAM = "persona";
-	static final String DEV_PROFILE = "dev";
+	static final String DEV_PROFILE = AppProfiles.DEV;
 	private static final String FIXTURE = "dev/odtu-personas.json";
 
 	private final Map<String, DevPersona> personas;
