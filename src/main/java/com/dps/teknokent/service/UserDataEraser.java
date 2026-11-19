@@ -28,6 +28,7 @@ import com.dps.teknokent.domain.UserDeletionCleanupKind;
 import com.dps.teknokent.domain.UserRole;
 import com.dps.teknokent.dto.responses.PeerWeeklySummary;
 import com.dps.teknokent.entity.AppUser;
+import com.dps.teknokent.entity.IskurOnboarding;
 import com.dps.teknokent.entity.Meeting;
 import com.dps.teknokent.entity.MeetingProposal;
 import com.dps.teknokent.entity.MentorProfile;
@@ -76,7 +77,8 @@ class UserDataEraser {
 			MentorshipStatus.PLANNED, MentorshipStatus.ACTIVE, MentorshipStatus.PAUSED);
 	/** Files about the person, deleted wherever they hang. */
 	private static final Set<DocumentKind> PERSONAL_KINDS = EnumSet.of(
-			DocumentKind.CV, DocumentKind.AVATAR, DocumentKind.PROFILE_PDF, DocumentKind.PEER_EVIDENCE);
+			DocumentKind.CV, DocumentKind.AVATAR, DocumentKind.PROFILE_PDF, DocumentKind.PEER_EVIDENCE,
+			DocumentKind.ISKUR_DOCUMENT);
 	/** Files that belong to a program, whoever uploaded them. */
 	private static final Set<DocumentKind> PROGRAM_KINDS = EnumSet.of(
 			DocumentKind.SYLLABUS, DocumentKind.WEEKLY_PROGRAM);
@@ -401,6 +403,11 @@ class UserDataEraser {
 			entityManager.remove(interest);
 		}
 		erasePeerReports(id);
+		// Through the entity, so its ranges, preferences, ratings and roles go with it; its files went above.
+		entityManager.createQuery("select o from IskurOnboarding o where o.userId = :id", IskurOnboarding.class)
+				.setParameter("id", id)
+				.getResultList()
+				.forEach(entityManager::remove);
 		entityManager.flush();
 
 		update("delete from ProfileAnalysis a where a.appUserId = :id", "id", id);
