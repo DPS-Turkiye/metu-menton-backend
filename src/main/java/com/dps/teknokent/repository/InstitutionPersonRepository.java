@@ -8,6 +8,7 @@ import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 
+import com.dps.teknokent.domain.InstitutionDataSource;
 import com.dps.teknokent.entity.InstitutionPerson;
 
 public interface InstitutionPersonRepository extends JpaRepository<InstitutionPerson, UUID> {
@@ -15,6 +16,8 @@ public interface InstitutionPersonRepository extends JpaRepository<InstitutionPe
 	Optional<InstitutionPerson> findByInstitutionAndPersistentId(String institution, String persistentId);
 
 	Optional<InstitutionPerson> findFirstByUserIdOrderBySyncedAtDesc(UUID userId);
+
+	Optional<InstitutionPerson> findFirstByUserIdAndSource(UUID userId, InstitutionDataSource source);
 
 	List<InstitutionPerson> findByUserIdIn(Collection<UUID> userIds);
 

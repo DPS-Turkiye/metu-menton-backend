@@ -60,6 +60,8 @@ class EditionSecurityTest {
 					.andExpect(status().isNotFound());
 			mockMvc.perform(get("/api/iskur/onboarding").with(httpBasic("test", "test")))
 					.andExpect(status().isNotFound());
+			mockMvc.perform(post("/api/auth/register/student").with(httpBasic("test", "test")))
+					.andExpect(status().isNotFound());
 		}
 
 		@Test
