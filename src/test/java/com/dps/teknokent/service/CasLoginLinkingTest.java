@@ -13,6 +13,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -108,7 +109,8 @@ class CasLoginLinkingTest {
 				"mail", List.of("E123456@metu.edu.tr"), "eduPersonAffiliation", List.of("student")));
 
 		// The code is for the account that already existed; no second one was made.
-		verify(values).set(eq(InstitutionLoginService.CODE_KEY + code), eq(signedUp.getId().toString()), any());
+		verify(values).set(eq(InstitutionLoginService.CODE_KEY + code), eq(signedUp.getId().toString()),
+				eq(InstitutionLoginService.CODE_TTL));
 		verify(users, never()).save(argThatIsNot(signedUp));
 		assertThat(signedUp.getFirebaseUid()).isEqualTo("firebase-email-login");
 		assertThat(signedUp.getProgramId()).isEqualTo(program);
@@ -139,7 +141,8 @@ class CasLoginLinkingTest {
 		String code = signInThroughCas("e123456", Map.of(
 				"mail", List.of("e123456@metu.edu.tr"), "eduPersonAffiliation", List.of("student")));
 
-		verify(values).set(eq(InstitutionLoginService.CODE_KEY + code), eq(signedUp.getId().toString()), any());
+		verify(values).set(eq(InstitutionLoginService.CODE_KEY + code), eq(signedUp.getId().toString()),
+				eq(InstitutionLoginService.CODE_TTL));
 		verify(identities, never()).save(any());
 	}
 
@@ -193,8 +196,9 @@ class CasLoginLinkingTest {
 		String code = signInThroughCas("idari1", Map.of("mail", List.of("idari1@metu.edu.tr"),
 				"eduPersonAffiliation", List.of("staff")));
 
-		verify(values).set(eq(InstitutionLoginService.SIGNUP_CODE_KEY + code), anyString(), any());
-		verify(values, never()).set(startsWith(InstitutionLoginService.CODE_KEY), anyString(), any());
+		verify(values).set(eq(InstitutionLoginService.SIGNUP_CODE_KEY + code), anyString(),
+				eq(InstitutionLoginService.CODE_TTL));
+		verify(values, never()).set(startsWith(InstitutionLoginService.CODE_KEY), anyString(), any(Duration.class));
 		verify(users, never()).save(any());
 		verify(people, never()).save(any());
 	}
