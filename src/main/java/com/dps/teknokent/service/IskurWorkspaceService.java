@@ -86,6 +86,7 @@ public class IskurWorkspaceService {
 	private final ProgramRepository programs;
 	private final InstitutionPersonRepository institutionPeople;
 	private final ApplicationEventPublisher events;
+	private final IskurSkillService skillService;
 
 	/** The program's coordinators and the admin may read it. */
 	@Transactional(readOnly = true)
@@ -93,7 +94,7 @@ public class IskurWorkspaceService {
 		return build(requireProgram(actorId, programId));
 	}
 
-	/** Creates the org chart's four units and eight teams in a program that has no structure yet. */
+	/** Creates the org chart's four units, eight teams and Figma 03's skills in a program with no structure yet. */
 	@Transactional
 	public IskurWorkspaceResponse createDefaultStructure(UUID actorId, UUID programId) {
 		Program program = requireEditable(actorId, programId);
@@ -104,6 +105,7 @@ public class IskurWorkspaceService {
 		for (int u = 1; u <= DEFAULT_UNITS; u++) {
 			IskurUnit unit = units.save(new IskurUnit(program.getId(),
 					Texts.get(AppLanguage.TR, "iskur.defaultUnit" + u), u - 1, actorId, now));
+			skillService.seedDefaultSkills(program.getId(), unit.getId(), u);
 			for (int t = 1; t <= DEFAULT_TEAMS_PER_UNIT; t++) {
 				teams.save(new IskurTeam(unit, Texts.get(AppLanguage.TR, "iskur.defaultTeam" + u + "." + t), t - 1,
 						now));
@@ -274,7 +276,8 @@ public class IskurWorkspaceService {
 		return build(program);
 	}
 
-	private Program requireProgram(UUID actorId, UUID programId) {
+	/** A peer program the caller coordinates (or the admin); others are refused as in {@code requireManagedProgram}. */
+	Program requireProgram(UUID actorId, UUID programId) {
 		Program program = coordinatorProgramService.requireManagedProgram(actorId, programId);
 		if (program.getProgramType() != ProgramType.PEER_MENTORING) {
 			throw new InvalidRequestException(Texts.forRequest("error.iskurPeerProgramsOnly"));
@@ -286,7 +289,7 @@ public class IskurWorkspaceService {
 	 * A program the caller may change, locked for the rest of the transaction: the two-leader cap, the sub-groups and
 	 * "delete only when empty" are read-then-write rules, so two coordinators' changes must not interleave.
 	 */
-	private Program requireEditable(UUID actorId, UUID programId) {
+	Program requireEditable(UUID actorId, UUID programId) {
 		requireProgram(actorId, programId);
 		Program program = programs.findByIdForUpdate(programId)
 				.orElseThrow(() -> new ResourceNotFoundException(Texts.forRequest("error.iskurProgramNotFound")));

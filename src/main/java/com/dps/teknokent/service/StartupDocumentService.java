@@ -269,7 +269,7 @@ public class StartupDocumentService {
 	/** Peer mentor evidence has its own visibility rules (PeerMentorDocumentService), so it reads as missing here. */
 	private StoredDocument requireDocument(UUID documentId) {
 		return storedDocumentRepository.findById(documentId)
-				.filter(document -> document.getKind() != DocumentKind.PEER_EVIDENCE)
+				.filter(document -> !document.getKind().featureOwned())
 				.orElseThrow(() -> new ResourceNotFoundException("Document not found: " + documentId));
 	}
 
