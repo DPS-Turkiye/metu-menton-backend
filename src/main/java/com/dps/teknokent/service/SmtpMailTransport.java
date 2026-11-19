@@ -14,6 +14,7 @@ import org.springframework.mail.javamail.JavaMailSenderImpl;
 
 import com.dps.teknokent.config.SmtpProperties;
 import com.dps.teknokent.domain.SmtpStartTls;
+import com.dps.teknokent.domain.SmtpTls;
 import com.dps.teknokent.util.EmailDomains;
 
 import jakarta.mail.SendFailedException;
@@ -73,9 +74,13 @@ public class SmtpMailTransport implements MailTransport {
 		session.setProperty("mail.smtp.connectiontimeout", timeout);
 		session.setProperty("mail.smtp.timeout", timeout);
 		session.setProperty("mail.smtp.writetimeout", timeout);
+		boolean implicit = smtp.tlsMode() == SmtpTls.IMPLICIT;
 		SmtpStartTls startTls = smtp.startTls();
-		session.setProperty("mail.smtp.starttls.enable", String.valueOf(startTls != SmtpStartTls.OFF));
-		session.setProperty("mail.smtp.starttls.required", String.valueOf(startTls == SmtpStartTls.REQUIRED));
+		session.setProperty("mail.smtp.ssl.enable", String.valueOf(implicit));
+		// Over TLS from the first byte there is nothing left to upgrade.
+		session.setProperty("mail.smtp.starttls.enable", String.valueOf(!implicit && startTls != SmtpStartTls.OFF));
+		session.setProperty("mail.smtp.starttls.required",
+				String.valueOf(!implicit && startTls == SmtpStartTls.REQUIRED));
 		// Encryption alone would still talk to anyone who answers on that address.
 		session.setProperty("mail.smtp.ssl.checkserveridentity", "true");
 		if (smtp.hasLogin()) {

@@ -155,7 +155,7 @@ class SmtpMailTransportTest {
 
 	@Test
 	void everyStepOfAConversationTimesOutAfterTenSeconds() {
-		Properties session = SmtpMailTransport.sender(new SmtpProperties("smtp.example.test", "", "", "", ""))
+		Properties session = SmtpMailTransport.sender(new SmtpProperties("smtp.example.test", "", "", "", "", ""))
 				.getJavaMailProperties();
 
 		assertThat(SmtpMailTransport.TIMEOUT).hasSeconds(10);
@@ -167,7 +167,7 @@ class SmtpMailTransportTest {
 	@Test
 	void encryptsAndChecksTheServersNameUnlessToldOtherwise() {
 		JavaMailSenderImpl byDefault = SmtpMailTransport.sender(
-				new SmtpProperties("smtp.example.test", "", "", "", ""));
+				new SmtpProperties("smtp.example.test", "", "", "", "", ""));
 		assertThat(byDefault.getPort()).isEqualTo(587);
 		assertThat(byDefault.getDefaultEncoding()).isEqualTo("UTF-8");
 		assertThat(byDefault.getJavaMailProperties()).containsEntry("mail.smtp.starttls.enable", "true")
@@ -176,20 +176,62 @@ class SmtpMailTransportTest {
 				.doesNotContainKey("mail.smtp.auth");
 
 		Properties optional = SmtpMailTransport.sender(
-				new SmtpProperties("smtp.example.test", "25", "menton-relay", "relay-secret-1", "optional"))
+				new SmtpProperties("smtp.example.test", "25", "menton-relay", "relay-secret-1", "", "optional"))
 				.getJavaMailProperties();
 		assertThat(optional).containsEntry("mail.smtp.starttls.enable", "true")
 				.containsEntry("mail.smtp.starttls.required", "false")
 				.containsEntry("mail.smtp.auth", "true");
 
-		Properties off = SmtpMailTransport.sender(new SmtpProperties("smtp.example.test", "25", "", "", "off"))
+		Properties off = SmtpMailTransport.sender(new SmtpProperties("smtp.example.test", "25", "", "", "", "off"))
 				.getJavaMailProperties();
 		assertThat(off).containsEntry("mail.smtp.starttls.enable", "false")
 				.containsEntry("mail.smtp.starttls.required", "false");
 	}
 
+	@Test
+	void implicitTlsEncryptsFromTheFirstByteAndLeavesStartTlsOut() {
+		JavaMailSenderImpl implicit = SmtpMailTransport.sender(
+				new SmtpProperties("smtp.example.test", "", "menton-relay", "relay-secret-1", "implicit", "off"));
+
+		assertThat(implicit.getPort()).isEqualTo(465);
+		assertThat(implicit.getJavaMailProperties()).containsEntry("mail.smtp.ssl.enable", "true")
+				.containsEntry("mail.smtp.starttls.enable", "false")
+				.containsEntry("mail.smtp.starttls.required", "false")
+				.containsEntry("mail.smtp.ssl.checkserveridentity", "true")
+				.containsEntry("mail.smtp.timeout", "10000");
+		assertThat(SmtpMailTransport.sender(new SmtpProperties("smtp.example.test", "", "", "", "", ""))
+				.getJavaMailProperties()).containsEntry("mail.smtp.ssl.enable", "false");
+	}
+
+	// GreenMail's TLS port presents a certificate no JVM trusts, which is what an impostor's would look like.
+	@Test
+	void implicitTlsSendsNothingToAServerWhoseCertificateItCannotCheck(CapturedOutput output) {
+		GreenMail tlsServer = new GreenMail(ServerSetupTest.SMTPS.dynamicPort());
+		tlsServer.start();
+		try {
+			SmtpMailTransport transport = new SmtpMailTransport(new SmtpProperties("127.0.0.1",
+					String.valueOf(tlsServer.getSmtps().getPort()), "", "", "implicit", ""));
+
+			assertThat(transport.send(FROM, STUDENT, "Konu", "Metin")).isFalse();
+
+			assertThat(tlsServer.getReceivedMessages()).isEmpty();
+			assertThat(output).contains("could not be sent over SMTP").doesNotContain(STUDENT);
+		} finally {
+			tlsServer.stop();
+		}
+	}
+
+	@Test
+	void implicitTlsSendsNothingToAServerThatOnlySpeaksPlainSmtp() {
+		SmtpMailTransport transport = new SmtpMailTransport(new SmtpProperties("127.0.0.1",
+				String.valueOf(server.getSmtp().getPort()), "", "", "implicit", ""));
+
+		assertThat(transport.send(FROM, STUDENT, "Konu", "Metin")).isFalse();
+		assertThat(server.getReceivedMessages()).isEmpty();
+	}
+
 	private SmtpMailTransport transport(String startTls, String username, String password) {
 		return new SmtpMailTransport(new SmtpProperties("127.0.0.1", String.valueOf(server.getSmtp().getPort()),
-				username, password, startTls));
+				username, password, "", startTls));
 	}
 }

@@ -1,11 +1,13 @@
 package com.dps.teknokent.config;
 
+import java.util.Locale;
 import java.util.regex.Pattern;
 
 import org.jspecify.annotations.Nullable;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 import com.dps.teknokent.domain.SmtpStartTls;
+import com.dps.teknokent.domain.SmtpTls;
 
 /**
  * The SMTP server e-mail goes through when {@code APP_MAIL_TRANSPORT=smtp}. An empty username and password mean a
@@ -13,9 +15,10 @@ import com.dps.teknokent.domain.SmtpStartTls;
  * never reaches a placeholder's default.
  */
 @ConfigurationProperties(prefix = "app.mail.smtp")
-public record SmtpProperties(String host, String port, String username, String password, String starttls) {
+public record SmtpProperties(String host, String port, String username, String password, String tls, String starttls) {
 
-	private static final int DEFAULT_PORT = 587;
+	private static final int STARTTLS_PORT = 587;
+	private static final int IMPLICIT_TLS_PORT = 465;
 	private static final int HIGHEST_PORT = 65_535;
 	private static final Pattern HOST = Pattern.compile("^[A-Za-z0-9.-]+$");
 
@@ -24,17 +27,19 @@ public record SmtpProperties(String host, String port, String username, String p
 			@Nullable String port,
 			@Nullable String username,
 			@Nullable String password,
+			@Nullable String tls,
 			@Nullable String starttls) {
 		this.host = trimmed(host);
 		this.port = trimmed(port);
 		this.username = trimmed(username);
 		this.password = trimmed(password);
+		this.tls = trimmed(tls);
 		this.starttls = trimmed(starttls);
 	}
 
 	public int portNumber() {
 		if (port.isEmpty()) {
-			return DEFAULT_PORT;
+			return tlsMode() == SmtpTls.IMPLICIT ? IMPLICIT_TLS_PORT : STARTTLS_PORT;
 		}
 		int number;
 		try {
@@ -48,8 +53,25 @@ public record SmtpProperties(String host, String port, String username, String p
 		return number;
 	}
 
+	public SmtpTls tlsMode() {
+		return SmtpTls.parse(tls);
+	}
+
 	public SmtpStartTls startTls() {
 		return SmtpStartTls.parse(starttls);
+	}
+
+	/** Whether nothing can leave unencrypted: TLS from the first byte, or STARTTLS that is not allowed to fail. */
+	public boolean alwaysEncrypted() {
+		return tlsMode() == SmtpTls.IMPLICIT || startTls() == SmtpStartTls.REQUIRED;
+	}
+
+	/** The encryption in words, for the start-up log. */
+	public String encryption() {
+		if (tlsMode() == SmtpTls.IMPLICIT) {
+			return "TLS from the first byte";
+		}
+		return "STARTTLS " + startTls().name().toLowerCase(Locale.ROOT);
 	}
 
 	public boolean hasLogin() {
@@ -69,6 +91,7 @@ public record SmtpProperties(String host, String port, String username, String p
 			throw new IllegalStateException("SMTP_USERNAME and SMTP_PASSWORD go together: set both, or neither for"
 					+ " a server that needs no login.");
 		}
+		tlsMode();
 		portNumber();
 		startTls();
 	}
@@ -76,7 +99,7 @@ public record SmtpProperties(String host, String port, String username, String p
 	/** A record prints every component; this one must never print the password. */
 	@Override
 	public String toString() {
-		return "SmtpProperties[host=" + host + ", port=" + port + ", starttls=" + starttls + ", login="
+		return "SmtpProperties[host=" + host + ", port=" + port + ", tls=" + tls + ", starttls=" + starttls + ", login="
 				+ (hasLogin() ? "set" : "none") + "]";
 	}
 

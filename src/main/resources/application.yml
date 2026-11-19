@@ -163,6 +163,7 @@ app:
       port: ${SMTP_PORT:587}
       username: ${SMTP_USERNAME:}
       password: ${SMTP_PASSWORD:}
+      tls: ${SMTP_TLS:starttls}
       starttls: ${SMTP_STARTTLS:required}
     region: ${AWS_REGION:eu-central-1}
     access-key-id: ${AWS_ACCESS_KEY_ID:}

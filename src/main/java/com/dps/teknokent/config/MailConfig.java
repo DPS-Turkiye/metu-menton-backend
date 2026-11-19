@@ -13,7 +13,6 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Lazy;
 
 import com.dps.teknokent.domain.MailTransportType;
-import com.dps.teknokent.domain.SmtpStartTls;
 import com.dps.teknokent.service.DisabledMailTransport;
 import com.dps.teknokent.service.LogMailTransport;
 import com.dps.teknokent.service.MailTransport;
@@ -87,16 +86,16 @@ public class MailConfig {
 	private static MailTransport smtpTransport(SmtpProperties smtp, String from) {
 		smtp.requireUsable();
 		requireSender(from);
-		String startTls = smtp.startTls().name().toLowerCase(Locale.ROOT);
-		if (smtp.startTls() != SmtpStartTls.REQUIRED) {
+		if (!smtp.alwaysEncrypted()) {
 			if (smtp.hasLogin()) {
 				// "optional" too: whoever sits between the two servers can hide the STARTTLS offer.
-				throw new IllegalStateException("SMTP_USERNAME and SMTP_PASSWORD need SMTP_STARTTLS=required:"
-						+ " without it the login can cross the network unencrypted.");
+				throw new IllegalStateException("SMTP_USERNAME and SMTP_PASSWORD need SMTP_STARTTLS=required (or"
+						+ " SMTP_TLS=implicit): without it the login can cross the network unencrypted.");
 			}
-			log.warn("SMTP_STARTTLS={}: e-mails can cross the network to the mail server unencrypted.", startTls);
+			log.warn("SMTP_STARTTLS={}: e-mails can cross the network to the mail server unencrypted.",
+					smtp.startTls().name().toLowerCase(Locale.ROOT));
 		}
-		log.info("E-mail goes over SMTP: {}:{}, STARTTLS {}, {}.", smtp.host(), smtp.portNumber(), startTls,
+		log.info("E-mail goes over SMTP: {}:{}, {}, {}.", smtp.host(), smtp.portNumber(), smtp.encryption(),
 				smtp.hasLogin() ? "with a login" : "without a login");
 		return new SmtpMailTransport(smtp);
 	}

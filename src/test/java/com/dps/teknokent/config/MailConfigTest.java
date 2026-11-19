@@ -20,6 +20,7 @@ import org.springframework.core.env.StandardEnvironment;
 import org.springframework.core.io.FileSystemResource;
 
 import com.dps.teknokent.domain.SmtpStartTls;
+import com.dps.teknokent.domain.SmtpTls;
 import com.dps.teknokent.service.DisabledMailTransport;
 import com.dps.teknokent.service.LogMailTransport;
 import com.dps.teknokent.service.MailTransport;
@@ -69,6 +70,7 @@ class MailConfigTest {
 			"app.mail.smtp.port=0 | SMTP_PORT",
 			"app.mail.smtp.port=70000 | SMTP_PORT",
 			"app.mail.smtp.starttls=tls | SMTP_STARTTLS",
+			"app.mail.smtp.tls=ssl | SMTP_TLS",
 			"app.mail.smtp.username=menton-relay | SMTP_PASSWORD",
 			"app.mail.smtp.password=relay-secret-1 | SMTP_USERNAME",
 			"app.mail.smtp.username=menton-relay,app.mail.smtp.password=relay-secret-1,app.mail.smtp.starttls=optional"
@@ -102,6 +104,17 @@ class MailConfigTest {
 				});
 
 		assertThat(output).contains("STARTTLS required, with a login").doesNotContain("relay-secret-1")
+				.doesNotContain("unencrypted");
+	}
+
+	// Over TLS from the first byte SMTP_STARTTLS plays no part, so "off" there exposes nothing.
+	@Test
+	void aLoginOverImplicitTlsStartsOnPort465(CapturedOutput output) {
+		context.withPropertyValues(SMTP, HOST, FROM, "app.mail.smtp.username=menton-relay",
+				"app.mail.smtp.password=relay-secret-1", "app.mail.smtp.tls=implicit", "app.mail.smtp.starttls=off")
+				.run(started -> assertThat(started).hasNotFailed());
+
+		assertThat(output).contains("smtp.example.test:465, TLS from the first byte, with a login")
 				.doesNotContain("unencrypted");
 	}
 
@@ -146,6 +159,7 @@ class MailConfigTest {
 				"SMTP_PORT", "25",
 				"SMTP_USERNAME", "menton-relay",
 				"SMTP_PASSWORD", "relay-secret-1",
+				"SMTP_TLS", "Implicit",
 				"SMTP_STARTTLS", "Optional"));
 		SmtpProperties smtp = Binder.get(environment).bindOrCreate("app.mail.smtp", SmtpProperties.class);
 
@@ -155,6 +169,7 @@ class MailConfigTest {
 		assertThat(smtp.portNumber()).isEqualTo(25);
 		assertThat(smtp.username()).isEqualTo("menton-relay");
 		assertThat(smtp.password()).isEqualTo("relay-secret-1");
+		assertThat(smtp.tlsMode()).isEqualTo(SmtpTls.IMPLICIT);
 		assertThat(smtp.startTls()).isEqualTo(SmtpStartTls.OPTIONAL);
 	}
 
@@ -163,9 +178,11 @@ class MailConfigTest {
 	void withNoOrEmptyEnvironmentVariablesMailStaysOnSes() throws IOException {
 		assertThat(fromApplicationYml(Map.of()).getProperty("app.mail.transport")).isEqualTo("ses");
 
-		SmtpProperties empty = Binder.get(fromApplicationYml(Map.of("SMTP_PORT", "", "SMTP_STARTTLS", "")))
+		Map<String, Object> declaredEmpty = Map.of("SMTP_PORT", "", "SMTP_TLS", "", "SMTP_STARTTLS", "");
+		SmtpProperties empty = Binder.get(fromApplicationYml(declaredEmpty))
 				.bindOrCreate("app.mail.smtp", SmtpProperties.class);
 		assertThat(empty.portNumber()).isEqualTo(587);
+		assertThat(empty.tlsMode()).isEqualTo(SmtpTls.STARTTLS);
 		assertThat(empty.startTls()).isEqualTo(SmtpStartTls.REQUIRED);
 		assertThat(empty.hasLogin()).isFalse();
 	}
