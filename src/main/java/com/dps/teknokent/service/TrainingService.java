@@ -17,6 +17,7 @@ import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.dps.teknokent.config.PeerTrainingProperties;
 import com.dps.teknokent.domain.BadgeSource;
 import com.dps.teknokent.domain.BadgeStatus;
 import com.dps.teknokent.domain.NotificationCategory;
@@ -53,6 +54,10 @@ import lombok.RequiredArgsConstructor;
  * The Akran Mentoru training of a peer program (4T): a YouTube video and a ten-question quiz. Its editors are the
  * program's coordinators and admins, the same people who award the badge by hand (D10). Saving publishes; a save
  * that changes anything makes a new version, which students start over on (D2e).
+ * <p>
+ * With {@link PeerTrainingProperties#inAppQuiz()} off (ODTÜ), the training runs on Prism instead and a coordinator
+ * approves each mentor ({@link PrismTrainingService}): the student sees the PRISM_ states, and the video and quiz
+ * endpoints are closed, so the quiz can never award the badge.
  */
 @Service
 @RequiredArgsConstructor
@@ -77,6 +82,8 @@ public class TrainingService {
 	private final BadgeService badgeService;
 	private final DomainLookupService domainLookupService;
 	private final NotificationService notificationService;
+	private final PrismTrainingService prismTraining;
+	private final PeerTrainingProperties peerTraining;
 
 	/** The editor's view; before the first save, the marked example content. */
 	@Transactional(readOnly = true)
@@ -137,7 +144,8 @@ public class TrainingService {
 	public StudentTrainingResponse videoWatched(UUID actorId) {
 		Context context = context(domainLookupService.requireUser(actorId));
 		TrainingModule module = context.module();
-		if (module == null || (context.state() != TrainingState.VIDEO && context.state() != TrainingState.QUIZ)) {
+		if (!peerTraining.inAppQuiz() || module == null
+				|| (context.state() != TrainingState.VIDEO && context.state() != TrainingState.QUIZ)) {
 			throw new InvalidRequestException(Texts.forRequest("error.trainingNotOpen"));
 		}
 		if (!progress.existsByModuleIdAndUserIdAndVersion(module.getId(), context.student().getId(),
@@ -221,10 +229,29 @@ public class TrainingService {
 		return new TrainingAttemptResponse(score, passed, after);
 	}
 
+	/**
+	 * "Prism eğitimini tamamladım", while the student has the Prism training to do or to take again. Optional for the
+	 * student; it only shows the coordinator who is waiting for a decision.
+	 */
+	@Transactional
+	public StudentTrainingResponse prismCompleted(UUID actorId) {
+		Context context = context(domainLookupService.requireUser(actorId));
+		Program program = context.program();
+		if (context.state() == TrainingState.PRISM_PENDING) {
+			return studentView(context);
+		}
+		if (program == null
+				|| (context.state() != TrainingState.PRISM_TODO && context.state() != TrainingState.PRISM_RETAKE)) {
+			throw new InvalidRequestException(Texts.forRequest("error.trainingNotOpen"));
+		}
+		prismTraining.markCompleted(context.student(), program);
+		return studentView(context(context.student()));
+	}
+
 	private OpenQuiz requireQuizOpen(Context context) {
 		Program program = context.program();
 		TrainingModule module = context.module();
-		if (context.state() != TrainingState.QUIZ || program == null || module == null) {
+		if (!peerTraining.inAppQuiz() || context.state() != TrainingState.QUIZ || program == null || module == null) {
 			throw new InvalidRequestException(Texts.forRequest("error.trainingNotOpen"));
 		}
 		if (attemptsInWindow(module, context.student()).size() >= ATTEMPTS_PER_WINDOW) {
@@ -233,9 +260,16 @@ public class TrainingService {
 		return new OpenQuiz(context.student(), program, module);
 	}
 
-	/** Program and module are set in every state but NOT_AVAILABLE, where either may be missing. */
+	/**
+	 * Program and module are set in every in-app state but NOT_AVAILABLE, where either may be missing. In the Prism
+	 * states the program is set, the module is not used, and {@code prism} carries the link.
+	 */
 	private record Context(AppUser student, @Nullable Program program, @Nullable TrainingModule module,
-			TrainingState state) {
+			TrainingState state, PrismTrainingService.@Nullable StudentPrism prism) {
+
+		Context(AppUser student, @Nullable Program program, @Nullable TrainingModule module, TrainingState state) {
+			this(student, program, module, state, null);
+		}
 	}
 
 	private record OpenQuiz(AppUser student, Program program, TrainingModule module) {
@@ -247,34 +281,65 @@ public class TrainingService {
 				: programs.findById(student.getProgramId())
 						.filter(found -> found.getProgramType() == ProgramType.PEER_MENTORING)
 						.orElse(null);
+		if (!peerTraining.inAppQuiz()) {
+			return prismContext(student, program);
+		}
 		TrainingModule module = program == null ? null : modules.findByProgramId(program.getId()).orElse(null);
 		if (program == null || module == null || !student.has(UserRole.MENTEE)
 				|| student.getStatus() != UserAccountStatus.APPROVED) {
 			return new Context(student, program, module, TrainingState.NOT_AVAILABLE);
 		}
-		List<UserBadge> gate = awards.findByUserIdOrderByAwardedAtDesc(student.getId()).stream()
-				.filter(award -> award.getBadgeCode() == BadgeService.GATE
-						&& program.getId().equals(award.getProgramId()))
-				.toList();
-		if (gate.stream().anyMatch(award -> award.getStatus() == BadgeStatus.ACTIVE)) {
-			return new Context(student, program, module, TrainingState.BADGE_ACTIVE);
-		}
-		if (gate.stream().anyMatch(award -> award.getStatus() == BadgeStatus.REVOKED)) {
-			return new Context(student, program, module, TrainingState.BLOCKED);
+		TrainingState badgeState = gateState(student, program);
+		if (badgeState != null) {
+			return new Context(student, program, module, badgeState);
 		}
 		boolean watched = progress.existsByModuleIdAndUserIdAndVersion(module.getId(), student.getId(),
 				module.getCurrentVersion());
 		return new Context(student, program, module, watched ? TrainingState.QUIZ : TrainingState.VIDEO);
 	}
 
+	/** ODTÜ: the badge states first, then where the student stands with the program's Prism training. */
+	private Context prismContext(AppUser student, @Nullable Program program) {
+		if (program == null || !student.has(UserRole.MENTEE) || student.getStatus() != UserAccountStatus.APPROVED) {
+			return new Context(student, program, null, TrainingState.NOT_AVAILABLE);
+		}
+		TrainingState badgeState = gateState(student, program);
+		if (badgeState != null) {
+			return new Context(student, program, null, badgeState);
+		}
+		PrismTrainingService.StudentPrism prism = prismTraining.forStudent(student, program);
+		return new Context(student, program, null, prism.state(), prism);
+	}
+
+	/** BADGE_ACTIVE or BLOCKED from the student's gate badge in the program; null when they never held it. */
+	private @Nullable TrainingState gateState(AppUser student, Program program) {
+		List<UserBadge> gate = awards.findByUserIdOrderByAwardedAtDesc(student.getId()).stream()
+				.filter(award -> award.getBadgeCode() == BadgeService.GATE
+						&& program.getId().equals(award.getProgramId()))
+				.toList();
+		if (gate.stream().anyMatch(award -> award.getStatus() == BadgeStatus.ACTIVE)) {
+			return TrainingState.BADGE_ACTIVE;
+		}
+		if (gate.stream().anyMatch(award -> award.getStatus() == BadgeStatus.REVOKED)) {
+			return TrainingState.BLOCKED;
+		}
+		return null;
+	}
+
 	private StudentTrainingResponse studentView(Context context) {
 		Program program = context.program();
 		TrainingModule module = context.module();
+		if (!peerTraining.inAppQuiz() && program != null && context.state() != TrainingState.NOT_AVAILABLE) {
+			PrismTrainingService.StudentPrism prism = context.prism();
+			return new StudentTrainingResponse(context.state(), program.getId(), program.getName(), null, null,
+					false, 0, null, null, PASS_MARK, QUESTION_COUNT, prism == null ? null : prism.url(),
+					prism == null ? null : prism.completedAt());
+		}
 		if (context.state() == TrainingState.NOT_AVAILABLE || program == null || module == null) {
 			return new StudentTrainingResponse(TrainingState.NOT_AVAILABLE,
 					program == null ? null : program.getId(),
 					program == null ? null : program.getName(), null, null, false, 0, null, null,
-					PASS_MARK, QUESTION_COUNT);
+					PASS_MARK, QUESTION_COUNT, null, null);
 		}
 		List<TrainingAttempt> recent = attemptsInWindow(module, context.student());
 		int left = Math.max(0, ATTEMPTS_PER_WINDOW - recent.size());
@@ -284,7 +349,7 @@ public class TrainingService {
 				.findFirst().map(TrainingAttempt::getScore).orElse(null);
 		return new StudentTrainingResponse(context.state(), program.getId(), program.getName(),
 				module.getCurrentVersion(), module.getVideoId(), context.state() == TrainingState.QUIZ, left, next,
-				lastScore, PASS_MARK, QUESTION_COUNT);
+				lastScore, PASS_MARK, QUESTION_COUNT, null, null);
 	}
 
 	/** Oldest first; the window counts every try at this program's training, whatever its version. */

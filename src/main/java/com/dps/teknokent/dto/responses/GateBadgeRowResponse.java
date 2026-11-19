@@ -9,6 +9,7 @@ import org.jspecify.annotations.Nullable;
 import com.dps.teknokent.domain.BadgeSource;
 import com.dps.teknokent.domain.GateBadgeState;
 import com.dps.teknokent.domain.PeerTopicCategory;
+import com.dps.teknokent.domain.PrismDecision;
 
 /**
  * A person and where they stand with a program's gate badge, for staff: Katılımcılar's roster and the admin's
@@ -28,7 +29,17 @@ public record GateBadgeRowResponse(
 		@Nullable Instant revokedAt,
 		@Nullable String reason,
 		Training training,
-		@Nullable Profile profile) {
+		@Nullable Profile profile,
+		@Nullable Prism prism) {
+
+	/**
+	 * The person's Prism training in the program, for its coordinators and admins only: when they said they finished
+	 * it, the latest decision and the score the Prism admin reported. Null when nothing was recorded, and on the
+	 * admin's student list.
+	 */
+	public record Prism(@Nullable Instant completedAt, @Nullable PrismDecision decision, @Nullable Instant decidedAt,
+			@Nullable String score) {
+	}
 
 	/**
 	 * Katılımcılar's columns for a peer program: Bölüm · sınıf from the institution's records, and for a peer mentor
