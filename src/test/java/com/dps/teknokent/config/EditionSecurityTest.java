@@ -51,6 +51,8 @@ class EditionSecurityTest {
 					.andExpect(status().isNotFound());
 			mockMvc.perform(get("/api/iskur/team/tasks").with(httpBasic("test", "test")))
 					.andExpect(status().isNotFound());
+			mockMvc.perform(get("/api/iskur/week").with(httpBasic("test", "test")))
+					.andExpect(status().isNotFound());
 			mockMvc.perform(get("/api/coordinator/programs/" + UUID.randomUUID() + "/iskur/support-activities")
 					.with(httpBasic("test", "test")))
 					.andExpect(status().isNotFound());
