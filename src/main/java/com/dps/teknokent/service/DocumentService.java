@@ -74,9 +74,9 @@ public class DocumentService {
 				.orElseThrow(
 						() -> rejectUpload(userId, null, kindValue, file == null ? null : file.getOriginalFilename(),
 								file == null ? null : file.getSize(), "unknown-kind", "Unknown document kind."));
-		if (kind == DocumentKind.PEER_EVIDENCE) {
-			// Only the peer-mentoring profile stores these, with who may see them.
-			throw new InvalidRequestException("Peer mentor evidence is uploaded from the peer mentor profile.");
+		if (kind.featureOwned()) {
+			// Only the feature that owns these stores them, with who may see them.
+			throw new InvalidRequestException("This kind of document is uploaded from its own screen.");
 		}
 		AppUser user = appUserRepository.findById(userId)
 				.orElseThrow(() -> new ResourceNotFoundException("User not found: " + userId));
@@ -156,7 +156,7 @@ public class DocumentService {
 			throw new InvalidRequestException("A signed-in user is required.");
 		}
 		return storedDocumentRepository.findByUserIdOrderByCreatedAtDesc(userId).stream()
-				.filter(document -> document.getKind() != DocumentKind.PEER_EVIDENCE)
+				.filter(document -> !document.getKind().featureOwned())
 				.map(StoredDocumentResponse::fromEntity)
 				.toList();
 	}
