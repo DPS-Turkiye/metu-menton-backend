@@ -19,6 +19,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -156,8 +157,8 @@ public class IskurTaskService {
 
 	/**
 	 * The assignee's time and output are replaced as sent; {@code status} then completes the task (time required, and
-	 * an output when the task asks for one), hands it over (reason required) or reopens it. A leader of the team may
-	 * only reopen.
+	 * an output when the task asks for one), hands it over (reason required) or reopens it. A done task is locked until
+	 * it is reopened, by its assignee (a completion by mistake) or a leader of the team; a leader may only reopen.
 	 */
 	@Transactional
 	public IskurTaskResponse update(UUID actorId, UUID taskId, IskurTaskUpdateRequest request) {
@@ -168,37 +169,42 @@ public class IskurTaskService {
 		if (!access.works() && target != IskurTaskStatus.OPEN) {
 			throw forbidden("error.iskurTaskAssigneeOnly");
 		}
+		if (task.getStatus() == IskurTaskStatus.DONE && target != IskurTaskStatus.OPEN) {
+			throw new ConflictException(Texts.forRequest("error.iskurTaskDoneLocked"));
+		}
 		Instant now = clock.instant();
-		if (access.works()) {
+		if (target == IskurTaskStatus.OPEN) {
+			if (task.getStatus() != IskurTaskStatus.OPEN) {
+				task.reopen(now);
+			}
+		} else if (access.works()) {
 			task.setActualMinutes(request.actualMinutes());
 			task.setOutputLink(link(request.outputLink()));
 			task.setOutputNote(TextUtils.normalizeOptional(request.outputNote()));
 			task.setUpdatedAt(now);
-		}
-		if (target != null && target != task.getStatus()) {
-			switch (target) {
-			case DONE -> {
-				if (task.getActualMinutes() == null) {
-					throw new InvalidRequestException(Texts.forRequest("error.iskurTaskActualRequired"));
-				}
-				if (task.isNeedsOutput() && task.getOutputLink() == null && task.getOutputNote() == null) {
-					throw new InvalidRequestException(Texts.forRequest("error.iskurTaskOutputRequired"));
-				}
+			if (target == IskurTaskStatus.DONE) {
+				requireCompletable(task);
 				task.complete(now);
-			}
-			case HANDED_OVER -> {
+			} else if (target == IskurTaskStatus.HANDED_OVER) {
 				String reason = TextUtils.normalizeOptional(request.handoverReason());
 				if (reason == null) {
 					throw new InvalidRequestException(Texts.forRequest("error.iskurTaskHandoverReason"));
 				}
 				task.handOver(reason, now);
 			}
-			case OPEN -> task.reopen(now);
-			}
 		}
-		IskurTask saved = savedOrConflict(task);
+		IskurTask saved = savedOrConflict(() -> tasks.saveAndFlush(task));
 		return response(saved, access, teamName(saved.getTeamId()), names(Set.of(saved.getAssigneeId()),
 				saved.getCreatedBy()));
+	}
+
+	private static void requireCompletable(IskurTask task) {
+		if (task.getActualMinutes() == null) {
+			throw new InvalidRequestException(Texts.forRequest("error.iskurTaskActualRequired"));
+		}
+		if (task.isNeedsOutput() && task.getOutputLink() == null && task.getOutputNote() == null) {
+			throw new InvalidRequestException(Texts.forRequest("error.iskurTaskOutputRequired"));
+		}
 	}
 
 	/** A leader of the team takes a task back; the log lines that used it keep their own title and minutes. */
@@ -210,7 +216,11 @@ public class IskurTaskService {
 			throw forbidden("error.iskurLeadersOnly");
 		}
 		requireOpenProgram(task.getProgramId());
-		tasks.delete(task);
+		savedOrConflict(() -> {
+			tasks.delete(task);
+			tasks.flush();
+			return task;
+		});
 		return build(access.placement(), mondayOf(task.getDueDate()));
 	}
 
@@ -229,10 +239,8 @@ public class IskurTaskService {
 		Set<UUID> ids = new HashSet<>();
 		teammates.forEach(placement -> ids.add(placement.getUserId()));
 		weekTasks.forEach(task -> ids.add(task.getAssigneeId()));
+		weekTasks.stream().map(IskurTask::getCreatedBy).filter(Objects::nonNull).forEach(ids::add);
 		Map<UUID, String> people = names(ids, null);
-		weekTasks.stream().map(IskurTask::getCreatedBy).filter(Objects::nonNull)
-				.filter(id -> !people.containsKey(id))
-				.forEach(id -> people.putAll(names(Set.of(id), null)));
 
 		Collator collator = Collator.getInstance(TR);
 		Comparator<IskurPlacement> byName = Comparator
@@ -315,8 +323,11 @@ public class IskurTaskService {
 	private Access accessOf(UUID actorId, IskurTask task) {
 		IskurPlacement mine = placements.findByProgramIdAndUserId(task.getProgramId(), actorId)
 				.orElseThrow(() -> new ResourceNotFoundException(Texts.forRequest("error.iskurTaskNotFound")));
-		boolean works = task.getAssigneeId().equals(actorId);
-		boolean manages = mine.getTeamId().equals(task.getTeamId()) && mine.getTeamRole() == IskurTeamRole.LEADER;
+		// Both need the caller to be on the task's team now: someone moved to another team hands their old tasks to
+		// that team's leaders.
+		boolean onTeam = mine.getTeamId().equals(task.getTeamId());
+		boolean works = onTeam && task.getAssigneeId().equals(actorId);
+		boolean manages = onTeam && mine.getTeamRole() == IskurTeamRole.LEADER;
 		if (!works && !manages) {
 			throw new ResourceNotFoundException(Texts.forRequest("error.iskurTaskNotFound"));
 		}
@@ -377,9 +388,10 @@ public class IskurTaskService {
 		return link;
 	}
 
-	private IskurTask savedOrConflict(IskurTask task) {
+	/** A change that lost a race with another one (two tabs, a leader deleting while the assignee saves) is a 409. */
+	private static IskurTask savedOrConflict(Supplier<IskurTask> write) {
 		try {
-			return tasks.saveAndFlush(task);
+			return write.get();
 		} catch (ObjectOptimisticLockingFailureException concurrent) {
 			throw new ConflictException(Texts.forRequest("error.iskurTaskConcurrent"));
 		}

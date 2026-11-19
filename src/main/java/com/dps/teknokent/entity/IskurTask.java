@@ -85,9 +85,10 @@ public class IskurTask {
 	@Column(name = "updated_at", nullable = false)
 	private Instant updatedAt;
 
+	/** Boxed so a new task (null) is persisted, not merged: its id is assigned before the first save. */
 	@Version
 	@Column(nullable = false)
-	private long version;
+	private Long version;
 
 	public IskurTask(UUID programId, UUID teamId, UUID assigneeId, UUID createdBy, Instant now) {
 		this.id = UUID.randomUUID();

@@ -111,7 +111,7 @@ public class IskurSupportActivityService {
 		return build(program.getId());
 	}
 
-	/** Weeks that already used the activity keep its title; it only stops being offered. */
+	/** Removes the activity; weeks that already used it keep its title. Retiring it is {@code active = false}. */
 	@Transactional
 	public IskurSupportActivitiesResponse delete(UUID actorId, UUID programId, UUID activityId) {
 		Program program = requireEditable(actorId, programId);

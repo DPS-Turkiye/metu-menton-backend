@@ -15,17 +15,22 @@ CREATE TABLE iskur_support_activity (
     created_by   UUID REFERENCES app_user (id) ON DELETE SET NULL,
     created_at   TIMESTAMPTZ NOT NULL,
     updated_at   TIMESTAMPTZ NOT NULL,
-    CONSTRAINT uq_iskur_support_activity_title UNIQUE (program_id, title)
+    CONSTRAINT uq_iskur_support_activity_title UNIQUE (program_id, title),
+    CONSTRAINT chk_iskur_support_activity_title CHECK (btrim(title) <> '')
 );
 
 CREATE INDEX ix_iskur_support_activity_created_by ON iskur_support_activity (created_by);
 
--- A team task (2.1 "Görev ata"). Estimates are in half-hour steps from one hour to one work day. A team goes only
--- once it is empty, so its tasks go with it; the log entries that used a task keep their own title and minutes.
+-- A task names its team and the team's program, so the pair must agree; this key lets iskur_task say so.
+ALTER TABLE iskur_team ADD CONSTRAINT uq_iskur_team_id_program UNIQUE (id, program_id);
+
+-- A team task (2.1 "Görev ata"). Estimates are in half-hour steps from one hour to one work day; the actual time may
+-- run over, up to a three-day week. A team goes only once it is empty, so its tasks go with it; the log entries that
+-- used a task keep their own title and minutes.
 CREATE TABLE iskur_task (
     id                 UUID PRIMARY KEY,
     program_id         UUID NOT NULL REFERENCES program (id) ON DELETE CASCADE,
-    team_id            UUID NOT NULL REFERENCES iskur_team (id) ON DELETE CASCADE,
+    team_id            UUID NOT NULL,
     assignee_id        UUID NOT NULL REFERENCES app_user (id) ON DELETE CASCADE,
     created_by         UUID REFERENCES app_user (id) ON DELETE SET NULL,
     title              VARCHAR(200) NOT NULL,
@@ -45,12 +50,16 @@ CREATE TABLE iskur_task (
     created_at         TIMESTAMPTZ NOT NULL,
     updated_at         TIMESTAMPTZ NOT NULL,
     version            BIGINT NOT NULL DEFAULT 0,
+    CONSTRAINT fk_iskur_task_team FOREIGN KEY (team_id, program_id) REFERENCES iskur_team (id, program_id)
+        ON DELETE CASCADE,
+    CONSTRAINT chk_iskur_task_title CHECK (btrim(title) <> ''),
     CONSTRAINT chk_iskur_task_kind CHECK (kind IN ('TEAM_TASK', 'EVENT', 'CORPORATE', 'CONTRIBUTION_PROJECT')),
     CONSTRAINT chk_iskur_task_status CHECK (status IN ('OPEN', 'DONE', 'HANDED_OVER')),
     CONSTRAINT chk_iskur_task_estimate CHECK (estimated_minutes BETWEEN 60 AND 450 AND estimated_minutes % 30 = 0),
     CONSTRAINT chk_iskur_task_actual CHECK (actual_minutes IS NULL OR actual_minutes BETWEEN 1 AND 1350),
     CONSTRAINT chk_iskur_task_done CHECK ((status = 'DONE') = (completed_at IS NOT NULL)),
-    CONSTRAINT chk_iskur_task_handover CHECK (status <> 'HANDED_OVER' OR handover_reason IS NOT NULL)
+    CONSTRAINT chk_iskur_task_done_time CHECK (status <> 'DONE' OR actual_minutes IS NOT NULL),
+    CONSTRAINT chk_iskur_task_handover CHECK (status <> 'HANDED_OVER' OR btrim(handover_reason) <> '')
 );
 
 CREATE INDEX ix_iskur_task_team_due ON iskur_task (team_id, due_date);
@@ -59,7 +68,8 @@ CREATE INDEX ix_iskur_task_program ON iskur_task (program_id);
 CREATE INDEX ix_iskur_task_created_by ON iskur_task (created_by);
 
 -- One intern's week (Monday to Sunday): drafted, sent to their leader, then approved, sent back or rejected. The
--- leader's reason is required for a revision or a rejection; the intern may answer it once with an objection.
+-- status and the leader's decision move together. The reason is required for a revision or a rejection, and the
+-- intern may answer either once with an objection.
 CREATE TABLE iskur_work_week (
     id                         UUID PRIMARY KEY,
     program_id                 UUID NOT NULL REFERENCES program (id) ON DELETE CASCADE,
@@ -85,9 +95,15 @@ CREATE TABLE iskur_work_week (
         ('DRAFT', 'SUBMITTED', 'APPROVED', 'REVISION_REQUESTED', 'REJECTED')),
     CONSTRAINT chk_iskur_work_week_decision CHECK (decision IS NULL OR decision IN ('APPROVE', 'REVISION', 'REJECT')),
     CONSTRAINT chk_iskur_work_week_decided CHECK ((decision IS NULL) = (decided_at IS NULL)),
+    CONSTRAINT chk_iskur_work_week_submitted CHECK (status = 'DRAFT' OR submitted_at IS NOT NULL),
+    CONSTRAINT chk_iskur_work_week_approved CHECK ((status = 'APPROVED') = (COALESCE(decision, '') = 'APPROVE')),
+    CONSTRAINT chk_iskur_work_week_revision CHECK
+        ((status = 'REVISION_REQUESTED') = (COALESCE(decision, '') = 'REVISION')),
+    CONSTRAINT chk_iskur_work_week_rejected CHECK ((status = 'REJECTED') = (COALESCE(decision, '') = 'REJECT')),
     CONSTRAINT chk_iskur_work_week_reason CHECK (decision IS NULL OR decision = 'APPROVE'
-        OR decision_reason IS NOT NULL),
-    CONSTRAINT chk_iskur_work_week_objection CHECK ((objection IS NULL) = (objected_at IS NULL))
+        OR btrim(decision_reason) <> ''),
+    CONSTRAINT chk_iskur_work_week_objection CHECK ((objection IS NULL) = (objected_at IS NULL)),
+    CONSTRAINT chk_iskur_work_week_objection_on CHECK (objection IS NULL OR decision IN ('REVISION', 'REJECT'))
 );
 
 CREATE INDEX ix_iskur_work_week_user ON iskur_work_week (user_id, week_start);
@@ -95,7 +111,8 @@ CREATE INDEX ix_iskur_work_week_program_week ON iskur_work_week (program_id, wee
 CREATE INDEX ix_iskur_work_week_decided_by ON iskur_work_week (decided_by);
 
 -- One line of the weekly log: team work (optionally on a task) or a mentoring support activity from the pool. Both
--- keep their own title, so a deleted task or a renamed activity does not change a week that was already sent.
+-- keep their own title, so a deleted task or a renamed activity does not change a week that was already sent. A
+-- draft's lines are replaced as a whole on save, so a line has no updated_at.
 CREATE TABLE iskur_work_entry (
     id                   UUID PRIMARY KEY,
     week_id              UUID NOT NULL REFERENCES iskur_work_week (id) ON DELETE CASCADE,
@@ -109,13 +126,14 @@ CREATE TABLE iskur_work_entry (
     note                 VARCHAR(500),
     sort_order           INTEGER NOT NULL DEFAULT 0,
     created_at           TIMESTAMPTZ NOT NULL,
+    CONSTRAINT chk_iskur_work_entry_title CHECK (btrim(title) <> ''),
     CONSTRAINT chk_iskur_work_entry_kind CHECK (kind IN ('TEAM', 'SUPPORT_ACTIVITY')),
     CONSTRAINT chk_iskur_work_entry_minutes CHECK (minutes BETWEEN 1 AND 450),
     CONSTRAINT chk_iskur_work_entry_task CHECK (kind = 'TEAM' OR task_id IS NULL),
     CONSTRAINT chk_iskur_work_entry_activity CHECK (kind = 'SUPPORT_ACTIVITY' OR support_activity_id IS NULL)
 );
 
-CREATE INDEX ix_iskur_work_entry_week ON iskur_work_entry (week_id, entry_date);
+CREATE INDEX ix_iskur_work_entry_week ON iskur_work_entry (week_id, entry_date, sort_order);
 CREATE INDEX ix_iskur_work_entry_task ON iskur_work_entry (task_id);
 CREATE INDEX ix_iskur_work_entry_activity ON iskur_work_entry (support_activity_id);
 

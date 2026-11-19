@@ -258,6 +258,55 @@ class IskurTaskIntegrationTest {
 	}
 
 	@Test
+	void aDoneTaskIsLockedUntilItsAssigneeOrALeaderReopensIt() throws Exception {
+		UUID taskId = createTask(mert, true);
+		update(mert, taskId, "{\"status\":\"DONE\",\"actualMinutes\":90,\"outputNote\":\"Teslim edildi\"}")
+				.andExpect(status().isOk());
+
+		// Saving again, with or without the status, would empty a finished task: refused.
+		update(mert, taskId, "{\"status\":\"DONE\"}").andExpect(status().isConflict());
+		update(mert, taskId, "{\"actualMinutes\":30}").andExpect(status().isConflict());
+		IskurTask locked = taskRepository.findById(taskId).orElseThrow();
+		assertThat(locked.getActualMinutes()).isEqualTo(90);
+		assertThat(locked.getOutputNote()).isEqualTo("Teslim edildi");
+
+		// A completion by mistake: the assignee reopens it, and the time and output stay for the next try.
+		update(mert, taskId, "{\"status\":\"OPEN\"}")
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.status").value("OPEN"))
+				.andExpect(jsonPath("$.completedAt").doesNotExist())
+				.andExpect(jsonPath("$.actualMinutes").value(90));
+	}
+
+	@Test
+	void aLeaderCompletesTheirOwnTaskAndAPlainHttpLinkIsRefused() throws Exception {
+		assign(zeynep, zeynep, "Ekip toplantısı", 60, today, true).andExpect(status().isOk());
+		UUID taskId = taskRepository.findAll().getFirst().getId();
+		update(zeynep, taskId, "{\"status\":\"DONE\",\"actualMinutes\":60,"
+				+ "\"outputLink\":\"http://notlar.example.test\"}").andExpect(status().isBadRequest());
+		update(zeynep, taskId, "{\"status\":\"DONE\",\"actualMinutes\":60,"
+				+ "\"outputLink\":\"https://notlar.example.test\"}")
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.canWork").value(true))
+				.andExpect(jsonPath("$.canManage").value(true));
+	}
+
+	@Test
+	void someoneMovedToAnotherTeamNoLongerReachesTheirOldTask() throws Exception {
+		UUID taskId = createTask(mert, false);
+		IskurPlacement moved = placementRepository.findByProgramIdAndUserId(program.getId(), mert.getId())
+				.orElseThrow();
+		moved.setTeamId(placementRepository.findByProgramIdAndUserId(program.getId(), outsider.getId()).orElseThrow()
+				.getTeamId());
+		moved.setLeaderId(null);
+		placementRepository.saveAndFlush(moved);
+
+		task(mert, taskId).andExpect(status().isNotFound());
+		update(mert, taskId, "{\"actualMinutes\":30}").andExpect(status().isNotFound());
+		task(zeynep, taskId).andExpect(status().isOk());
+	}
+
+	@Test
 	void aTaskIsHiddenFromEveryoneButItsAssigneeAndTheTeamsLeaders() throws Exception {
 		UUID taskId = createTask(mert, false);
 
