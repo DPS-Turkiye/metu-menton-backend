@@ -211,6 +211,53 @@ class InstitutionLoginServiceTest {
 				.satisfies(grant -> assertThat(grant.getSource()).isNotEqualTo(PermissionSource.INSTITUTION));
 	}
 
+	// Weekend launch: students sign up by e-mail before ODTÜ's login exists; that login must land on the same account.
+	@Test
+	void aStudentWhoSignedUpByEmailIsBoundByTheVerifiedAddressAndTheInstitutionRecordReplacesTheirOwn() {
+		AppUser signedUp = account(UserRole.MENTEE);
+		signedUp.setEmail("deniz@metu.edu.tr");
+		signedUp.setFirebaseUid("firebase-email-login");
+		UUID program = UUID.randomUUID();
+		signedUp.setProgramId(program);
+		when(users.findByEmailIgnoreCase("deniz@metu.edu.tr")).thenReturn(Optional.of(signedUp));
+		InstitutionPerson typed = new InstitutionPerson("odtu", "signup:" + signedUp.getId());
+		typed.setUser(signedUp);
+		typed.setDepartmentName("Bilgisayar");
+		typed.setClassYear(1);
+		typed.setSource(InstitutionDataSource.SIGNUP);
+		when(people.findFirstByUserIdAndSource(signedUp.getId(), InstitutionDataSource.SIGNUP))
+				.thenReturn(Optional.of(typed));
+
+		AppUser user = service.signIn(provider, student("e100001", "deniz@metu.edu.tr"));
+
+		assertThat(user).isSameAs(signedUp);
+		assertThat(user.getFirebaseUid()).isEqualTo("firebase-email-login");
+		assertThat(user.getStatus()).isEqualTo(UserAccountStatus.APPROVED);
+		assertThat(user.getProgramId()).isEqualTo(program);
+		ArgumentCaptor<InstitutionPerson> record = ArgumentCaptor.forClass(InstitutionPerson.class);
+		verify(people).save(record.capture());
+		assertThat(record.getValue()).isSameAs(typed);
+		assertThat(record.getValue().getInstitution()).isEqualTo("odtu");
+		assertThat(record.getValue().getPersistentId()).isEqualTo("e100001");
+		assertThat(record.getValue().getSource()).isEqualTo(InstitutionDataSource.LOGIN);
+		assertThat(record.getValue().getDepartmentName()).isEqualTo("Bilgisayar Mühendisliği");
+		assertThat(record.getValue().getClassYear()).isEqualTo(3);
+	}
+
+	// Once the institution's row exists, a returning login updates it and leaves any other row alone.
+	@Test
+	void theInstitutionsOwnRowWinsOverASignupRow() {
+		AppUser signedUp = account(UserRole.MENTEE);
+		when(users.findByEmailIgnoreCase("mentee@metu.edu.tr")).thenReturn(Optional.of(signedUp));
+		InstitutionPerson own = new InstitutionPerson("odtu", "e100001");
+		when(people.findByInstitutionAndPersistentId("odtu", "e100001")).thenReturn(Optional.of(own));
+
+		service.signIn(provider, student("e100001", "mentee@metu.edu.tr"));
+
+		verify(people).save(own);
+		verify(people, never()).findFirstByUserIdAndSource(any(), any());
+	}
+
 	@Test
 	void anUnverifiedAddressNeverTakesOverAnAccount() {
 		when(users.findByEmailIgnoreCase("ayse@metu.edu.tr")).thenReturn(Optional.of(account(UserRole.MENTEE)));

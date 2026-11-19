@@ -36,6 +36,7 @@ import com.dps.teknokent.exception.InvalidRequestException;
 import com.dps.teknokent.security.FirebaseIdentity;
 import com.dps.teknokent.service.ProgramEligibilityService;
 import com.dps.teknokent.service.RegistrationService;
+import com.dps.teknokent.service.StudentSignupService;
 
 @WebMvcTest(AuthRegistrationController.class)
 @Import(SecurityConfig.class)
@@ -49,6 +50,9 @@ class AuthRegistrationControllerTest {
 
 	@MockitoBean
 	private ProgramEligibilityService programEligibilityService;
+
+	@MockitoBean
+	private StudentSignupService studentSignupService;
 
 	private static final UUID ISKUR_ID = UUID.fromString("00000000-0000-0000-0000-0000000009a1");
 

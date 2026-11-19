@@ -16,11 +16,13 @@ import org.springframework.web.server.ResponseStatusException;
 import com.dps.teknokent.dto.requests.RegisterFounderRequest;
 import com.dps.teknokent.dto.requests.RegisterMemberRequest;
 import com.dps.teknokent.dto.requests.RegisterMentorRequest;
+import com.dps.teknokent.dto.requests.RegisterStudentRequest;
 import com.dps.teknokent.dto.responses.ProgramEligibilityResponse;
 import com.dps.teknokent.dto.responses.UserResponse;
 import com.dps.teknokent.security.FirebaseIdentity;
 import com.dps.teknokent.service.ProgramEligibilityService;
 import com.dps.teknokent.service.RegistrationService;
+import com.dps.teknokent.service.StudentSignupService;
 import com.dps.teknokent.util.Texts;
 
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -35,6 +37,7 @@ public class AuthRegistrationController {
 
 	private final RegistrationService registrationService;
 	private final ProgramEligibilityService programEligibilityService;
+	private final StudentSignupService studentSignupService;
 
 	/**
 	 * Asked by sign-up when a program is picked, about the address in the caller's own token. Firebase puts an
@@ -70,5 +73,20 @@ public class AuthRegistrationController {
 	@ResponseStatus(HttpStatus.CREATED)
 	public UserResponse registerMember(@Valid @RequestBody RegisterMemberRequest request) {
 		return registrationService.registerMember(request);
+	}
+
+	/**
+	 * ODTÜ only (see Edition). Takes the address from the caller's own verified token, never from the body; the
+	 * service checks that it is a metu.edu.tr one.
+	 */
+	@PostMapping("/student")
+	@ResponseStatus(HttpStatus.CREATED)
+	public UserResponse registerStudent(
+			@AuthenticationPrincipal FirebaseIdentity identity,
+			@Valid @RequestBody RegisterStudentRequest request) {
+		if (identity == null) {
+			throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "A Firebase sign-in is required.");
+		}
+		return studentSignupService.register(identity, request);
 	}
 }

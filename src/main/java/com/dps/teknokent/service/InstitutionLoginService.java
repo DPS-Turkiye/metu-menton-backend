@@ -168,8 +168,14 @@ public class InstitutionLoginService {
 			user.setFirebaseUid(firebaseUid(provider, persistentId));
 		}
 		user = users.save(user);
+		UUID userId = user.getId();
+		// A student who signed up by e-mail has a SIGNUP row with what they typed; the institution's record replaces
+		// it, so the person keeps one row and the roster reads the institution's word.
 		InstitutionPerson person = people.findByInstitutionAndPersistentId(provider.id(), persistentId)
+				.or(() -> people.findFirstByUserIdAndSource(userId, InstitutionDataSource.SIGNUP))
 				.orElseGet(() -> new InstitutionPerson(provider.id(), persistentId));
+		person.setInstitution(provider.id());
+		person.setPersistentId(persistentId);
 		InstitutionRecords.apply(identity, person, now);
 		person.setSource(InstitutionDataSource.LOGIN);
 		person.setUser(user);

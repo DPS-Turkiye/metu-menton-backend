@@ -32,6 +32,7 @@ class EditionPathFilterTest {
 				"/api/institution/me/advisees/" + ID + "/profile",
 				"/api/auth/institution/odtu/start",
 				"/api/auth/institution/odtu/dev-personas",
+				"/api/auth/register/student",
 				"/api/admin/academics",
 				"/api/admin/students",
 				"/api/lti",
