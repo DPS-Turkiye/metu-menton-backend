@@ -291,6 +291,32 @@ class IskurWeekIntegrationTest {
 	}
 
 	@Test
+	void aDraftStaysTheInternsOwnUntilItIsSent() throws Exception {
+		saveEntries(mert, lines(teamLine("2026-11-17", mertsTask.getId(), null, 180, "taslak.docx", null)))
+				.andExpect(status().isOk());
+		UUID draftId = weekOf(mert).getId();
+		leaderWeek(zeynep, draftId).andExpect(status().isNotFound());
+		mockMvc.perform(get("/api/iskur/leader/weeks").param("actorId", zeynep.getId().toString())
+				.with(httpBasic("test", "test")))
+				.andExpect(jsonPath("$.people[1].fullName").value("Mert Demir"))
+				.andExpect(jsonPath("$.people[1].status").value("DRAFT"))
+				.andExpect(jsonPath("$.people[1].weekId").doesNotExist())
+				.andExpect(jsonPath("$.people[1].teamMinutes").value(0));
+	}
+
+	@Test
+	void aRetiredActivityStaysOnTheDraftThatPickedIt() throws Exception {
+		addSupport(ayse, openOffice, 60).andExpect(status().isOk());
+		openOffice.setActive(false);
+		supportRepository.saveAndFlush(openOffice);
+		saveEntries(ayse, lines(supportLine("2026-11-18", openOffice.getId(), 60),
+				teamLine("2026-11-18", ayseTask.getId(), null, 60, null, null)))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.entries.length()").value(2))
+				.andExpect(jsonPath("$.supportActivities").isEmpty());
+	}
+
+	@Test
 	void anEmptyWeekCannotBeSent() throws Exception {
 		submit(ayse).andExpect(status().isBadRequest());
 	}
@@ -482,6 +508,11 @@ class IskurWeekIntegrationTest {
 				.anySatisfy(notification -> assertThat(notification.getBody()).contains("Ayşe Yıldız"));
 		// Kaan gives no mentoring; a second run tells no one again.
 		assertThat(meetingGaps.run()).isZero();
+		// A week later the same stretch goes on: its mark moves forward, and no one is told again.
+		doReturn(Instant.parse("2026-12-14T07:00:00Z")).when(calendar).now();
+		assertThat(meetingGaps.run()).isZero();
+		assertThat(alertRepository.findAll()).hasSize(8);
+		assertThat(notificationRepository.findByRecipientIdOrderByCreatedAtDesc(coordinator.getId())).hasSize(4);
 
 		// A week earlier, Mert's meetings of 17 and 18 November still count, so he is not reported.
 		alertRepository.deleteAll();

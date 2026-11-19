@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -95,11 +96,12 @@ public class IskurWorkWeekService {
 	@Transactional
 	public IskurWeekResponse saveEntries(UUID actorId, LocalDate weekStart, IskurWorkEntriesRequest request) {
 		IskurPlacement me = placementOf(actorId);
-		LocalDate monday = requireReachable(weekStart);
+		LocalDate monday = requireReachable(me, weekStart);
 		requireOpenProgram(me.getProgramId());
 		IskurWorkWeek week = editableWeek(me, monday);
 		Map<UUID, IskurTask> ownTasks = new HashMap<>();
-		Map<UUID, IskurSupportActivity> pool = poolOf(me.getProgramId());
+		List<IskurWorkEntry> saved = entries.findByWeekIdOrderByEntryDateAscSortOrderAsc(week.getId());
+		Map<UUID, IskurSupportActivity> pool = poolOf(me.getProgramId(), saved);
 		List<IskurWorkEntry> lines = new ArrayList<>();
 		Instant now = calendar.now();
 		int order = 0;
@@ -107,40 +109,51 @@ public class IskurWorkWeekService {
 			lines.add(line(week, me, monday, line, order++, ownTasks, pool, now));
 		}
 		requireDaysFit(lines);
-		entries.deleteAll(entries.findByWeekIdOrderByEntryDateAscSortOrderAsc(week.getId()));
-		entries.flush();
-		entries.saveAll(lines);
-		week.setUpdatedAt(now);
-		IskurWorkWeek saved = savedOrConflict(() -> weeks.saveAndFlush(week));
-		return response(me, monday, saved);
+		// The week's version is checked first, so a second tab saving at the same time gets a 409 before it
+		// touches the lines the first one is replacing.
+		IskurWorkWeek stored = savedOrConflict(() -> {
+			week.setUpdatedAt(now);
+			IskurWorkWeek checked = weeks.saveAndFlush(week);
+			entries.deleteAll(saved);
+			entries.flush();
+			entries.saveAll(lines);
+			entries.flush();
+			return checked;
+		});
+		return response(me, monday, stored);
 	}
 
 	/** "Mentörlük destek faaliyeti seç": adds one support line to the draft. */
 	@Transactional
 	public IskurWeekResponse addSupportActivity(UUID actorId, LocalDate weekStart, IskurSupportEntryRequest request) {
 		IskurPlacement me = placementOf(actorId);
-		LocalDate monday = requireReachable(weekStart);
+		LocalDate monday = requireReachable(me, weekStart);
 		requireOpenProgram(me.getProgramId());
 		IskurWorkWeek week = editableWeek(me, monday);
-		List<IskurWorkEntry> lines = new ArrayList<>(entries.findByWeekIdOrderByEntryDateAscSortOrderAsc(week.getId()));
+		List<IskurWorkEntry> lines = new ArrayList<>(
+				entries.findByWeekIdOrderByEntryDateAscSortOrderAsc(week.getId()));
 		IskurWorkEntriesRequest.Entry added = new IskurWorkEntriesRequest.Entry(request.date(),
 				IskurWorkEntryKind.SUPPORT_ACTIVITY, null, request.activityId(), null, request.minutes(), null, null);
 		int order = lines.stream().mapToInt(IskurWorkEntry::getSortOrder).max().orElse(-1) + 1;
 		Instant now = calendar.now();
-		IskurWorkEntry line = line(week, me, monday, added, order, new HashMap<>(), poolOf(me.getProgramId()), now);
+		IskurWorkEntry line = line(week, me, monday, added, order, new HashMap<>(),
+				poolOf(me.getProgramId(), List.of()), now);
 		lines.add(line);
 		requireDaysFit(lines);
-		entries.save(line);
-		week.setUpdatedAt(now);
-		IskurWorkWeek saved = savedOrConflict(() -> weeks.saveAndFlush(week));
-		return response(me, monday, saved);
+		IskurWorkWeek stored = savedOrConflict(() -> {
+			week.setUpdatedAt(now);
+			IskurWorkWeek checked = weeks.saveAndFlush(week);
+			entries.saveAndFlush(line);
+			return checked;
+		});
+		return response(me, monday, stored);
 	}
 
 	/** Sends the week to the leader (or sends it again after a revision); needs something logged. */
 	@Transactional
 	public IskurWeekResponse submit(UUID actorId, LocalDate weekStart) {
 		IskurPlacement me = placementOf(actorId);
-		LocalDate monday = requireReachable(weekStart);
+		LocalDate monday = requireReachable(me, weekStart);
 		requireOpenProgram(me.getProgramId());
 		IskurWorkWeek week = editableWeek(me, monday);
 		AppUser intern = requireUser(actorId);
@@ -168,7 +181,8 @@ public class IskurWorkWeekService {
 	@Transactional
 	public IskurWeekResponse object(UUID actorId, LocalDate weekStart, IskurWeekObjectionRequest request) {
 		IskurPlacement me = placementOf(actorId);
-		LocalDate monday = IskurTaskService.requireMonday(weekStart);
+		LocalDate monday = IskurTaskService.requireMonday(PeerReportCalendar.requirePlausible(weekStart));
+		requireOpenProgram(me.getProgramId());
 		IskurWorkWeek week = weeks.findByProgramIdAndUserIdAndWeekStart(me.getProgramId(), actorId, monday)
 				.orElseThrow(() -> new ConflictException(Texts.forRequest("error.iskurWeekNotDecided")));
 		if (week.getStatus() != IskurWeekStatus.REVISION_REQUESTED && week.getStatus() != IskurWeekStatus.REJECTED) {
@@ -214,9 +228,10 @@ public class IskurWorkWeekService {
 				.map(activity -> new IskurWeekResponse.SupportOption(activity.getId(), activity.getTitle(),
 						activity.getDescription()))
 				.toList();
-		UUID leaderId = me.getLeaderId();
-		IskurWeekResponse.Person reviewer = leaderId == null ? null
-				: users.findById(leaderId)
+		// The one leader who reviews the week; none when it is several co-leaders or the coordinators.
+		Set<UUID> reviewers = IskurLeaderReviewService.reviewersOf(me, placements.findByTeamId(me.getTeamId()));
+		IskurWeekResponse.Person reviewer = reviewers.size() != 1 ? null
+				: users.findById(reviewers.iterator().next())
 						.map(user -> new IskurWeekResponse.Person(user.getId(), user.getFullName()))
 						.orElse(null);
 		return new IskurWeekResponse(monday, week == null ? null : week.getId(), status, editable,
@@ -333,10 +348,17 @@ public class IskurWorkWeekService {
 		}
 	}
 
-	/** The activities a week may still pick: the pool's active ones. */
-	private Map<UUID, IskurSupportActivity> poolOf(UUID programId) {
+	/**
+	 * The activities a week may use: the pool's active ones, and any the week already has, so retiring an activity
+	 * does not block saving a draft that picked it earlier.
+	 */
+	private Map<UUID, IskurSupportActivity> poolOf(UUID programId, List<IskurWorkEntry> saved) {
+		Set<UUID> kept = saved.stream()
+				.map(IskurWorkEntry::getSupportActivityId)
+				.filter(Objects::nonNull)
+				.collect(Collectors.toSet());
 		return activities.findByProgramIdOrderBySortOrderAscCreatedAtAsc(programId).stream()
-				.filter(IskurSupportActivity::isActive)
+				.filter(activity -> activity.isActive() || kept.contains(activity.getId()))
 				.collect(Collectors.toMap(IskurSupportActivity::getId, activity -> activity));
 	}
 
@@ -351,11 +373,14 @@ public class IskurWorkWeekService {
 		return week;
 	}
 
-	/** A Monday no later than this week's: next week cannot be logged yet. */
-	private LocalDate requireReachable(LocalDate weekStart) {
+	/** A Monday no later than this week's (next week cannot be logged yet) and not before the placement's week. */
+	private LocalDate requireReachable(IskurPlacement me, LocalDate weekStart) {
 		LocalDate monday = IskurTaskService.requireMonday(PeerReportCalendar.requirePlausible(weekStart));
 		if (monday.isAfter(calendar.weekStartOf(calendar.today()))) {
 			throw new InvalidRequestException(Texts.forRequest("error.iskurWeekFuture"));
+		}
+		if (monday.isBefore(calendar.weekStartOf(calendar.dateOf(me.getPlacedAt())))) {
+			throw new InvalidRequestException(Texts.forRequest("error.iskurWeekBeforePlacement"));
 		}
 		return monday;
 	}

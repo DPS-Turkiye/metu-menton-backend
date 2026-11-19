@@ -4,6 +4,8 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.util.UUID;
 
+import org.springframework.data.domain.Persistable;
+
 import com.dps.teknokent.domain.IskurWorkEntryKind;
 
 import jakarta.persistence.Column;
@@ -11,7 +13,10 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
+import jakarta.persistence.PostLoad;
+import jakarta.persistence.PostPersist;
 import jakarta.persistence.Table;
+import jakarta.persistence.Transient;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
@@ -22,7 +27,11 @@ import lombok.Setter;
 @Getter
 @Setter
 @NoArgsConstructor
-public class IskurWorkEntry {
+public class IskurWorkEntry implements Persistable<UUID> {
+
+	/** Assigned ids: without this, Spring Data would merge (one SELECT per row) instead of persisting a new row. */
+	@Transient
+	private boolean fresh = true;
 
 	@Id
 	private UUID id;
@@ -67,5 +76,16 @@ public class IskurWorkEntry {
 		this.kind = kind;
 		this.sortOrder = sortOrder;
 		this.createdAt = now;
+	}
+
+	@Override
+	public boolean isNew() {
+		return fresh;
+	}
+
+	@PostLoad
+	@PostPersist
+	void markStored() {
+		this.fresh = false;
 	}
 }

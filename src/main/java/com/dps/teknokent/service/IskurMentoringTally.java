@@ -61,6 +61,11 @@ class IskurMentoringTally {
 		}
 	}
 
+	/** How many peer meetings the intern held in [from, to): what the two-week check needs, without the rest. */
+	int meetingsHeld(AppUser intern, LocalDate from, LocalDate to) {
+		return access.heldMeetings(intern, calendar.startOf(from), calendar.startOf(to)).size();
+	}
+
 	Week of(AppUser intern, LocalDate monday) {
 		List<Meeting> held = access.heldMeetings(intern, calendar.startOf(monday),
 				calendar.startOf(monday.plusDays(7)));

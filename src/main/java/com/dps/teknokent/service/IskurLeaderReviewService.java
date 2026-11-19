@@ -147,6 +147,10 @@ public class IskurLeaderReviewService {
 
 	private Reviewed decideWeek(UUID actorId, Reviewed reviewed, IskurWeekDecisionRequest request) {
 		IskurWorkWeek week = reviewed.week();
+		// A coordinator or an admin may also be placed as an intern: never on their own week.
+		if (week.getUserId().equals(actorId)) {
+			throw new ResponseStatusException(HttpStatus.FORBIDDEN, Texts.forRequest("error.iskurWeekOwn"));
+		}
 		programs.findById(week.getProgramId())
 				.filter(program -> program.getStatus() == ProgramStatus.COMPLETED)
 				.ifPresent(program -> {
@@ -255,14 +259,17 @@ public class IskurLeaderReviewService {
 			if (person == null) {
 				continue;
 			}
-			IskurWorkWeek week = byUser.get(person.getId());
+			IskurWorkWeek found = byUser.get(person.getId());
+			// A draft is the intern's own until it is sent: its status shows, not its lines or totals.
+			boolean draft = found != null && found.getStatus() == IskurWeekStatus.DRAFT;
+			IskurWorkWeek week = draft ? null : found;
 			List<IskurWorkEntry> lines = week == null ? List.of()
 					: linesByWeek.getOrDefault(week.getId(), List.of());
-			IskurMentoringTally.Week mentoring = tallies.computeIfAbsent(person.getId(),
-					id -> tally.of(person, monday));
-			IskurWeekResponse.Totals totals = IskurWorkWeekService.totals(lines, mentoring);
+			IskurWeekResponse.Totals totals = week == null ? new IskurWeekResponse.Totals(0, 0)
+					: IskurWorkWeekService.totals(lines, tallies.computeIfAbsent(person.getId(),
+							id -> tally.of(person, monday)));
 			rows.add(new IskurLeaderQueueResponse.Row(person.getId(), person.getFullName(),
-					week == null ? null : week.getId(), week == null ? null : week.getStatus(),
+					week == null ? null : week.getId(), found == null ? null : found.getStatus(),
 					week == null ? null : week.getSubmittedAt(), totals.teamMinutes(), totals.mentoringMinutes()));
 		}
 		rows.sort(Comparator.comparing(IskurLeaderQueueResponse.Row::fullName, collator));
@@ -273,6 +280,7 @@ public class IskurLeaderReviewService {
 	private Reviewed requireReviewed(IskurPlacement me, UUID weekId) {
 		IskurWorkWeek week = weeks.findById(weekId)
 				.filter(found -> found.getProgramId().equals(me.getProgramId()))
+				.filter(found -> found.getStatus() != IskurWeekStatus.DRAFT)
 				.orElseThrow(() -> new ResourceNotFoundException(Texts.forRequest("error.iskurWeekNotFound")));
 		List<IskurPlacement> teammates = placements.findByTeamId(me.getTeamId());
 		IskurPlacement person = teammates.stream()
@@ -289,6 +297,7 @@ public class IskurLeaderReviewService {
 	private Reviewed requireFallback(Program program, UUID weekId) {
 		IskurWorkWeek week = weeks.findById(weekId)
 				.filter(found -> found.getProgramId().equals(program.getId()))
+				.filter(found -> found.getStatus() != IskurWeekStatus.DRAFT)
 				.orElseThrow(() -> new ResourceNotFoundException(Texts.forRequest("error.iskurWeekNotFound")));
 		IskurPlacement person = fallbackPeople(program.getId()).stream()
 				.filter(placement -> placement.getUserId().equals(week.getUserId()))

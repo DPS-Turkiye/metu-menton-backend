@@ -4,10 +4,15 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.util.UUID;
 
+import org.springframework.data.domain.Persistable;
+
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
+import jakarta.persistence.PostLoad;
+import jakarta.persistence.PostPersist;
 import jakarta.persistence.Table;
+import jakarta.persistence.Transient;
 import jakarta.persistence.UniqueConstraint;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -18,7 +23,11 @@ import lombok.NoArgsConstructor;
 		"program_id", "user_id", "week_start" }))
 @Getter
 @NoArgsConstructor
-public class IskurMeetingGapAlert {
+public class IskurMeetingGapAlert implements Persistable<UUID> {
+
+	/** Assigned ids: without this, Spring Data would merge (one SELECT per row) instead of persisting a new row. */
+	@Transient
+	private boolean fresh = true;
 
 	@Id
 	private UUID id;
@@ -42,5 +51,16 @@ public class IskurMeetingGapAlert {
 		this.userId = userId;
 		this.weekStart = weekStart;
 		this.createdAt = now;
+	}
+
+	@Override
+	public boolean isNew() {
+		return fresh;
+	}
+
+	@PostLoad
+	@PostPersist
+	void markStored() {
+		this.fresh = false;
 	}
 }

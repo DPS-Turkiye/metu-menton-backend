@@ -8,7 +8,6 @@ import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -33,7 +32,8 @@ import lombok.extern.slf4j.Slf4j;
 /**
  * "İki hafta üst üste görüşme yoksa akran mentörlüğü koordinatörüne bildirim gider" (rules frame 322:3413). On Monday,
  * for each running İŞKUR program, every placed intern who gives peer mentoring and held no peer meeting in either of
- * the last two weeks is reported to the program's coordinators, once per stretch.
+ * the last two weeks is reported to the program's coordinators, once per stretch: while the stretch goes on, each
+ * Monday only carries its mark forward, and a meeting ends it.
  */
 @Slf4j
 @Service
@@ -70,6 +70,17 @@ public class IskurMeetingGapService {
 	}
 
 	private int check(Program program, LocalDate firstMonday, LocalDate lastMonday) {
+		// Locked for the rest of the transaction: a second instance running the job at the same minute waits here,
+		// then sees the alerts this one wrote, so a coordinator is never told twice.
+		programs.findByIdForUpdate(program.getId());
+		Set<UUID> coordinatorIds = coordinatorProgramService.coordinatorsOf(program).stream()
+				.map(CoordinatorProgramResponse.CoordinatorRef::id)
+				.collect(Collectors.toSet());
+		List<AppUser> coordinators = users.findAllById(coordinatorIds);
+		if (coordinators.isEmpty()) {
+			// No one to tell yet: no alert is recorded, so the first coordinator added still hears of it.
+			return 0;
+		}
 		List<IskurPlacement> watched = placements.findByProgramId(program.getId()).stream()
 				.filter(IskurMeetingGapService::givesMentoring)
 				// Someone placed during the two weeks has not had two whole weeks yet.
@@ -83,26 +94,18 @@ public class IskurMeetingGapService {
 		Map<UUID, AppUser> people = users.findAllById(watched.stream().map(IskurPlacement::getUserId).toList())
 				.stream()
 				.collect(Collectors.toMap(AppUser::getId, Function.identity()));
-		List<AppUser> silent = watched.stream()
-				.map(placement -> people.get(placement.getUserId()))
-				.filter(person -> person != null)
-				.filter(person -> tally.of(person, firstMonday).meetingCount() == 0
-						&& tally.of(person, lastMonday).meetingCount() == 0)
-				.toList();
-		if (silent.isEmpty()) {
-			return 0;
-		}
-		Set<UUID> coordinatorIds = coordinatorProgramService.coordinatorsOf(program).stream()
-				.map(CoordinatorProgramResponse.CoordinatorRef::id)
-				.collect(Collectors.toSet());
-		List<AppUser> coordinators = users.findAllById(coordinatorIds);
+		LocalDate thisMonday = lastMonday.plusDays(7);
 		int reported = 0;
-		for (AppUser person : silent) {
-			try {
-				alerts.saveAndFlush(new IskurMeetingGapAlert(program.getId(), person.getId(), lastMonday,
-						calendar.now()));
-			} catch (DataIntegrityViolationException alreadyReported) {
-				// A second instance got there first; it sends the notification.
+		for (IskurPlacement placement : watched) {
+			AppUser person = people.get(placement.getUserId());
+			if (person == null || tally.meetingsHeld(person, firstMonday, thisMonday) > 0) {
+				continue;
+			}
+			// Still the same silent stretch as last week's alert: carry the mark on, without telling anyone again.
+			boolean continuing = alerts.existsByProgramIdAndUserIdAndWeekStart(program.getId(), person.getId(),
+					firstMonday);
+			alerts.save(new IskurMeetingGapAlert(program.getId(), person.getId(), lastMonday, calendar.now()));
+			if (continuing) {
 				continue;
 			}
 			coordinators.forEach(coordinator -> notifications.create(coordinator, NotificationCategory.GENERAL,
