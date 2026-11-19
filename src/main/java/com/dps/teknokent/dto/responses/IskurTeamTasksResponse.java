@@ -38,7 +38,7 @@ public record IskurTeamTasksResponse(
 			int plannedMinutes,
 			boolean overTarget,
 			boolean assignable,
-			/** The days the person works, from their onboarding form; empty until they send it. */
+			// The days the person works, from their onboarding form; empty until they send it.
 			List<DayOfWeek> workDays,
 			List<IskurTaskResponse> tasks) {
 	}
