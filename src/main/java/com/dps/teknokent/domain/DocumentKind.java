@@ -21,7 +21,9 @@ public enum DocumentKind {
 	REQUESTED_DOC("requested-doc", 25 * 1024 * 1024, false, false),
 	SYLLABUS("syllabus", 10 * 1024 * 1024, true, false),
 	WEEKLY_PROGRAM("weekly-program", 10 * 1024 * 1024, true, false),
-	PEER_EVIDENCE("peer-evidence", 10 * 1024 * 1024, true, false);
+	PEER_EVIDENCE("peer-evidence", 10 * 1024 * 1024, true, false),
+	/** An İŞKUR intern's CV or transcript, from the onboarding form; only the program's coordinators read it. */
+	ISKUR_DOCUMENT("iskur-document", 10 * 1024 * 1024, true, false);
 
 	private final String value;
 	private final long maxBytes;
@@ -51,6 +53,14 @@ public enum DocumentKind {
 
 	public boolean imageOnly() {
 		return imageOnly;
+	}
+
+	/**
+	 * Stored, listed and shown only by the feature that owns it (peer mentor evidence, İŞKUR onboarding files), with
+	 * its own rules on who sees it: never uploaded through the general endpoint, never on a person's or a team's list.
+	 */
+	public boolean featureOwned() {
+		return this == PEER_EVIDENCE || this == ISKUR_DOCUMENT;
 	}
 
 	public static Optional<DocumentKind> find(String raw) {

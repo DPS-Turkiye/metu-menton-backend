@@ -59,6 +59,21 @@ public class IskurInternService {
 				.flatMap(program -> placements.findByProgramIdAndUserId(program.getId(), userId));
 	}
 
+	/**
+	 * Everyone the program's İŞKUR workspace counts as an intern, whether placed or not: its approved students and its
+	 * accepted peer mentors.
+	 */
+	@Transactional(readOnly = true)
+	public Set<UUID> internIds(UUID programId) {
+		Set<UUID> ids = new LinkedHashSet<>();
+		users.findByProgramIdAndPermissionAndStatusOrderByCreatedAtAsc(programId, UserRole.MENTEE,
+				UserAccountStatus.APPROVED).forEach(student -> ids.add(student.getId()));
+		programMentors.findByProgramIdOrderByCreatedAtAsc(programId).stream()
+				.filter(membership -> membership.getStatus() == ProgramMentorStatus.ACCEPTED)
+				.forEach(membership -> ids.add(membership.getMentorId()));
+		return ids;
+	}
+
 	private Optional<Program> currentProgram(AppUser user) {
 		Set<UUID> candidates = new LinkedHashSet<>();
 		UUID studentOf = user.getProgramId();

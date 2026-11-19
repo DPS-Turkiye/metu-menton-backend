@@ -51,6 +51,9 @@ class EditionPathFilterTest {
 				"/api/iskur/tasks/" + ID,
 				"/api/iskur/week",
 				"/api/iskur/leader/weeks/" + ID,
+				"/api/coordinator/programs/" + ID + "/iskur/applications",
+				"/api/iskur/onboarding",
+				"/api/iskur/me",
 				"/api/coordinator/programs/" + ID + "/training",
 				"/api/users/" + ID + "/badges");
 	}

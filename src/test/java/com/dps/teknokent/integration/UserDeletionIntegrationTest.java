@@ -41,6 +41,7 @@ import org.springframework.web.server.ResponseStatusException;
 import com.dps.teknokent.domain.AppLanguage;
 import com.dps.teknokent.domain.DocumentKind;
 import com.dps.teknokent.domain.InstitutionDataSource;
+import com.dps.teknokent.domain.IskurTeamRolePreference;
 import com.dps.teknokent.domain.MeetingMode;
 import com.dps.teknokent.domain.MeetingProposalStatus;
 import com.dps.teknokent.domain.MeetingStatus;
@@ -68,6 +69,8 @@ import com.dps.teknokent.entity.AppUser;
 import com.dps.teknokent.entity.AppUserIdentity;
 import com.dps.teknokent.entity.DataProcessingConsent;
 import com.dps.teknokent.entity.InstitutionPerson;
+import com.dps.teknokent.entity.IskurOnboarding;
+import com.dps.teknokent.entity.IskurScheduleRange;
 import com.dps.teknokent.entity.Meeting;
 import com.dps.teknokent.entity.MeetingProposal;
 import com.dps.teknokent.entity.MentorProfile;
@@ -716,6 +719,26 @@ class UserDeletionIntegrationTest {
 		verify(loginProvisioner, never()).deleteLogin(any());
 		assertThat(cleanupRepository.count()).isZero();
 		assertThat(userRepository.findByFirebaseUid(UID)).isPresent();
+	}
+
+	@Test
+	void anIskurInternsOnboardingFormAndFilesGoWithThem() throws Exception {
+		AppUser target = user(UserRole.MENTEE, "Mert Demir", null);
+		StoredDocument cv = document(target.getId(), null, DocumentKind.ISKUR_DOCUMENT, null);
+		IskurOnboarding form = new IskurOnboarding(UUID.randomUUID(), target.getId(), Instant.now());
+		form.setCvDocumentId(cv.getId());
+		form.setWantsLeadership(true);
+		form.setLeadershipMotivation("Planlamayı severim.");
+		form.getRanges().add(new IskurScheduleRange((short) 1, (short) 540, (short) 990));
+		form.getTeamRoles().add(IskurTeamRolePreference.PLANNER);
+		entityManager.persist(form);
+		flushAndClear();
+
+		delete(admin, target.getId(), target.getEmail()).andExpect(status().isOk());
+
+		assertThat(count("select count(o) from IskurOnboarding o where o.userId = :id", target.getId())).isZero();
+		assertThat(entityManager.find(StoredDocument.class, cv.getId())).isNull();
+		verify(objectStorage).delete(cv.getS3Key());
 	}
 
 	@Test
