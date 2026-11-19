@@ -981,6 +981,146 @@ class DocumentServiceTest {
 		verifyNoInteractions(objectStorage);
 	}
 
+	@ParameterizedTest
+	@MethodSource("workFiles")
+	void storesAWorkFileUnderTheTypeItsBytesSay(String filename, byte[] bytes, String storedAs) {
+		when(storedDocumentRepository.save(any(StoredDocument.class)))
+				.thenAnswer(invocation -> invocation.getArgument(0));
+
+		// What the browser calls the file is never believed.
+		var response = documentService.store(UUID.randomUUID(), null, DocumentKind.ISKUR_TASK_OUTPUT, filename,
+				"text/html", bytes);
+
+		assertThat(response.contentType()).isEqualTo(storedAs);
+		verify(objectStorage).put(any(), eq(bytes), eq(storedAs));
+	}
+
+	static Stream<Arguments> workFiles() throws IOException {
+		return Stream.of(
+				Arguments.of("rapor.pdf", pdfBytes(), "application/pdf"),
+				Arguments.of("afis.PNG", pngBytes(), "image/png"),
+				Arguments.of("foto.jpg", jpegBytes(), "image/jpeg"),
+				Arguments.of("foto.jpeg", jpegBytes(), "image/jpeg"),
+				Arguments.of("rapor.docx", zip(wordParts()),
+						"application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+				Arguments.of("butce.xlsx", docx("[Content_Types].xml", "<Types></Types>", "xl/workbook.xml", "<w/>"),
+						"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+				Arguments.of("sunum.pptx",
+						docx("[Content_Types].xml", "<Types></Types>", "ppt/presentation.xml", "<p/>"),
+						"application/vnd.openxmlformats-officedocument.presentationml.presentation"),
+				// Source code inside a ZIP is inert here: it is stored and handed back, never run.
+				Arguments.of("site.zip", docx("site/index.html", "<html></html>", "site/app.js", "let a = 1;",
+						"site/build.py", "print(1)"), "application/zip"));
+	}
+
+	@ParameterizedTest
+	@ValueSource(strings = { "betik.js", "sayfa.html", "gorsel.webp", "notlar.txt", "eski.doc", "uzantisiz" })
+	void refusesAWorkFileOfAnyOtherFormat(String filename) {
+		assertThatThrownBy(() -> documentService.store(UUID.randomUUID(), null, DocumentKind.ISKUR_TASK_OUTPUT,
+				filename, "application/pdf", pdfBytes()))
+				.isInstanceOf(InvalidRequestException.class)
+				.hasMessage("PDF, PNG, JPG, DOCX, XLSX, PPTX ya da ZIP dosyası yükleyebilirsin.");
+		verifyNoInteractions(objectStorage);
+	}
+
+	@ParameterizedTest
+	@MethodSource("workFilesThatAreNotWhatTheirNameSays")
+	void refusesAWorkFileWhoseBytesDoNotMatchItsExtension(String filename, byte[] bytes) {
+		assertThatThrownBy(() -> documentService.store(UUID.randomUUID(), null, DocumentKind.ISKUR_TASK_OUTPUT,
+				filename, "application/pdf", bytes))
+				.isInstanceOf(InvalidRequestException.class)
+				.hasMessage("Dosyanın içeriği uzantısıyla uyuşmuyor ya da dosya bozuk.");
+		verifyNoInteractions(objectStorage);
+	}
+
+	static Stream<Arguments> workFilesThatAreNotWhatTheirNameSays() throws IOException {
+		byte[] script = "<script>alert(1)</script>".getBytes(UTF_8);
+		return Stream.of(
+				Arguments.of("rapor.pdf", pngBytes()),
+				Arguments.of("rapor.pdf", script),
+				Arguments.of("afis.png", jpegBytes()),
+				Arguments.of("afis.png", pdfBytes()),
+				Arguments.of("foto.jpg", pngBytes()),
+				Arguments.of("foto.jpeg", script),
+				Arguments.of("rapor.docx", pdfBytes()),
+				// A real archive, but not the Office format its name claims.
+				Arguments.of("butce.xlsx", zip(wordParts())),
+				Arguments.of("sunum.pptx", docx("notlar.txt", "merhaba")));
+	}
+
+	@ParameterizedTest
+	@ValueSource(strings = { "kur.exe", "kur.msi", "calistir.bat", "calistir.cmd", "eski.com", "ekran.scr",
+			"betik.ps1", "betik.vbs", "uygulama.jar", "Uygulama.app/Contents/MacOS/calistir", "kurulum.dmg",
+			"araclar/kur.SH", "kisayol.lnk", "ayar.reg", "../kacak.txt", "/etc/passwd" })
+	void refusesAZipHoldingSomethingThatRunsOrEscapes(String entryName) throws Exception {
+		byte[] archive = docx("rapor.txt", "merhaba", entryName, "x");
+
+		assertThatThrownBy(() -> documentService.store(UUID.randomUUID(), null, DocumentKind.ISKUR_TASK_OUTPUT,
+				"teslim.zip", "application/zip", archive))
+				.isInstanceOf(InvalidRequestException.class)
+				.hasMessage("ZIP dosyası açılamadı, çok büyük ya da içinde çalıştırılabilir bir dosya var.");
+		verifyNoInteractions(objectStorage);
+	}
+
+	@Test
+	void refusesAZipThatIsEmptyOrNotAnArchive() throws Exception {
+		byte[] empty = zip(Map.of());
+		for (byte[] bytes : List.of(empty, pdfBytes())) {
+			assertThatThrownBy(() -> documentService.store(UUID.randomUUID(), null,
+					DocumentKind.ISKUR_TASK_OUTPUT, "teslim.zip", "application/zip", bytes))
+					.isInstanceOf(InvalidRequestException.class);
+		}
+		verifyNoInteractions(objectStorage);
+	}
+
+	@Test
+	void refusesAZipWithMoreEntriesThanTheLimit() throws Exception {
+		Map<String, byte[]> entries = new LinkedHashMap<>();
+		for (int i = 0; i <= 2_000; i++) {
+			entries.put("dosya-" + i + ".txt", new byte[] { 'a' });
+		}
+
+		assertThatThrownBy(() -> documentService.store(UUID.randomUUID(), null, DocumentKind.ISKUR_TASK_OUTPUT,
+				"teslim.zip", "application/zip", zip(entries)))
+				.isInstanceOf(InvalidRequestException.class);
+	}
+
+	@Test
+	void refusesAZipThatUnpacksBeyondAHundredMegabytes() throws Exception {
+		// Mostly one letter with a rare second one: it packs about thirty to one, well under the bomb ratio, so only
+		// the total stops it.
+		byte[] megabyte = new byte[1024 * 1024];
+		new Random(7).nextBytes(megabyte);
+		for (int index = 0; index < megabyte.length; index++) {
+			megabyte[index] = (byte) ((megabyte[index] & 31) == 0 ? 'b' : 'a');
+		}
+		ByteArrayOutputStream output = new ByteArrayOutputStream();
+		try (ZipOutputStream archive = new ZipOutputStream(output)) {
+			for (int index = 0; index < 101; index++) {
+				archive.putNextEntry(new ZipEntry("veri-" + index + ".txt"));
+				archive.write(megabyte);
+				archive.closeEntry();
+			}
+		}
+		byte[] expandsTooFar = output.toByteArray();
+		assertThat((long) expandsTooFar.length).isLessThan(DocumentKind.ISKUR_TASK_OUTPUT.maxBytes());
+		assertThat(expandsTooFar.length).isGreaterThan(101 * 1024 * 1024 / 200);
+
+		assertThatThrownBy(() -> documentService.store(UUID.randomUUID(), null, DocumentKind.ISKUR_TASK_OUTPUT,
+				"teslim.zip", "application/zip", expandsTooFar))
+				.isInstanceOf(InvalidRequestException.class);
+		verifyNoInteractions(objectStorage);
+	}
+
+	@Test
+	void keepsTaskOutputsOffTheGeneralUpload() {
+		UUID userId = UUID.randomUUID();
+
+		assertThatThrownBy(() -> documentService.storeForUser(userId, "iskur-task-output", pdfFile(), null))
+				.isInstanceOf(InvalidRequestException.class);
+		verifyNoInteractions(objectStorage);
+	}
+
 	private static Organization startup() {
 		Organization organization = new Organization();
 		organization.setId(UUID.randomUUID());

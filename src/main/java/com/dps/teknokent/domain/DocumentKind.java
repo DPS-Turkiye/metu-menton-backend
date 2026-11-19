@@ -23,7 +23,12 @@ public enum DocumentKind {
 	WEEKLY_PROGRAM("weekly-program", 10 * 1024 * 1024, true, false),
 	PEER_EVIDENCE("peer-evidence", 10 * 1024 * 1024, true, false),
 	/** An İŞKUR intern's CV or transcript, from the onboarding form; only the program's coordinators read it. */
-	ISKUR_DOCUMENT("iskur-document", 10 * 1024 * 1024, true, false);
+	ISKUR_DOCUMENT("iskur-document", 10 * 1024 * 1024, true, false),
+	/**
+	 * A file an İŞKUR intern hands in as a task's output: a PDF, a picture, an Office file or a ZIP. Its team's leaders
+	 * and the program's coordinators read it.
+	 */
+	ISKUR_TASK_OUTPUT("iskur-task-output", 10 * 1024 * 1024, false, false);
 
 	private final String value;
 	private final long maxBytes;
@@ -56,11 +61,20 @@ public enum DocumentKind {
 	}
 
 	/**
-	 * Stored, listed and shown only by the feature that owns it (peer mentor evidence, İŞKUR onboarding files), with
-	 * its own rules on who sees it: never uploaded through the general endpoint, never on a person's or a team's list.
+	 * Work files of mixed formats (PDF, PNG, JPG, DOCX, XLSX, PPTX, ZIP). The format is read from the bytes: the
+	 * extension must match what the file is, and the stored type is ours, never the one the browser sent.
+	 */
+	public boolean workFiles() {
+		return this == ISKUR_TASK_OUTPUT;
+	}
+
+	/**
+	 * Stored, listed and shown only by the feature that owns it (peer mentor evidence, İŞKUR onboarding files and task
+	 * outputs), with its own rules on who sees it: never uploaded through the general endpoint, never on a person's or
+	 * a team's list.
 	 */
 	public boolean featureOwned() {
-		return this == PEER_EVIDENCE || this == ISKUR_DOCUMENT;
+		return this == PEER_EVIDENCE || this == ISKUR_DOCUMENT || this == ISKUR_TASK_OUTPUT;
 	}
 
 	public static Optional<DocumentKind> find(String raw) {
