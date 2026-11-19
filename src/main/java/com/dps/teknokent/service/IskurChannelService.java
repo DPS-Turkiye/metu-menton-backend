@@ -2,6 +2,7 @@ package com.dps.teknokent.service;
 
 import java.text.Collator;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -18,12 +19,14 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import org.jspecify.annotations.Nullable;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import com.dps.teknokent.config.RateLimitingConfig;
 import com.dps.teknokent.domain.IskurChannelKind;
 import com.dps.teknokent.domain.ProgramType;
 import com.dps.teknokent.domain.UserAccountStatus;
@@ -83,6 +86,9 @@ import lombok.RequiredArgsConstructor;
 public class IskurChannelService {
 
 	static final int PAGE_SIZE = 50;
+	/** Enough for a lively chat; a script posting in a loop stops here. */
+	static final int POSTS_PER_MINUTE = 30;
+	private static final long MINUTE_MS = 60_000;
 	private static final Locale TR = Locale.forLanguageTag("tr");
 
 	private final IskurChannelRepository channels;
@@ -96,7 +102,8 @@ public class IskurChannelService {
 	private final ProgramRepository programs;
 	private final ProgramCoordinatorRepository programCoordinators;
 	private final AppUserRepository users;
-	private final IskurChannelNotifier notifier;
+	private final ApplicationEventPublisher events;
+	private final RateLimitingConfig rateLimiting;
 
 	/** Every channel the caller can open, Genel Duyurular first; a coordinator can narrow it to one program. */
 	@Transactional(readOnly = true)
@@ -125,15 +132,21 @@ public class IskurChannelService {
 				rows.stream().mapToLong(IskurChannelResponse::unreadCount).sum());
 	}
 
-	/** A page of the channel, oldest first; {@code before} pages back from that moment. */
+	/** A page of the channel, oldest first; {@code before} names the oldest message already shown. */
 	@Transactional(readOnly = true)
-	public IskurMessagePageResponse messages(UUID actorId, UUID channelId, @Nullable Instant before) {
+	public IskurMessagePageResponse messages(UUID actorId, UUID channelId, @Nullable UUID before) {
 		AppUser actor = requireActive(actorId);
 		Reached reached = requireReach(actor, channelId);
 		PageRequest page = PageRequest.of(0, PAGE_SIZE + 1);
-		List<IskurMessage> newestFirst = before == null
-				? messages.findByChannelIdOrderByCreatedAtDescIdDesc(channelId, page)
-				: messages.findByChannelIdAndCreatedAtBeforeOrderByCreatedAtDescIdDesc(channelId, before, page);
+		List<IskurMessage> newestFirst;
+		if (before == null) {
+			newestFirst = messages.findByChannelIdOrderByCreatedAtDescIdDesc(channelId, page);
+		} else {
+			IskurMessage cursor = messages.findById(before)
+					.filter(message -> message.getChannelId().equals(channelId))
+					.orElseThrow(() -> new InvalidRequestException(Texts.forRequest("error.iskurMessageCursor")));
+			newestFirst = messages.findPageBefore(channelId, cursor.getCreatedAt(), cursor.getId(), page);
+		}
 		boolean hasMore = newestFirst.size() > PAGE_SIZE;
 		List<IskurMessage> shown = new ArrayList<>(newestFirst.subList(0, Math.min(PAGE_SIZE, newestFirst.size())));
 		Collections.reverse(shown);
@@ -150,10 +163,9 @@ public class IskurChannelService {
 		if (!reached.reach().canWrite()) {
 			throw new ResponseStatusException(HttpStatus.FORBIDDEN, Texts.forRequest("error.iskurChannelReadOnly"));
 		}
-		IskurChannel channel = reached.channel();
 		String title = TextUtils.normalizeOptional(request.title());
 		boolean important = Boolean.TRUE.equals(request.important());
-		boolean announcer = reached.reach().staff() && channel.getKind() == IskurChannelKind.ANNOUNCEMENTS;
+		boolean announcer = reached.reach().staff() && reached.channel().getKind() == IskurChannelKind.ANNOUNCEMENTS;
 		if ((title != null || important) && !announcer) {
 			throw new InvalidRequestException(Texts.forRequest("error.iskurAnnouncementOnly"));
 		}
@@ -161,24 +173,39 @@ public class IskurChannelService {
 		if (body.isEmpty()) {
 			throw new InvalidRequestException(Texts.forRequest("error.iskurMessageEmpty"));
 		}
-		Instant now = Instant.now();
-		Instant previousMessageAt = channel.getLastMessageAt();
+		if (!rateLimiting.resolveBucket("iskur_post:" + actor.getId(), POSTS_PER_MINUTE, MINUTE_MS).tryConsume(1)) {
+			throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS,
+					Texts.forRequest("error.iskurTooManyMessages"));
+		}
+		// The lock orders the channel's posts: each gets a later time than the one before, so lastMessageAt never
+		// goes back and a read mark taken from it never covers a message still being written.
+		IskurChannel channel = channels.findByIdForUpdate(channelId).orElseThrow(IskurChannelService::channelNotFound);
+		Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
+		Instant previous = channel.getLastMessageAt();
+		if (previous != null && !now.isAfter(previous)) {
+			now = previous.plus(1, ChronoUnit.MICROS);
+		}
 		IskurMessage message = messages.save(new IskurMessage(channelId, actor.getId(), title, body, important, now));
 		channel.setLastMessageAt(now);
 		channels.save(channel);
-		notifier.messagePosted(channel, placeName(channel), message, actor, previousMessageAt);
-		return render(actor, reached, List.of(message)).getFirst();
+		events.publishEvent(new IskurMessagePostedEvent(message.getId()));
+		return render(actor, new Reached(channel, reached.reach()), List.of(message)).getFirst();
 	}
 
-	/** Marks the channel read up to now. */
+	/**
+	 * Marks the channel read up to its newest message (its opening, while it has none). Not "now": a message still
+	 * being written has a time before now and would be marked read unseen.
+	 */
 	@Transactional
 	public void markRead(UUID actorId, UUID channelId) {
 		AppUser actor = requireActive(actorId);
-		requireReach(actor, channelId);
-		Instant now = Instant.now();
+		IskurChannel channel = requireReach(actor, channelId).channel();
+		Instant mark = channel.getLastMessageAt() != null ? channel.getLastMessageAt() : channel.getCreatedAt();
 		IskurChannelRead read = reads.findByChannelIdAndUserId(channelId, actor.getId())
-				.orElseGet(() -> new IskurChannelRead(channelId, actor.getId(), now));
-		read.setLastReadAt(now);
+				.orElseGet(() -> new IskurChannelRead(channelId, actor.getId()));
+		if (read.getLastReadAt() == null || read.getLastReadAt().isBefore(mark)) {
+			read.setLastReadAt(mark);
+		}
 		reads.save(read);
 	}
 
@@ -357,8 +384,13 @@ public class IskurChannelService {
 		Map<UUID, Long> internCount = members.findByChannelIdIn(ids).stream()
 				.filter(IskurChannelMember::isActive)
 				.collect(Collectors.groupingBy(IskurChannelMember::getChannelId, Collectors.counting()));
-		Map<UUID, Instant> readUpTo = reads.findByUserIdAndChannelIdIn(actor.getId(), ids).stream()
-				.collect(Collectors.toMap(IskurChannelRead::getChannelId, IskurChannelRead::getLastReadAt));
+		Set<UUID> opened = reads.findByUserIdAndChannelIdIn(actor.getId(), ids).stream()
+				.filter(read -> read.getLastReadAt() != null)
+				.map(IskurChannelRead::getChannelId)
+				.collect(Collectors.toSet());
+		Map<UUID, Long> unread = new HashMap<>();
+		messages.countUnread(ids, actor.getId(), Instant.EPOCH)
+				.forEach(row -> unread.put(row.getChannelId(), row.getCount()));
 		Map<UUID, Integer> coordinatorCount = new HashMap<>();
 
 		Collator collator = Collator.getInstance(TR);
@@ -391,15 +423,11 @@ public class IskurChannelService {
 			case UNIT -> unit != null && unit.getCoordinatorId() != null ? 1 : 0;
 			case TEAM, LEADER_DIRECT -> 0;
 			};
-			Instant readMark = readUpTo.get(channel.getId());
-			Instant last = channel.getLastMessageAt();
-			long unread = last == null || (readMark != null && !last.isAfter(readMark)) ? 0
-					: messages.countUnread(channel.getId(), readMark == null ? Instant.EPOCH : readMark,
-							actor.getId());
 			rows.add(new IskurChannelResponse(channel.getId(), program.getId(), program.getName(), channel.getKind(),
 					name, channel.getKind() == IskurChannelKind.TEAM && unit != null ? unit.getName() : null,
 					counterpart, internCount.getOrDefault(channel.getId(), 0L).intValue() + staffCount,
-					access.canWrite(), access.staff(), unread, readMark == null, last));
+					access.canWrite(), access.staff(), unread.getOrDefault(channel.getId(), 0L),
+					!opened.contains(channel.getId()), channel.getLastMessageAt()));
 		}
 		rows.sort(Comparator.comparing(IskurChannelResponse::kind)
 				.thenComparing(IskurChannelResponse::programName, collator)
@@ -445,16 +473,6 @@ public class IskurChannelService {
 					actor.getId().equals(message.getSenderId()), mine.get(message.getId()), tally));
 		}
 		return rendered;
-	}
-
-	private @Nullable String placeName(IskurChannel channel) {
-		if (channel.getTeamId() != null) {
-			return teams.findById(channel.getTeamId()).map(IskurTeam::getName).orElse(null);
-		}
-		if (channel.getUnitId() != null) {
-			return units.findById(channel.getUnitId()).map(IskurUnit::getName).orElse(null);
-		}
-		return null;
 	}
 
 	/**

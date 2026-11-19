@@ -11,6 +11,8 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import org.jspecify.annotations.Nullable;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
@@ -22,10 +24,12 @@ import org.springframework.transaction.support.TransactionTemplate;
 import com.dps.teknokent.domain.IskurChannelKind;
 import com.dps.teknokent.domain.IskurPlacementStatus;
 import com.dps.teknokent.domain.IskurTeamRole;
+import com.dps.teknokent.domain.ProgramType;
 import com.dps.teknokent.entity.IskurChannel;
 import com.dps.teknokent.entity.IskurChannelMember;
 import com.dps.teknokent.entity.IskurPlacement;
 import com.dps.teknokent.entity.IskurTeam;
+import com.dps.teknokent.entity.Program;
 import com.dps.teknokent.repository.IskurChannelMemberRepository;
 import com.dps.teknokent.repository.IskurChannelRepository;
 import com.dps.teknokent.repository.IskurPlacementRepository;
@@ -55,16 +59,31 @@ public class IskurChannelMembershipService {
 
 	/**
 	 * After the placement is committed, in a transaction of its own: a failure here is logged and never turns the
-	 * coordinator's saved placement into an error. The next change in the program repairs it.
+	 * coordinator's saved placement into an error. The next change in the program, or the next start, repairs it.
 	 */
 	@TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
 	public void onPlacementChanged(IskurPlacementChangedEvent event) {
+		reconcileOnItsOwn(event.programId());
+	}
+
+	/**
+	 * A sync that failed, or never ran because the server stopped between the commit and the listener, is repaired on
+	 * the next start: every peer program is rebuilt once, each in its own transaction.
+	 */
+	@EventListener(ApplicationReadyEvent.class)
+	public void reconcileAllOnStartup() {
+		for (Program program : programs.findByProgramType(ProgramType.PEER_MENTORING)) {
+			reconcileOnItsOwn(program.getId());
+		}
+	}
+
+	private void reconcileOnItsOwn(UUID programId) {
 		TransactionTemplate own = new TransactionTemplate(transactionManager);
 		own.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
 		try {
-			own.executeWithoutResult(status -> reconcile(event.programId()));
+			own.executeWithoutResult(status -> reconcile(programId));
 		} catch (RuntimeException failure) {
-			log.warn("İŞKUR channel sync failed for program {}", event.programId(), failure);
+			log.warn("İŞKUR channel sync failed for program {}", programId, failure);
 		}
 	}
 

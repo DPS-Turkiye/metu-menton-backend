@@ -1,6 +1,5 @@
 package com.dps.teknokent.controller;
 
-import java.time.Instant;
 import java.util.UUID;
 
 import org.springframework.http.ResponseEntity;
@@ -45,7 +44,7 @@ public class IskurChannelController {
 
 	@GetMapping("/channels/{channelId}/messages")
 	public IskurMessagePageResponse messages(@PathVariable UUID channelId,
-			@RequestParam(required = false) UUID actorId, @RequestParam(required = false) Instant before) {
+			@RequestParam(required = false) UUID actorId, @RequestParam(required = false) UUID before) {
 		return iskurChannelService.messages(CurrentActor.resolve(actorId), channelId, before);
 	}
 

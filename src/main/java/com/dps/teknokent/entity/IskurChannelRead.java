@@ -12,7 +12,10 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
-/** How far one reader has read one channel. */
+/**
+ * One reader's place in one channel: how far they have read it (empty until they first open it) and when they were
+ * last notified about it.
+ */
 @Entity
 @Table(name = "iskur_channel_read", uniqueConstraints = @UniqueConstraint(name = "uq_iskur_channel_read", columnNames = {
 		"channel_id", "user_id" }))
@@ -30,13 +33,20 @@ public class IskurChannelRead {
 	@Column(name = "user_id", nullable = false)
 	private UUID userId;
 
-	@Column(name = "last_read_at", nullable = false)
+	@Column(name = "last_read_at")
 	private Instant lastReadAt;
 
-	public IskurChannelRead(UUID channelId, UUID userId, Instant now) {
+	@Column(name = "notified_at")
+	private Instant notifiedAt;
+
+	public IskurChannelRead(UUID channelId, UUID userId) {
 		this.id = UUID.randomUUID();
 		this.channelId = channelId;
 		this.userId = userId;
-		this.lastReadAt = now;
+	}
+
+	/** Whether a new message should notify: never notified, or read since the last notification. */
+	public boolean readSinceLastNotified() {
+		return notifiedAt == null || (lastReadAt != null && !lastReadAt.isBefore(notifiedAt));
 	}
 }

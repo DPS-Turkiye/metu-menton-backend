@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -20,6 +21,7 @@ import com.dps.teknokent.domain.IskurTeamRole;
 import com.dps.teknokent.domain.ProgramStatus;
 import com.dps.teknokent.domain.ProgramType;
 import com.dps.teknokent.domain.UserRole;
+import com.dps.teknokent.dto.requests.IskurMessageRequest;
 import com.dps.teknokent.entity.AppUser;
 import com.dps.teknokent.entity.IskurChannel;
 import com.dps.teknokent.entity.IskurPlacement;
@@ -28,11 +30,15 @@ import com.dps.teknokent.entity.IskurUnit;
 import com.dps.teknokent.entity.Program;
 import com.dps.teknokent.repository.AppUserRepository;
 import com.dps.teknokent.repository.IskurChannelMemberRepository;
+import com.dps.teknokent.repository.IskurChannelReadRepository;
 import com.dps.teknokent.repository.IskurChannelRepository;
+import com.dps.teknokent.repository.IskurMessageRepository;
 import com.dps.teknokent.repository.IskurPlacementRepository;
 import com.dps.teknokent.repository.IskurTeamRepository;
 import com.dps.teknokent.repository.IskurUnitRepository;
+import com.dps.teknokent.repository.NotificationRepository;
 import com.dps.teknokent.repository.ProgramRepository;
+import com.dps.teknokent.service.IskurChannelService;
 import com.dps.teknokent.service.IskurPlacementChangedEvent;
 
 /**
@@ -60,6 +66,14 @@ class IskurChannelSyncIntegrationTest {
 	private IskurChannelRepository channelRepository;
 	@Autowired
 	private IskurChannelMemberRepository memberRepository;
+	@Autowired
+	private IskurMessageRepository messageRepository;
+	@Autowired
+	private IskurChannelReadRepository readRepository;
+	@Autowired
+	private NotificationRepository notificationRepository;
+	@Autowired
+	private IskurChannelService channelService;
 
 	private TransactionTemplate tx;
 	private Program program;
@@ -90,6 +104,12 @@ class IskurChannelSyncIntegrationTest {
 		List<UUID> channelIds = channelRepository.findByProgramId(program.getId()).stream()
 				.map(IskurChannel::getId)
 				.toList();
+		notificationRepository.deleteAll(notificationRepository.findByRecipientIdOrderByCreatedAtDesc(intern.getId()));
+		channelIds.forEach(id -> {
+			readRepository.deleteAll(readRepository.findByChannelId(id));
+			messageRepository.deleteAll(messageRepository.findByChannelIdOrderByCreatedAtDescIdDesc(id,
+					PageRequest.of(0, 100)));
+		});
 		memberRepository.deleteAll(memberRepository.findByChannelIdIn(channelIds));
 		channelRepository.deleteAllById(channelIds);
 		placementRepository.deleteAll(placementRepository.findByProgramId(program.getId()));
@@ -111,6 +131,36 @@ class IskurChannelSyncIntegrationTest {
 				.containsExactlyInAnyOrder(IskurChannelKind.ANNOUNCEMENTS, IskurChannelKind.UNIT,
 						IskurChannelKind.TEAM);
 		assertThat(memberRepository.findByUserIdAndLeftAtIsNull(intern.getId())).hasSize(3);
+	}
+
+	@Test
+	void anImportantAnnouncementNotifiesTheInternOnceItIsCommitted() {
+		tx.executeWithoutResult(status -> {
+			IskurPlacement placement = placementRepository.save(finalPlacement());
+			events.publishEvent(new IskurPlacementChangedEvent(program.getId(), intern.getId(), null,
+					placement.getTeamId(), placement.getStatus(), placement.getTeamRole(), null));
+		});
+		UUID announcements = channelRepository.findByProgramId(program.getId()).stream()
+				.filter(channel -> channel.getKind() == IskurChannelKind.ANNOUNCEMENTS)
+				.findFirst()
+				.orElseThrow()
+				.getId();
+
+		channelService.post(coordinator.getId(), announcements,
+				new IskurMessageRequest(coordinator.getId(), "Eğitim 09:00'da.", "İş sağlığı eğitimi", true));
+
+		assertThat(notificationRepository.findByRecipientIdOrderByCreatedAtDesc(intern.getId()))
+				.singleElement()
+				.satisfies(notification -> {
+					assertThat(notification.getTitle()).isEqualTo("Önemli duyuru");
+					assertThat(notification.getBody()).isEqualTo("İş sağlığı eğitimi");
+					assertThat(notification.getHref()).isEqualTo("/student/messages?channel=" + announcements);
+				});
+		assertThat(readRepository.findByChannelIdAndUserId(announcements, intern.getId()))
+				.hasValueSatisfying(read -> {
+					assertThat(read.getNotifiedAt()).isNotNull();
+					assertThat(read.getLastReadAt()).isNull();
+				});
 	}
 
 	@Test

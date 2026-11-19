@@ -53,10 +53,12 @@ CREATE TABLE iskur_message (
     title       VARCHAR(160),
     body        VARCHAR(4000) NOT NULL,
     important   BOOLEAN NOT NULL DEFAULT FALSE,
-    created_at  TIMESTAMPTZ NOT NULL
+    created_at  TIMESTAMPTZ NOT NULL,
+    CONSTRAINT chk_iskur_message_body CHECK (length(btrim(body)) > 0)
 );
 
-CREATE INDEX ix_iskur_message_channel_created ON iskur_message (channel_id, created_at DESC);
+-- Pages go back by (created_at, id), and unread counts scan created_at within one channel.
+CREATE INDEX ix_iskur_message_channel_created ON iskur_message (channel_id, created_at DESC, id DESC);
 CREATE INDEX ix_iskur_message_sender ON iskur_message (sender_id);
 
 -- "Okudum" on an important announcement: an explicit confirmation, separate from opening the channel.
@@ -70,12 +72,15 @@ CREATE TABLE iskur_message_receipt (
 
 CREATE INDEX ix_iskur_message_receipt_user ON iskur_message_receipt (user_id);
 
--- How far each reader (intern or coordinator) has read a channel; the unread counts start from here.
+-- Each reader's (intern or coordinator) place in a channel. last_read_at is where the unread count starts; empty until
+-- they first open it (5.1 "Yeni"). notified_at is the last notification about the channel: another one goes out only
+-- once they have read past it, so a busy channel sends one notification, not one per message.
 CREATE TABLE iskur_channel_read (
     id            UUID PRIMARY KEY,
     channel_id    UUID NOT NULL REFERENCES iskur_channel (id) ON DELETE CASCADE,
     user_id       UUID NOT NULL REFERENCES app_user (id) ON DELETE CASCADE,
-    last_read_at  TIMESTAMPTZ NOT NULL,
+    last_read_at  TIMESTAMPTZ,
+    notified_at   TIMESTAMPTZ,
     CONSTRAINT uq_iskur_channel_read UNIQUE (channel_id, user_id)
 );
 

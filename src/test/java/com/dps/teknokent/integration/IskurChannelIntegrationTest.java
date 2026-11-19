@@ -21,6 +21,8 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.test.context.event.ApplicationEvents;
+import org.springframework.test.context.event.RecordApplicationEvents;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
@@ -38,7 +40,6 @@ import com.dps.teknokent.entity.IskurMessage;
 import com.dps.teknokent.entity.IskurPlacement;
 import com.dps.teknokent.entity.IskurTeam;
 import com.dps.teknokent.entity.IskurUnit;
-import com.dps.teknokent.entity.Notification;
 import com.dps.teknokent.entity.Program;
 import com.dps.teknokent.entity.ProgramCoordinator;
 import com.dps.teknokent.repository.AppUserRepository;
@@ -47,17 +48,18 @@ import com.dps.teknokent.repository.IskurMessageRepository;
 import com.dps.teknokent.repository.IskurPlacementRepository;
 import com.dps.teknokent.repository.IskurTeamRepository;
 import com.dps.teknokent.repository.IskurUnitRepository;
-import com.dps.teknokent.repository.NotificationRepository;
 import com.dps.teknokent.repository.ProgramCoordinatorRepository;
 import com.dps.teknokent.repository.ProgramRepository;
 import com.dps.teknokent.security.AppUserPrincipal;
 import com.dps.teknokent.service.IskurChannelMembershipService;
+import com.dps.teknokent.service.IskurMessagePostedEvent;
 import com.jayway.jsonpath.JsonPath;
 
 /** The İŞKUR channels, through the ODTÜ edition's real security chain and an H2 database. */
 @SpringBootTest(properties = "app.edition=ODTU")
 @AutoConfigureMockMvc
 @Transactional
+@RecordApplicationEvents
 class IskurChannelIntegrationTest {
 
 	private static final String CHANNELS = "/api/iskur/channels";
@@ -83,7 +85,7 @@ class IskurChannelIntegrationTest {
 	@Autowired
 	private IskurMessageRepository messageRepository;
 	@Autowired
-	private NotificationRepository notificationRepository;
+	private ApplicationEvents recorded;
 
 	private AppUser admin;
 	private AppUser selin;
@@ -292,14 +294,8 @@ class IskurChannelIntegrationTest {
 				.andExpect(jsonPath("$.receipts.read").value(0))
 				.andExpect(jsonPath("$.receipts.total").value(4)));
 
-		List<Notification> forAyse = notificationRepository.findByRecipientIdOrderByCreatedAtDesc(ayse.getId());
-		assertThat(forAyse).singleElement().satisfies(notification -> {
-			assertThat(notification.getTitle()).isEqualTo("Önemli duyuru");
-			assertThat(notification.getBody()).isEqualTo("Perşembe 19 Kasım: İş sağlığı ve güvenliği eğitimi");
-			assertThat(notification.getHref()).isEqualTo("/student/messages?channel=" + announcements);
-		});
-		assertThat(notificationRepository.findByRecipientIdOrderByCreatedAtDesc(deniz.getId())).isEmpty();
-		assertThat(notificationRepository.findByRecipientIdOrderByCreatedAtDesc(selin.getId())).isEmpty();
+		assertThat(recorded.stream(IskurMessagePostedEvent.class)).extracting(IskurMessagePostedEvent::messageId)
+				.containsExactly(UUID.fromString(id));
 
 		send(post("/api/iskur/messages/{id}/acknowledge", id), actor(burak))
 				.andExpect(status().isOk())
@@ -364,9 +360,13 @@ class IskurChannelIntegrationTest {
 	void pagesBackFiftyMessagesAtATime() throws Exception {
 		UUID team = channelOf(IskurChannelKind.TEAM, media.getId()).getId();
 		Instant start = Instant.parse("2026-11-19T07:00:00Z");
+		UUID sixth = null;
 		for (int i = 1; i <= 55; i++) {
-			messageRepository.save(new IskurMessage(team, ayse.getId(), null, "Mesaj " + i, false,
-					start.plusSeconds(i * 60L)));
+			IskurMessage saved = messageRepository.save(new IskurMessage(team, ayse.getId(), null, "Mesaj " + i,
+					false, start.plusSeconds(i * 60L)));
+			if (i == 6) {
+				sixth = saved.getId();
+			}
 		}
 		messages(burak, team)
 				.andExpect(jsonPath("$.messages.length()").value(50))
@@ -375,11 +375,64 @@ class IskurChannelIntegrationTest {
 				.andExpect(jsonPath("$.hasMore").value(true));
 		mockMvc.perform(get(CHANNELS + "/{id}/messages", team)
 				.param("actorId", burak.getId().toString())
-				.param("before", start.plusSeconds(6 * 60L).toString())
+				.param("before", String.valueOf(sixth))
 				.with(httpBasic("test", "test")))
 				.andExpect(jsonPath("$.messages[*].body").value(Matchers.contains(
 						"Mesaj 1", "Mesaj 2", "Mesaj 3", "Mesaj 4", "Mesaj 5")))
 				.andExpect(jsonPath("$.hasMore").value(false));
+	}
+
+	@Test
+	void messagesSentAtTheSameMomentAreNeitherSkippedNorRepeatedAcrossPages() throws Exception {
+		UUID team = channelOf(IskurChannelKind.TEAM, media.getId()).getId();
+		Instant same = Instant.parse("2026-11-19T07:00:00Z");
+		for (int i = 1; i <= 53; i++) {
+			messageRepository.save(new IskurMessage(team, ayse.getId(), null, "Aynı an " + i, false, same));
+		}
+		String first = messages(burak, team).andReturn().getResponse().getContentAsString();
+		List<String> firstPage = JsonPath.read(first, "$.messages[*].id");
+		String oldest = firstPage.getFirst();
+		String second = mockMvc.perform(get(CHANNELS + "/{id}/messages", team)
+				.param("actorId", burak.getId().toString())
+				.param("before", oldest)
+				.with(httpBasic("test", "test")))
+				.andExpect(jsonPath("$.hasMore").value(false))
+				.andReturn().getResponse().getContentAsString();
+		List<String> secondPage = JsonPath.read(second, "$.messages[*].id");
+		assertThat(firstPage).hasSize(50).doesNotContainAnyElementsOf(secondPage);
+		assertThat(secondPage).hasSize(3);
+	}
+
+	@Test
+	void aCursorFromAnotherChannelIsRefused() throws Exception {
+		UUID team = channelOf(IskurChannelKind.TEAM, media.getId()).getId();
+		UUID elsewhere = channelOf(IskurChannelKind.UNIT, creative.getId()).getId();
+		IskurMessage other = messageRepository.save(new IskurMessage(elsewhere, ayse.getId(), null, "Birim", false,
+				Instant.now()));
+		mockMvc.perform(get(CHANNELS + "/{id}/messages", team)
+				.param("actorId", burak.getId().toString())
+				.param("before", other.getId().toString())
+				.with(httpBasic("test", "test")))
+				.andExpect(status().isBadRequest());
+	}
+
+	@Test
+	void someonePostingInALoopIsStoppedAfterThirtyAMinute() throws Exception {
+		UUID team = channelOf(IskurChannelKind.TEAM, media.getId()).getId();
+		for (int i = 0; i < 30; i++) {
+			postMessage(ayse, team, "{\"body\":\"Mesaj\"}").andExpect(status().isOk());
+		}
+		postMessage(ayse, team, "{\"body\":\"Bir tane daha\"}").andExpect(status().isTooManyRequests());
+	}
+
+	@Test
+	void readingMarksTheNewestMessageAndKeepsLaterOnesUnread() throws Exception {
+		UUID team = channelOf(IskurChannelKind.TEAM, media.getId()).getId();
+		postMessage(burak, team, "{\"body\":\"Bir\"}").andExpect(status().isOk());
+		send(post(CHANNELS + "/{id}/read", team), actor(ayse)).andExpect(status().isNoContent());
+		send(post(CHANNELS + "/{id}/read", team), actor(ayse)).andExpect(status().isNoContent());
+		postMessage(burak, team, "{\"body\":\"İki\"}").andExpect(status().isOk());
+		channels(ayse).andExpect(jsonPath("$.channels[2].unreadCount").value(1));
 	}
 
 	@Test
