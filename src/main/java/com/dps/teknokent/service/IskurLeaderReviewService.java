@@ -1,6 +1,7 @@
 package com.dps.teknokent.service;
 
 import java.text.Collator;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -76,6 +77,7 @@ public class IskurLeaderReviewService {
 	private final IskurMentoringTally tally;
 	private final PeerReportCalendar calendar;
 	private final CoordinatorProgramService coordinatorProgramService;
+	private final IskurWeekHistoryService history;
 
 	/**
 	 * Who decides on this person's week: their sub-group's leader, or else the team's other leaders. Empty for the
@@ -163,9 +165,11 @@ public class IskurLeaderReviewService {
 		if (request.decision() != IskurWeekDecision.APPROVE && reason == null) {
 			throw new InvalidRequestException(Texts.forRequest("error.iskurWeekReasonRequired"));
 		}
+		Instant now = calendar.now();
 		week.decide(request.decision(), reason, request.timeMatchesWork(), request.effortDocumented(),
-				request.outputsSufficient(), actorId, calendar.now());
+				request.outputsSufficient(), actorId, now);
 		IskurWorkWeek saved = IskurWorkWeekService.savedOrConflict(() -> weeks.saveAndFlush(week));
+		history.decided(saved, actorId, request, reason, now);
 		AppUser intern = reviewed.person();
 		String leaderName = users.findById(actorId).map(AppUser::getFullName).orElse("");
 		notifications.create(intern, NotificationCategory.GENERAL,
@@ -217,7 +221,7 @@ public class IskurLeaderReviewService {
 				new IskurLeaderWeekResponse.Mentoring(totals.mentoringMinutes(), mentoring.meetingCount(),
 						mentoring.reportsSubmitted(), mentoring.meetingCount(), List.copyOf(days)),
 				workWeeks.decision(week), IskurWorkWeekService.objection(week),
-				week.getStatus() == IskurWeekStatus.SUBMITTED, queue);
+				week.getStatus() == IskurWeekStatus.SUBMITTED, queue, history.of(week));
 	}
 
 	private List<IskurPlacement> revieweesOf(IskurPlacement me) {

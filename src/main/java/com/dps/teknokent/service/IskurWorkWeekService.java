@@ -81,6 +81,7 @@ public class IskurWorkWeekService {
 	private final NotificationService notifications;
 	private final IskurMentoringTally tally;
 	private final PeerReportCalendar calendar;
+	private final IskurWeekHistoryService history;
 
 	/** The caller's week; {@code weekStart} null means this week. Reading never creates the week. */
 	@Transactional(readOnly = true)
@@ -161,8 +162,10 @@ public class IskurWorkWeekService {
 		if (lines.isEmpty() && tally.of(intern, monday).minutes() == 0) {
 			throw new InvalidRequestException(Texts.forRequest("error.iskurWeekEmpty"));
 		}
-		week.submit(calendar.now());
+		Instant now = calendar.now();
+		week.submit(now);
 		IskurWorkWeek saved = savedOrConflict(() -> weeks.saveAndFlush(week));
+		history.submitted(saved, now);
 		Set<UUID> reviewers = IskurLeaderReviewService.reviewersOf(me, placements.findByTeamId(me.getTeamId()));
 		String href = "/student/team/weeks/" + saved.getId();
 		if (reviewers.isEmpty()) {
@@ -196,6 +199,7 @@ public class IskurWorkWeekService {
 		week.setObjectedAt(now);
 		week.setUpdatedAt(now);
 		IskurWorkWeek saved = savedOrConflict(() -> weeks.saveAndFlush(week));
+		history.objected(saved, request.objection().strip(), now);
 		AppUser intern = requireUser(actorId);
 		programs.findById(me.getProgramId()).ifPresent(program -> notifyCoordinators(program, intern, monday));
 		return response(me, monday, saved);
@@ -241,7 +245,8 @@ public class IskurWorkWeekService {
 				totals(lines, mentoring), new IskurWeekResponse.Mentoring(mentoring.meetingCount(),
 						mentoring.meetingMinutes(), mentoring.activityMinutes(), support,
 						mentoring.reportsSubmitted(), mentoring.meetingCount(), mentoring.meetingsAhead()),
-				needsSupport, lines.stream().map(IskurWorkWeekService::entry).toList(), weekTasks, options);
+				needsSupport, lines.stream().map(IskurWorkWeekService::entry).toList(), weekTasks, options,
+				history.of(week));
 	}
 
 	static IskurWeekResponse.@Nullable Split split(IskurPlacement placement) {
