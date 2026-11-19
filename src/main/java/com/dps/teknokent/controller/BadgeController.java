@@ -12,15 +12,18 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.dps.teknokent.domain.GateBadgeState;
 import com.dps.teknokent.dto.requests.AwardBadgeRequest;
+import com.dps.teknokent.dto.requests.PrismDecisionRequest;
 import com.dps.teknokent.dto.requests.RevokeBadgeRequest;
 import com.dps.teknokent.dto.responses.AchievementProgressResponse;
 import com.dps.teknokent.dto.responses.BadgeAwardResponse;
 import com.dps.teknokent.dto.responses.BadgeCatalogueResponse;
 import com.dps.teknokent.dto.responses.GateBadgeRowResponse;
+import com.dps.teknokent.dto.responses.PrismDecisionResultResponse;
 import com.dps.teknokent.dto.responses.PublicBadgeResponse;
 import com.dps.teknokent.security.CurrentActor;
 import com.dps.teknokent.service.AchievementService;
 import com.dps.teknokent.service.BadgeService;
+import com.dps.teknokent.service.PrismTrainingService;
 
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -34,6 +37,7 @@ public class BadgeController {
 
 	private final BadgeService badgeService;
 	private final AchievementService achievementService;
+	private final PrismTrainingService prismTrainingService;
 
 	@GetMapping("/api/badges/catalogue")
 	public List<BadgeCatalogueResponse> catalogue() {
@@ -70,6 +74,13 @@ public class BadgeController {
 	public GateBadgeRowResponse revoke(@PathVariable UUID programId, @PathVariable UUID awardId,
 			@Valid @RequestBody RevokeBadgeRequest request) {
 		return badgeService.revoke(CurrentActor.resolve(request.actorId()), programId, awardId, request.reason());
+	}
+
+	@PostMapping("/api/coordinator/programs/{programId}/badges/prism-decisions")
+	public List<PrismDecisionResultResponse> prismDecisions(@PathVariable UUID programId,
+			@Valid @RequestBody PrismDecisionRequest request) {
+		return prismTrainingService.decide(CurrentActor.resolve(request.actorId()), programId, request.decision(),
+				request.entries());
 	}
 
 	@GetMapping("/api/admin/students")

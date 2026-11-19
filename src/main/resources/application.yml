@@ -144,6 +144,12 @@ app:
     aws-region: ${AWS_REGION:}
     aws-access-key-id: ${AWS_ACCESS_KEY_ID:}
     aws-secret-access-key: ${AWS_SECRET_ACCESS_KEY:}
+  peer-training:
+    # ODTÜ: the Akran Mentoru training and test run on Prism and a coordinator approves each mentor, so Menton's own
+    # quiz stays off and never awards the badge. true brings the in-app quiz (and its automatic badge) back.
+    in-app-quiz: ${PEER_TRAINING_IN_APP_QUIZ:false}
+    # Only the program's İŞKUR interns can be approved as Akran mentors (default, not yet confirmed by Arya).
+    interns-only: ${PEER_TRAINING_INTERNS_ONLY:true}
   registration:
     allowed-email-domains: ${REGISTRATION_ALLOWED_EMAIL_DOMAINS:}
   bootstrap:
