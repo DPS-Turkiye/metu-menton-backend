@@ -28,6 +28,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import com.dps.teknokent.config.PeerTrainingProperties;
 import com.dps.teknokent.domain.BadgeCode;
 import com.dps.teknokent.domain.BadgeSource;
 import com.dps.teknokent.domain.BadgeStatus;
@@ -77,6 +78,10 @@ class TrainingServiceTest {
 	private DomainLookupService domainLookupService;
 	@Mock
 	private NotificationService notificationService;
+	@Mock
+	private PrismTrainingService prismTraining;
+	@Mock
+	private PeerTrainingProperties peerTraining;
 
 	@InjectMocks
 	private TrainingService service;
@@ -87,6 +92,8 @@ class TrainingServiceTest {
 
 	@BeforeEach
 	void setUp() {
+		// The in-app quiz is on for these tests unless one turns it off (ODTÜ runs with it off).
+		lenient().when(peerTraining.inAppQuiz()).thenReturn(true);
 		lenient().when(badgeService.requirePeerProgram(coordinator, iskur.getId())).thenReturn(iskur);
 		lenient().when(questions.save(any(TrainingQuestion.class))).thenAnswer(call -> {
 			stored.add(call.getArgument(0));
@@ -344,6 +351,82 @@ class TrainingServiceTest {
 
 		student.setProgramId(null);
 		assertThat(service.forStudent(student.getId()).state()).isEqualTo(TrainingState.NOT_AVAILABLE);
+	}
+
+	// ---- ODTÜ: the training runs on Prism and a coordinator approves; the in-app quiz is off ----
+
+	private AppUser onPrism(TrainingState state) {
+		when(peerTraining.inAppQuiz()).thenReturn(false);
+		lenient().when(programs.findById(iskur.getId())).thenReturn(Optional.of(iskur));
+		AppUser student = signedIn(true);
+		lenient().when(prismTraining.forStudent(student, iskur)).thenReturn(new PrismTrainingService.StudentPrism(
+				state, state == TrainingState.INTERNS_ONLY ? null : "https://prism.example.test/egitim", null));
+		return student;
+	}
+
+	@Test
+	void withTheQuizOffTheStudentSeesThePrismLinkAndTheirPrismState() {
+		AppUser student = onPrism(TrainingState.PRISM_TODO);
+
+		var view = service.forStudent(student.getId());
+
+		assertThat(view.state()).isEqualTo(TrainingState.PRISM_TODO);
+		assertThat(view.prismUrl()).isEqualTo("https://prism.example.test/egitim");
+		assertThat(view.programName()).isEqualTo(iskur.getName());
+		assertThat(view.videoId()).isNull();
+	}
+
+	@Test
+	void aStudentWhoIsNotAnInternIsToldPeerMentoringIsForInterns() {
+		AppUser student = onPrism(TrainingState.INTERNS_ONLY);
+
+		var view = service.forStudent(student.getId());
+
+		assertThat(view.state()).isEqualTo(TrainingState.INTERNS_ONLY);
+		assertThat(view.prismUrl()).isNull();
+	}
+
+	@Test
+	void withTheQuizOffTheVideoAndTheQuizAreClosedSoTheQuizNeverAwardsTheBadge() {
+		live();
+		AppUser student = onPrism(TrainingState.PRISM_TODO);
+
+		assertThatThrownBy(() -> service.videoWatched(student.getId())).isInstanceOf(InvalidRequestException.class);
+		assertThatThrownBy(() -> service.quiz(student.getId())).isInstanceOf(InvalidRequestException.class);
+		assertThatThrownBy(() -> service.submit(student.getId(), 1, answers(10)))
+				.isInstanceOf(InvalidRequestException.class);
+		verify(badgeService, never()).award(any(), any(), any(), any(), any());
+		verify(attempts, never()).save(any());
+	}
+
+	@Test
+	void theBadgeStatesComeBeforePrism() {
+		AppUser holder = onPrism(TrainingState.PRISM_TODO);
+		when(awards.findByUserIdOrderByAwardedAtDesc(holder.getId()))
+				.thenReturn(List.of(gate(holder, iskur, BadgeStatus.ACTIVE)));
+
+		assertThat(service.forStudent(holder.getId()).state()).isEqualTo(TrainingState.BADGE_ACTIVE);
+		verify(prismTraining, never()).forStudent(any(), any());
+	}
+
+	@Test
+	void aStudentCanSayTheyFinishedPrismWhileItIsToDoOrToRetake() {
+		AppUser student = onPrism(TrainingState.PRISM_RETAKE);
+
+		service.prismCompleted(student.getId());
+
+		verify(prismTraining).markCompleted(student, iskur);
+	}
+
+	@Test
+	void sayingPrismIsFinishedAgainWhileWaitingChangesNothingAndOutsideAProgramIsRefused() {
+		AppUser waiting = onPrism(TrainingState.PRISM_PENDING);
+		assertThat(service.prismCompleted(waiting.getId()).state()).isEqualTo(TrainingState.PRISM_PENDING);
+
+		waiting.setProgramId(null);
+		assertThat(service.forStudent(waiting.getId()).state()).isEqualTo(TrainingState.NOT_AVAILABLE);
+		assertThatThrownBy(() -> service.prismCompleted(waiting.getId())).isInstanceOf(InvalidRequestException.class);
+		verify(prismTraining, never()).markCompleted(any(), any());
 	}
 
 	/** The quiz's types carry no correct option at all, so it cannot leak by mistake. */

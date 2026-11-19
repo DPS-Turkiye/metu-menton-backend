@@ -3,6 +3,7 @@ package com.dps.teknokent.service;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.time.Instant;
+import java.util.Locale;
 import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -20,12 +21,14 @@ import com.dps.teknokent.domain.ProgramType;
 import com.dps.teknokent.domain.UserAccountStatus;
 import com.dps.teknokent.domain.UserRole;
 import com.dps.teknokent.entity.AppUser;
+import com.dps.teknokent.entity.IskurInternEmail;
 import com.dps.teknokent.entity.IskurPlacement;
 import com.dps.teknokent.entity.IskurTeam;
 import com.dps.teknokent.entity.IskurUnit;
 import com.dps.teknokent.entity.Program;
 import com.dps.teknokent.entity.ProgramMentor;
 import com.dps.teknokent.repository.AppUserRepository;
+import com.dps.teknokent.repository.IskurInternEmailRepository;
 import com.dps.teknokent.repository.IskurPlacementRepository;
 import com.dps.teknokent.repository.IskurTeamRepository;
 import com.dps.teknokent.repository.IskurUnitRepository;
@@ -50,6 +53,8 @@ class IskurInternServiceTest {
 	private IskurTeamRepository teamRepository;
 	@Autowired
 	private IskurPlacementRepository placementRepository;
+	@Autowired
+	private IskurInternEmailRepository internEmailRepository;
 
 	private AppUser coordinator;
 	private Program iskur;
@@ -64,7 +69,7 @@ class IskurInternServiceTest {
 
 	@Test
 	void findsTheProgramOfAnApprovedStudent() {
-		AppUser student = user(UserRole.MENTEE, iskur);
+		AppUser student = listed(iskur, user(UserRole.MENTEE, iskur));
 
 		assertThat(service.currentProgram(student.getId())).map(Program::getId).contains(iskur.getId());
 	}
@@ -73,6 +78,7 @@ class IskurInternServiceTest {
 	void findsTheProgramOfAnAcceptedPeerMentor() {
 		AppUser mentor = user(UserRole.MENTOR, null);
 		mentorOf(iskur, mentor, ProgramMentorStatus.ACCEPTED);
+		listed(iskur, mentor);
 
 		assertThat(service.currentProgram(mentor.getId())).map(Program::getId).contains(iskur.getId());
 	}
@@ -81,13 +87,14 @@ class IskurInternServiceTest {
 	void ignoresAPeerMentorWhoHasNotAcceptedYet() {
 		AppUser mentor = user(UserRole.MENTOR, null);
 		mentorOf(iskur, mentor, ProgramMentorStatus.PENDING);
+		listed(iskur, mentor);
 
 		assertThat(service.currentProgram(mentor.getId())).isEmpty();
 	}
 
 	@Test
 	void ignoresAStudentWhoseAccountIsNotApproved() {
-		AppUser student = user(UserRole.MENTEE, iskur);
+		AppUser student = listed(iskur, user(UserRole.MENTEE, iskur));
 		student.setStatus(UserAccountStatus.PENDING);
 		userRepository.saveAndFlush(student);
 
@@ -97,7 +104,7 @@ class IskurInternServiceTest {
 	@Test
 	void ignoresAProgramWithoutIskurUnits() {
 		Program bare = program(ProgramType.PEER_MENTORING, Instant.now());
-		AppUser student = user(UserRole.MENTEE, bare);
+		AppUser student = listed(bare, user(UserRole.MENTEE, bare));
 
 		assertThat(service.currentProgram(student.getId())).isEmpty();
 	}
@@ -111,8 +118,9 @@ class IskurInternServiceTest {
 		Program officeHours = program(ProgramType.OFFICE_HOURS, Instant.now());
 		unitOf(officeHours);
 
-		assertThat(service.currentProgram(user(UserRole.MENTEE, archived).getId())).isEmpty();
-		assertThat(service.currentProgram(user(UserRole.MENTEE, officeHours).getId())).isEmpty();
+		assertThat(service.currentProgram(listed(archived, user(UserRole.MENTEE, archived)).getId())).isEmpty();
+		assertThat(service.currentProgram(listed(officeHours, user(UserRole.MENTEE, officeHours)).getId()))
+				.isEmpty();
 	}
 
 	@Test
@@ -123,13 +131,72 @@ class IskurInternServiceTest {
 		student.grant(UserRole.MENTOR, PermissionSource.ADMIN, Instant.now());
 		userRepository.saveAndFlush(student);
 		mentorOf(newer, student, ProgramMentorStatus.ACCEPTED);
+		listed(iskur, student);
+		listed(newer, student);
 
 		assertThat(service.currentProgram(student.getId())).map(Program::getId).contains(newer.getId());
 	}
 
 	@Test
+	void aStudentOffTheListIsAPlainStudent() {
+		AppUser plain = user(UserRole.MENTEE, iskur);
+		AppUser intern = listed(iskur, user(UserRole.MENTEE, iskur));
+		AppUser mentor = user(UserRole.MENTOR, null);
+		mentorOf(iskur, mentor, ProgramMentorStatus.ACCEPTED);
+
+		assertThat(service.currentProgram(plain.getId())).isEmpty();
+		assertThat(service.currentPlacement(plain.getId())).isEmpty();
+		assertThat(service.currentProgram(mentor.getId())).isEmpty();
+		assertThat(service.internIds(iskur.getId())).containsExactly(intern.getId());
+		assertThat(service.isIntern(iskur.getId(), intern.getId())).isTrue();
+		assertThat(service.isIntern(iskur.getId(), plain.getId())).isFalse();
+		assertThat(service.isIntern(iskur.getId(), mentor.getId())).isFalse();
+	}
+
+	@Test
+	void anAddressListedBeforeSignUpMakesAnInternOnceTheAccountJoins() {
+		internEmailRepository.saveAndFlush(new IskurInternEmail(iskur.getId(), "yeni.stajyer@example.test",
+				coordinator.getId(), Instant.now()));
+		assertThat(service.internIds(iskur.getId())).isEmpty();
+
+		AppUser joined = user(UserRole.MENTEE, iskur);
+		joined.setEmail("Yeni.Stajyer@Example.test");
+		userRepository.saveAndFlush(joined);
+
+		assertThat(service.currentProgram(joined.getId())).map(Program::getId).contains(iskur.getId());
+		assertThat(service.internIds(iskur.getId())).containsExactly(joined.getId());
+		assertThat(service.isIntern(iskur.getId(), joined.getId())).isTrue();
+	}
+
+	@Test
+	void aListingCountsOnlyInItsOwnProgram() {
+		Program other = program(ProgramType.PEER_MENTORING, Instant.now());
+		unitOf(other);
+		AppUser student = listed(other, user(UserRole.MENTEE, iskur));
+
+		assertThat(service.currentProgram(student.getId())).isEmpty();
+		assertThat(service.internIds(iskur.getId())).isEmpty();
+		assertThat(service.internIds(other.getId())).isEmpty();
+		assertThat(service.isIntern(other.getId(), student.getId())).isFalse();
+	}
+
+	@Test
+	void listsAcceptedPeerMentorsOnTheListAsInterns() {
+		AppUser mentor = user(UserRole.MENTOR, null);
+		mentorOf(iskur, mentor, ProgramMentorStatus.ACCEPTED);
+		listed(iskur, mentor);
+		AppUser waiting = user(UserRole.MENTOR, null);
+		mentorOf(iskur, waiting, ProgramMentorStatus.PENDING);
+		listed(iskur, waiting);
+
+		assertThat(service.internIds(iskur.getId())).containsExactly(mentor.getId());
+		assertThat(service.isIntern(iskur.getId(), mentor.getId())).isTrue();
+		assertThat(service.isIntern(iskur.getId(), waiting.getId())).isFalse();
+	}
+
+	@Test
 	void findsThePlacementInTheCurrentProgram() {
-		AppUser student = user(UserRole.MENTEE, iskur);
+		AppUser student = listed(iskur, user(UserRole.MENTEE, iskur));
 		assertThat(service.currentPlacement(student.getId())).isEmpty();
 
 		IskurTeam team = teamRepository.saveAndFlush(new IskurTeam(iskurUnit, "Ekip", 0, Instant.now()));
@@ -146,6 +213,14 @@ class IskurInternServiceTest {
 	void knowsNothingOfAnUnknownPerson() {
 		assertThat(service.currentProgram(UUID.randomUUID())).isEmpty();
 		assertThat(service.currentPlacement(UUID.randomUUID())).isEmpty();
+		assertThat(service.isIntern(iskur.getId(), UUID.randomUUID())).isFalse();
+	}
+
+	/** Puts the person's address on the program's intern list, lowercased as the list stores it. */
+	private AppUser listed(Program program, AppUser person) {
+		internEmailRepository.saveAndFlush(new IskurInternEmail(program.getId(),
+				person.getEmail().toLowerCase(Locale.ROOT), coordinator.getId(), Instant.now()));
+		return person;
 	}
 
 	private AppUser user(UserRole role, Program joined) {
