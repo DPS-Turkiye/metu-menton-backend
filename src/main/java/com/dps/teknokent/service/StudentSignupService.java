@@ -9,8 +9,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.dps.teknokent.domain.IdentityKind;
 import com.dps.teknokent.domain.InstitutionDataSource;
-import com.dps.teknokent.domain.ProgramStatus;
-import com.dps.teknokent.domain.ProgramType;
 import com.dps.teknokent.domain.UserAccountStatus;
 import com.dps.teknokent.domain.UserRole;
 import com.dps.teknokent.dto.requests.RegisterStudentRequest;
@@ -22,7 +20,6 @@ import com.dps.teknokent.exception.ConflictException;
 import com.dps.teknokent.exception.InvalidRequestException;
 import com.dps.teknokent.repository.AppUserRepository;
 import com.dps.teknokent.repository.InstitutionPersonRepository;
-import com.dps.teknokent.repository.ProgramRepository;
 import com.dps.teknokent.security.FirebaseIdentity;
 import com.dps.teknokent.util.EmailDomains;
 import com.dps.teknokent.util.Texts;
@@ -53,7 +50,7 @@ public class StudentSignupService {
 	public static final String SEVERAL_STUDENT_PROGRAMS = "SEVERAL_STUDENT_PROGRAMS";
 
 	private final AppUserRepository users;
-	private final ProgramRepository programs;
+	private final StudentProgramLookup studentPrograms;
 	private final InstitutionPersonRepository people;
 	private final EmailDomainPolicy emailDomainPolicy;
 
@@ -106,9 +103,7 @@ public class StudentSignupService {
 	 * student only hears that sign-up is closed; the log says why, for whoever runs the deployment.
 	 */
 	private Program requireTheStudentProgram() {
-		List<Program> running = programs.findByProgramType(ProgramType.PEER_MENTORING).stream()
-				.filter(program -> program.getStatus() == ProgramStatus.ACTIVE)
-				.toList();
+		List<Program> running = studentPrograms.running();
 		if (running.size() == 1) {
 			return running.getFirst();
 		}

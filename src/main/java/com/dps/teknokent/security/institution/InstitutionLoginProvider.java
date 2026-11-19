@@ -34,6 +34,31 @@ public interface InstitutionLoginProvider {
 	}
 
 	/**
+	 * The same question for one person, for a login whose answer depends on who signed in (CAS: yes for a student
+	 * or an academic, no for anyone else).
+	 */
+	default boolean grantsAccess(InstitutionIdentity identity) {
+		return grantsAccess();
+	}
+
+	/**
+	 * Whether a login carries the person's whole record. One that names only part of it (CAS, with no class year)
+	 * answers false, and what it leaves out stays as the row has it: what the student typed at sign-up, or what an
+	 * import filed.
+	 */
+	default boolean sendsWholeRecord() {
+		return true;
+	}
+
+	/**
+	 * Whether a student this login creates an account for joins the one running peer-mentoring program, as a student
+	 * who signs up by e-mail does. ODTÜ's CAS says yes; the dev stub's personas are placed by hand.
+	 */
+	default boolean newStudentsJoinTheProgram() {
+		return false;
+	}
+
+	/**
 	 * Permissions beyond what the record gives. Only the dev stub has any: it stands in for badges until they exist.
 	 */
 	default Set<UserRole> extraGrants(String persistentId) {

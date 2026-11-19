@@ -1,7 +1,6 @@
 package com.dps.teknokent.security.institution;
 
 import java.net.URI;
-import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -18,7 +17,6 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
-import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
@@ -73,7 +71,7 @@ public class OtgLoginProvider implements InstitutionLoginProvider {
 			@Value("${app.otg-login.client-id}") String clientId,
 			@Value("${app.otg-login.client-secret}") String clientSecret,
 			@Value("${app.otg-login.redirect-uri}") String redirectUri) {
-		this(redis, jsonMapper, defaultClient(), issuer, userinfoUrl, clientId, clientSecret, redirectUri);
+		this(redis, jsonMapper, InstitutionHttp.client(), issuer, userinfoUrl, clientId, clientSecret, redirectUri);
 	}
 
 	OtgLoginProvider(StringRedisTemplate redis, JsonMapper jsonMapper, RestClient http, String issuer,
@@ -220,17 +218,6 @@ public class OtgLoginProvider implements InstitutionLoginProvider {
 			throw new IllegalStateException(name + " must be an https URL.");
 		}
 		return url;
-	}
-
-	private static RestClient defaultClient() {
-		HttpClient client = HttpClient.newBuilder()
-				.version(HttpClient.Version.HTTP_1_1)
-				.connectTimeout(Duration.ofSeconds(5))
-				.followRedirects(HttpClient.Redirect.NEVER)
-				.build();
-		JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(client);
-		requestFactory.setReadTimeout(Duration.ofSeconds(10));
-		return RestClient.builder().requestFactory(requestFactory).build();
 	}
 
 	@JsonIgnoreProperties(ignoreUnknown = true)

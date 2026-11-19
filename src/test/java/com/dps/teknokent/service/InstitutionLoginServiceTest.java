@@ -49,6 +49,7 @@ import com.dps.teknokent.exception.ResourceNotFoundException;
 import com.dps.teknokent.repository.AppUserIdentityRepository;
 import com.dps.teknokent.repository.AppUserRepository;
 import com.dps.teknokent.repository.InstitutionPersonRepository;
+import com.dps.teknokent.repository.ProgramRepository;
 import com.dps.teknokent.security.LoginProvisioner;
 import com.dps.teknokent.security.institution.InstitutionIdentity;
 import com.dps.teknokent.security.institution.InstitutionLoginProvider;
@@ -67,6 +68,7 @@ class InstitutionLoginServiceTest {
 	private final AppUserIdentityRepository identities = mock(AppUserIdentityRepository.class);
 	private final InstitutionPersonRepository people = mock(InstitutionPersonRepository.class);
 	private final LoginProvisioner loginProvisioner = mock(LoginProvisioner.class);
+	private final ProgramRepository programs = mock(ProgramRepository.class);
 	private InstitutionLoginService service;
 
 	@BeforeEach
@@ -86,7 +88,7 @@ class InstitutionLoginServiceTest {
 		when(identities.findByProviderAndPersistentId(anyString(), anyString())).thenReturn(Optional.empty());
 		when(people.findByInstitutionAndPersistentId(anyString(), anyString())).thenReturn(Optional.empty());
 		service = new InstitutionLoginService(providers, redis, users, identities, people, loginProvisioner,
-				mock(PlatformTransactionManager.class), jsonMapper);
+				new StudentProgramLookup(programs), mock(PlatformTransactionManager.class), jsonMapper);
 	}
 
 	@Test
@@ -470,7 +472,7 @@ class InstitutionLoginServiceTest {
 		when(providers.orderedStream()).thenAnswer(invocation -> Stream.of(remote));
 		when(values.getAndDelete(InstitutionLoginService.STATE_KEY + "s1")).thenReturn("otg");
 		InstitutionLoginService ordered = new InstitutionLoginService(providers, redis, users, identities, people,
-				loginProvisioner, transactionManager, jsonMapper);
+				loginProvisioner, new StudentProgramLookup(programs), transactionManager, jsonMapper);
 
 		ordered.complete("otg", "s1", Map.of("code", "c"));
 
@@ -642,6 +644,119 @@ class InstitutionLoginServiceTest {
 		assertThat(jsonMapper.readValue(login.getValue(), InstitutionLoginService.NewLogin.class).fullName()).isNull();
 	}
 
+	// The dev stub and OTG answer for everyone at once, as before: nothing about them depends on who signed in.
+	@Test
+	void aProviderThatAnswersForEveryoneKeepsItsAnswerForEachPerson() {
+		assertThat(provider.grantsAccess(student("e100001", "ayse@metu.edu.tr"))).isTrue();
+		assertThat(otg.grantsAccess(otgPerson("a72ab40d", "ogrenci@ornek.com", true, null))).isFalse();
+		assertThat(otg.grantsAccess(student("e100001", "ayse@metu.edu.tr"))).isFalse();
+		assertThat(provider.sendsWholeRecord()).isTrue();
+		assertThat(provider.newStudentsJoinTheProgram()).isFalse();
+	}
+
+	// OTG, unchanged: even a person its record calls a student is only identified, never given an account.
+	@Test
+	void anIdentityOnlyLoginNeverCreatesAnAccountWhateverTheRecordSays() {
+		otg.next = student("a72ab40d", "ogrenci@ornek.com");
+		when(values.getAndDelete(InstitutionLoginService.STATE_KEY + "s1")).thenReturn("otg");
+
+		String code = service.complete("otg", "s1", Map.of("code", "c"));
+
+		verify(values).set(eq(InstitutionLoginService.SIGNUP_CODE_KEY + code), anyString(),
+				eq(InstitutionLoginService.CODE_TTL));
+		verify(users, never()).save(any());
+		verify(people, never()).save(any());
+	}
+
+	// A login decides per person (CAS): the same provider creates an account for one and only identifies another.
+	@Test
+	void aLoginThatDecidesPerPersonGrantsOnlyWhereItSaysSo() {
+		FakeProvider cas = new FakeProvider("odtu-cas", false) {
+			@Override
+			public boolean grantsAccess(InstitutionIdentity identity) {
+				return identity.kinds().contains(IdentityKind.STUDENT);
+			}
+		};
+		InstitutionLoginService perPerson = serviceWith(cas);
+		when(values.getAndDelete(anyString())).thenReturn("odtu-cas");
+
+		cas.next = student("e100001", "ayse@metu.edu.tr");
+		String studentCode = perPerson.complete("odtu-cas", "s1", Map.of());
+		verify(values).set(eq(InstitutionLoginService.CODE_KEY + studentCode), anyString(),
+				eq(InstitutionLoginService.CODE_TTL));
+
+		cas.next = identity("idari1", "idari@metu.edu.tr", true, Set.of(IdentityKind.STAFF));
+		String staffCode = perPerson.complete("odtu-cas", "s2", Map.of());
+		verify(values).set(eq(InstitutionLoginService.SIGNUP_CODE_KEY + staffCode), anyString(),
+				eq(InstitutionLoginService.CODE_TTL));
+	}
+
+	// The dev stub's personas are placed by hand, so its new students join nothing by themselves.
+	@Test
+	void aNewStudentJoinsNoProgramUnlessTheLoginSaysSo() {
+		AppUser user = service.signIn(provider, student("e100001", "ayse@metu.edu.tr"));
+
+		assertThat(user.getProgramId()).isNull();
+		verify(programs, never()).findByProgramType(any());
+	}
+
+	@Test
+	void aLoginThatSendsPartOfTheRecordLeavesTheRestAsItWas() {
+		FakeProvider partial = new FakeProvider("odtu-cas", true) {
+			@Override
+			public boolean sendsWholeRecord() {
+				return false;
+			}
+		};
+		InstitutionPerson filed = new InstitutionPerson("odtu-cas", "e100001");
+		filed.setFullName("Ayşe Yılmaz");
+		filed.setFaculty("Mühendislik Fakültesi");
+		filed.setDepartmentCode("CENG");
+		filed.setDepartmentName("Bilgisayar Mühendisliği");
+		filed.setClassYear(3);
+		filed.setAcademicTitle("Arş. Gör.");
+		filed.setIskurParticipant(true);
+		when(people.findByInstitutionAndPersistentId("odtu-cas", "e100001")).thenReturn(Optional.of(filed));
+
+		service.signIn(partial, new InstitutionIdentity("e100001", "ayse@metu.edu.tr", true, null,
+				Set.of(IdentityKind.STUDENT), null, null, "Elektrik-Elektronik Mühendisliği", null, null, null, false));
+
+		assertThat(filed.getFullName()).isEqualTo("Ayşe Yılmaz");
+		assertThat(filed.getFaculty()).isEqualTo("Mühendislik Fakültesi");
+		assertThat(filed.getDepartmentCode()).isEqualTo("CENG");
+		// What the login does say wins.
+		assertThat(filed.getDepartmentName()).isEqualTo("Elektrik-Elektronik Mühendisliği");
+		assertThat(filed.getClassYear()).isEqualTo(3);
+		assertThat(filed.getAcademicTitle()).isEqualTo("Arş. Gör.");
+		assertThat(filed.isIskurParticipant()).isTrue();
+		assertThat(filed.getEmail()).isEqualTo("ayse@metu.edu.tr");
+		assertThat(filed.isActive()).isTrue();
+		assertThat(filed.getSource()).isEqualTo(InstitutionDataSource.LOGIN);
+	}
+
+	// institution_person.full_name takes no null; a login without a name files the account's own.
+	@Test
+	void aRecordWithoutANameTakesTheAccountsName() {
+		service.signIn(provider, named("e100008", "adsiz@metu.edu.tr", null));
+
+		ArgumentCaptor<InstitutionPerson> record = ArgumentCaptor.forClass(InstitutionPerson.class);
+		verify(people).save(record.capture());
+		assertThat(record.getValue().getFullName()).isEqualTo("adsiz@metu.edu.tr");
+	}
+
+	@Test
+	void theEnabledProvidersAreNamedByTheirIds() {
+		assertThat(service.enabledProviders()).containsExactly("odtu", "otg");
+	}
+
+	@SuppressWarnings("unchecked") // mock() takes the raw class of a generic type.
+	private InstitutionLoginService serviceWith(InstitutionLoginProvider only) {
+		ObjectProvider<InstitutionLoginProvider> providers = mock(ObjectProvider.class);
+		when(providers.orderedStream()).thenAnswer(invocation -> Stream.of(only));
+		return new InstitutionLoginService(providers, redis, users, identities, people, loginProvisioner,
+				new StudentProgramLookup(programs), mock(PlatformTransactionManager.class), jsonMapper);
+	}
+
 	private static InstitutionIdentity named(String persistentId, String email, String fullName) {
 		return new InstitutionIdentity(persistentId, email, true, fullName, Set.of(IdentityKind.STUDENT),
 				"Mühendislik Fakültesi", "CENG", "Bilgisayar Mühendisliği", 3, null, null, false);
@@ -676,7 +791,7 @@ class InstitutionLoginServiceTest {
 		return (List<AppUserPermission>) ReflectionTestUtils.getField(user, "permissions");
 	}
 
-	private static final class FakeProvider implements InstitutionLoginProvider {
+	private static class FakeProvider implements InstitutionLoginProvider {
 		private final String id;
 		private final boolean grantsAccess;
 		private InstitutionIdentity next;

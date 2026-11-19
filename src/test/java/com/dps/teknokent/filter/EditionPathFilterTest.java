@@ -22,6 +22,8 @@ class EditionPathFilterTest {
 	/** Served only by the ODTÜ deployment. */
 	static Stream<String> odtuPaths() {
 		return Stream.of(
+				"/api/auth/institution/odtu-cas/start",
+				"/api/auth/institution/odtu-cas/callback",
 				"/api/peer-mentoring/mentors",
 				"/api/peer-mentoring",
 				"/api/student/profile-completion",
@@ -86,6 +88,7 @@ class EditionPathFilterTest {
 				"/api/health",
 				"/api/auth/me",
 				"/api/auth/institution/exchange",
+				"/api/auth/institution/providers",
 				"/api/auth/register/founder",
 				"/api/auth/register/program-eligibility",
 				"/api/mentorship-requests",

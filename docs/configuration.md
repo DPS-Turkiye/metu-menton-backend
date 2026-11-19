@@ -41,6 +41,8 @@ Never commit `.env`: it holds real keys.
 | `APP_BOOTSTRAP_STAFF` | `ROLE:email:firebaseUid` entries, comma-separated (`ADMIN` or `COORDINATOR`): staff accounts created at startup when neither the uid nor the address has a row yet. Never changes an existing row; a malformed entry stops the startup with nothing created. |
 | `INSTITUTION_LOGIN_DEV_STUB` | `true` replaces the ODTÜ login with a persona picker. Local only. |
 | `OTG_LOGIN_ENABLED`, `OTG_ISSUER`, `OTG_USERINFO_URL`, `OTG_CLIENT_ID`, `OTG_CLIENT_SECRET`, `OTG_REDIRECT_URI` | "OTG ile giriş yap". The secret is server-side only. |
+| `CAS_LOGIN_ENABLED`, `CAS_BASE_URL`, `CAS_SERVICE_URL`, `CAS_VERSION`, `CAS_EMAIL_DOMAINS` | "ODTÜ ile giriş yap" over CAS, ODTÜ edition only. Off by default; once on, a missing or non-https address stops start-up. See [ODTÜ CAS login](odtu-cas-login.md). |
+| `CAS_ATTR_ID`, `CAS_ATTR_EMAIL`, `CAS_ATTR_NAME`, `CAS_ATTR_KIND`, `CAS_ATTR_DEPARTMENT`, `CAS_ATTR_FACULTY`, `CAS_KIND_STUDENT`, `CAS_KIND_ACADEMIC`, `CAS_KIND_STAFF` | Which CAS attribute holds what, and which values mark a student, an academic or other staff. |
 | `LTI_PLATFORM_ISSUER`, `LTI_CLIENT_ID`, `LTI_DEPLOYMENT_IDS`, `LTI_PLATFORM_AUTH_URL`, `LTI_PLATFORM_JWKS_URL`, `LTI_TOOL_LAUNCH_URL`, `LTI_TOOL_PRIVATE_KEY` | Office hours from Moodle over LTI 1.3; an empty issuer keeps LTI off. Once LTI is configured, an empty `LTI_TOOL_PRIVATE_KEY` stops start-up outside the `dev` profile. |
 
 ## AI
