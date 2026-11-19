@@ -44,6 +44,8 @@ class EditionPathFilterTest {
 				"/api/coordinator/programs/" + ID + "/office-hours/appointments/" + ID,
 				"/api/coordinator/programs/" + ID + "/office-hours/students",
 				"/api/coordinator/programs/" + ID + "/peer-categories",
+				"/api/coordinator/programs/" + ID + "/iskur/workspace",
+				"/api/coordinator/programs/" + ID + "/iskur/placements/" + ID,
 				"/api/coordinator/programs/" + ID + "/training",
 				"/api/users/" + ID + "/badges");
 	}
