@@ -28,6 +28,7 @@ import com.dps.teknokent.util.EmailDomains;
 import com.dps.teknokent.util.Texts;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * ODTÜ's e-mail sign-up for students, until ODTÜ's own login exists. The address that proves someone is a student
@@ -35,6 +36,7 @@ import lombok.RequiredArgsConstructor;
  * it. The account is an approved mentee of the one running peer-mentoring program, and what the student typed about
  * their department and year sits in institution_person as a SIGNUP row, which ODTÜ's login later takes over.
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class StudentSignupService {
@@ -99,19 +101,20 @@ public class StudentSignupService {
 		return email;
 	}
 
-	/** Students join the one running peer-mentoring program; with none, or more than one, there is no right guess. */
+	/**
+	 * Students join the one running peer-mentoring program; with none, or more than one, there is no right guess. The
+	 * student only hears that sign-up is closed; the log says why, for whoever runs the deployment.
+	 */
 	private Program requireTheStudentProgram() {
 		List<Program> running = programs.findByProgramType(ProgramType.PEER_MENTORING).stream()
 				.filter(program -> program.getStatus() == ProgramStatus.ACTIVE)
 				.toList();
-		if (running.isEmpty()) {
-			throw new ConflictException(Texts.forRequest("error.studentSignupNoProgram"), NO_STUDENT_PROGRAM);
+		if (running.size() == 1) {
+			return running.getFirst();
 		}
-		if (running.size() > 1) {
-			throw new ConflictException(Texts.forRequest("error.studentSignupSeveralPrograms"),
-					SEVERAL_STUDENT_PROGRAMS);
-		}
-		return running.getFirst();
+		log.warn("Student sign-up refused: {} active peer-mentoring programs, exactly one is needed", running.size());
+		throw new ConflictException(Texts.forRequest("error.studentSignupClosed"),
+				running.isEmpty() ? NO_STUDENT_PROGRAM : SEVERAL_STUDENT_PROGRAMS);
 	}
 
 	private static InstitutionPerson signupRecord(AppUser student, RegisterStudentRequest request) {

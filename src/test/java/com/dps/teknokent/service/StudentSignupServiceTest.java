@@ -39,6 +39,7 @@ import com.dps.teknokent.repository.AppUserRepository;
 import com.dps.teknokent.repository.InstitutionPersonRepository;
 import com.dps.teknokent.repository.ProgramRepository;
 import com.dps.teknokent.security.FirebaseIdentity;
+import com.dps.teknokent.util.Texts;
 
 class StudentSignupServiceTest {
 
@@ -194,7 +195,10 @@ class StudentSignupServiceTest {
 
 		assertThatThrownBy(() -> service.register(student("uid-1", "deniz@metu.edu.tr"), FORM))
 				.isInstanceOfSatisfying(ConflictException.class,
-						error -> assertThat(error.code()).isEqualTo(StudentSignupService.NO_STUDENT_PROGRAM));
+						error -> {
+							assertThat(error.code()).isEqualTo(StudentSignupService.NO_STUDENT_PROGRAM);
+							assertThat(error.getMessage()).isEqualTo(Texts.forRequest("error.studentSignupClosed"));
+						});
 		assertNothingCreated();
 	}
 
@@ -204,7 +208,10 @@ class StudentSignupServiceTest {
 
 		assertThatThrownBy(() -> service.register(student("uid-1", "deniz@metu.edu.tr"), FORM))
 				.isInstanceOfSatisfying(ConflictException.class,
-						error -> assertThat(error.code()).isEqualTo(StudentSignupService.SEVERAL_STUDENT_PROGRAMS));
+						error -> {
+							assertThat(error.code()).isEqualTo(StudentSignupService.SEVERAL_STUDENT_PROGRAMS);
+							assertThat(error.getMessage()).isEqualTo(Texts.forRequest("error.studentSignupClosed"));
+						});
 		assertNothingCreated();
 	}
 
