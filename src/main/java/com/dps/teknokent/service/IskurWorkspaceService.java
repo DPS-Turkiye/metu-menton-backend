@@ -27,8 +27,6 @@ import com.dps.teknokent.domain.IskurWeeklySplit;
 import com.dps.teknokent.domain.ProgramMentorStatus;
 import com.dps.teknokent.domain.ProgramStatus;
 import com.dps.teknokent.domain.ProgramType;
-import com.dps.teknokent.domain.UserAccountStatus;
-import com.dps.teknokent.domain.UserRole;
 import com.dps.teknokent.dto.requests.IskurFinalizeRequest;
 import com.dps.teknokent.dto.requests.IskurPlacementRequest;
 import com.dps.teknokent.dto.requests.IskurTeamRequest;
@@ -87,6 +85,7 @@ public class IskurWorkspaceService {
 	private final InstitutionPersonRepository institutionPeople;
 	private final ApplicationEventPublisher events;
 	private final IskurSkillService skillService;
+	private final IskurInternService interns;
 
 	/** The program's coordinators and the admin may read it. */
 	@Transactional(readOnly = true)
@@ -374,17 +373,9 @@ public class IskurWorkspaceService {
 		return orders.stream().mapToInt(Integer::intValue).max().orElse(-1) + 1;
 	}
 
-	/** The program's approved students and its accepted peer mentors: the people the coordinator can place. */
+	/** The program's interns (students and peer mentors on its İŞKUR list): the people the coordinator can place. */
 	private Set<UUID> candidateIds(Program program) {
-		Set<UUID> ids = new LinkedHashSet<>();
-		students(program).forEach(student -> ids.add(student.getId()));
-		ids.addAll(peerMentorIds(program));
-		return ids;
-	}
-
-	private List<AppUser> students(Program program) {
-		return users.findByProgramIdAndPermissionAndStatusOrderByCreatedAtAsc(program.getId(), UserRole.MENTEE,
-				UserAccountStatus.APPROVED);
+		return interns.internIds(program.getId());
 	}
 
 	private Set<UUID> peerMentorIds(Program program) {
@@ -401,17 +392,12 @@ public class IskurWorkspaceService {
 				.map(ref -> new IskurWorkspaceResponse.Coordinator(ref.id(), ref.fullName()))
 				.toList();
 
-		List<AppUser> studentRows = students(program);
 		Set<UUID> mentorIds = peerMentorIds(program);
-		Set<UUID> candidates = new LinkedHashSet<>();
-		studentRows.forEach(student -> candidates.add(student.getId()));
-		candidates.addAll(mentorIds);
+		Set<UUID> candidates = candidateIds(program);
 		Map<UUID, AppUser> accounts = new HashMap<>();
-		studentRows.forEach(student -> accounts.put(student.getId(), student));
-		Set<UUID> missing = new LinkedHashSet<>(mentorIds);
-		placementRows.forEach(placement -> missing.add(placement.getUserId()));
-		missing.removeAll(accounts.keySet());
-		users.findAllById(missing).forEach(user -> accounts.put(user.getId(), user));
+		Set<UUID> wanted = new LinkedHashSet<>(candidates);
+		placementRows.forEach(placement -> wanted.add(placement.getUserId()));
+		users.findAllById(wanted).forEach(user -> accounts.put(user.getId(), user));
 		Map<UUID, InstitutionPerson> records = latestRecords(accounts.keySet());
 		Map<UUID, IskurWorkspaceResponse.Person> people = new HashMap<>();
 		accounts.values().forEach(user -> people.put(user.getId(), new IskurWorkspaceResponse.Person(user.getId(),

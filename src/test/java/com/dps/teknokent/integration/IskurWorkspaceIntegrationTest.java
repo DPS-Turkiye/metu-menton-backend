@@ -12,6 +12,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 
 import org.hamcrest.Matchers;
@@ -40,6 +41,7 @@ import com.dps.teknokent.domain.UserAccountStatus;
 import com.dps.teknokent.domain.UserRole;
 import com.dps.teknokent.entity.AppUser;
 import com.dps.teknokent.entity.InstitutionPerson;
+import com.dps.teknokent.entity.IskurInternEmail;
 import com.dps.teknokent.entity.IskurPlacement;
 import com.dps.teknokent.entity.IskurTeam;
 import com.dps.teknokent.entity.IskurUnit;
@@ -48,6 +50,7 @@ import com.dps.teknokent.entity.ProgramCoordinator;
 import com.dps.teknokent.entity.ProgramMentor;
 import com.dps.teknokent.repository.AppUserRepository;
 import com.dps.teknokent.repository.InstitutionPersonRepository;
+import com.dps.teknokent.repository.IskurInternEmailRepository;
 import com.dps.teknokent.repository.IskurPlacementRepository;
 import com.dps.teknokent.repository.IskurTeamRepository;
 import com.dps.teknokent.repository.IskurUnitRepository;
@@ -72,6 +75,8 @@ class IskurWorkspaceIntegrationTest {
 	private ApplicationEvents events;
 	@Autowired
 	private AppUserRepository userRepository;
+	@Autowired
+	private IskurInternEmailRepository internEmailRepository;
 	@Autowired
 	private ProgramRepository programRepository;
 	@Autowired
@@ -299,6 +304,31 @@ class IskurWorkspaceIntegrationTest {
 		place(coordinator, outsider, team, IskurTeamRole.MEMBER, null, 3, null).andExpect(status().isBadRequest());
 		place(coordinator, ayse, teamOfAnotherProgram(), IskurTeamRole.MEMBER, null, 3, null)
 				.andExpect(status().isNotFound());
+	}
+
+	@Test
+	void aStudentOffTheInternListIsNotInThePoolAndCannotBePlaced() throws Exception {
+		AppUser plain = userRepository.saveAndFlush(account("Liste Dışı Öğrenci", program));
+		AppUser unlistedMentor = user("Listesiz Mentor", UserRole.MENTOR, null);
+		ProgramMentor membership = new ProgramMentor();
+		membership.setId(UUID.randomUUID());
+		membership.setProgramId(program.getId());
+		membership.setMentorId(unlistedMentor.getId());
+		membership.setStatus(ProgramMentorStatus.ACCEPTED);
+		membership.setInvitedBy(ProgramMentorInvitedBy.COORDINATOR);
+		membership.setCreatedAt(Instant.now());
+		programMentorRepository.saveAndFlush(membership);
+		IskurTeam team = team(unit("Etki"), "Etkinlik");
+
+		workspace(coordinator)
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.pool[*].fullName").value(Matchers.contains(
+						"Ayşe Yıldız", "Burak Tan", "Ceren Su", "Deniz Arslan", "Zeynep Kaya")))
+				.andExpect(jsonPath("$.counts.interns").value(5));
+		place(coordinator, plain, team, IskurTeamRole.MEMBER, null, 3, null).andExpect(status().isBadRequest());
+		place(coordinator, unlistedMentor, team, IskurTeamRole.MEMBER, null, 3, null)
+				.andExpect(status().isBadRequest());
+		assertThat(placementRepository.findByProgramId(program.getId())).isEmpty();
 	}
 
 	@Test
@@ -539,7 +569,27 @@ class IskurWorkspaceIntegrationTest {
 		if (joined != null) {
 			user.setProgramId(joined.getId());
 		}
-		return userRepository.saveAndFlush(user);
+		AppUser saved = userRepository.saveAndFlush(user);
+		if (joined != null && role == UserRole.MENTEE) {
+			internOf(joined, saved);
+		}
+		return saved;
+	}
+
+	/** A student of the program whose address is not on the intern list. */
+	private static AppUser account(String name, Program joined) {
+		AppUser user = new AppUser();
+		user.setFullName(name);
+		user.setEmail(UUID.randomUUID() + "@example.test");
+		user.setRole(UserRole.MENTEE);
+		user.setProgramId(joined.getId());
+		return user;
+	}
+
+	/** Puts the person's address on the program's İŞKUR intern list, as the coordinator would. */
+	private void internOf(Program listing, AppUser person) {
+		internEmailRepository.saveAndFlush(new IskurInternEmail(listing.getId(),
+				person.getEmail().toLowerCase(Locale.ROOT), null, Instant.now()));
 	}
 
 	private void record(AppUser user, String department, boolean iskur) {
@@ -590,6 +640,9 @@ class IskurWorkspaceIntegrationTest {
 		membership.setInvitedBy(ProgramMentorInvitedBy.COORDINATOR);
 		membership.setCreatedAt(Instant.now());
 		programMentorRepository.saveAndFlush(membership);
+		if (mentorStatus == ProgramMentorStatus.ACCEPTED) {
+			internOf(pool, mentor);
+		}
 	}
 
 	private static UsernamePasswordAuthenticationToken signedIn(AppUser user) {
