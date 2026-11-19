@@ -39,6 +39,7 @@ public enum Edition {
 					"/api/training/**",
 					"/api/badges/**",
 					"/api/institution/**",
+					"/api/iskur/**",
 					"/api/auth/institution/odtu/**",
 					"/api/admin/academics/**",
 					"/api/admin/students/**",
