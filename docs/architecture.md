@@ -65,7 +65,8 @@ and NullAway checks it at compile time.
 - **Redis** keeps short-lived shared state: rate-limit windows, the live collaborative meeting note, LTI and OTG
   login state. The app keeps working without Redis for rate limits (in-memory fallback).
 - **S3** stores uploaded documents, meeting transcripts and reports. Downloads use presigned URLs or go through
-  `Downloads.attachment` (attachment, `nosniff`, `no-store`).
+  `Downloads.attachment` (attachment, `nosniff`, `no-store`). The ODTÜ edition uses an S3-compatible store on its
+  own servers (MinIO, `AWS_S3_ENDPOINT`) and never AWS S3.
 
 ## Realtime
 

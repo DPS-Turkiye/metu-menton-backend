@@ -57,7 +57,8 @@ public class OfficeHoursMailService {
 		/** Nobody acted in time (FR-OH-15); the student hears, since the request was theirs. */
 		EXPIRED("expired", false, Times.NONE);
 
-		private final String key;
+		/** Also the in-app notification's text key; package-visible so a test can check every step has its texts. */
+		final String key;
 		private final boolean toInstructor;
 		private final Times times;
 
@@ -79,8 +80,12 @@ public class OfficeHoursMailService {
 	private final OfficeHoursRequestRepository requestRepository;
 	private final OfficeHoursMeetingRepository meetingRepository;
 	private final AppUserRepository appUserRepository;
+	private final OfficeHoursInAppNotifications inAppNotifications;
 
-	/** Tells the side that did not act; {@code note} is their message, question, answer or reason, if any. */
+	/**
+	 * Tells the side that did not act, by e-mail and, for a Menton account, in Menton too; {@code note} is their
+	 * message, question, answer or reason, if any.
+	 */
 	public void requestChanged(OfficeHoursRequest request, Event event, @Nullable String note) {
 		Map<UUID, OfficeHoursUser> people = people(request);
 		UUID to = request.getStudentId();
@@ -99,6 +104,8 @@ public class OfficeHoursMailService {
 		compose(people.get(to), people.get(from), course(request), request.getTopic(), event.key, times, note,
 				event.toInstructor)
 				.ifPresent(mail -> outbox.enqueue(mail.to(), mail.subject(), mail.body()));
+		inAppNotifications.requestChanged(people.get(to), people.get(from), event.key, request.getTopic(),
+				event.toInstructor);
 	}
 
 	/** Which side of a meeting a reminder is for. */
