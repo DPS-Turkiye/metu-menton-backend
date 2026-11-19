@@ -63,6 +63,15 @@ public class RateLimitingFilter extends OncePerRequestFilter {
 	private static final long CV_PREVIEW_PER_ADDRESS_CAPACITY = 30;
 
 	/**
+	 * ODTÜ's student sign-up creates an account, and Firebase hands out logins freely, so each login gets a few tries.
+	 * Keyed per login rather than per address: every request comes through the web proxy, so the address would put a
+	 * whole campus signing up on one budget.
+	 */
+	private static final String STUDENT_SIGNUP_PATH = "/api/auth/register/student";
+	private static final long STUDENT_SIGNUP_CAPACITY = 10;
+	private static final long STUDENT_SIGNUP_WINDOW_MS = 10 * 60_000;
+
+	/**
 	 * A calendar feed is fetched by the subscriber's calendar server, not by a person, and the frontend's server
 	 * passes every fetch on from one address, so the budget is per link. A course link may have a subscription per
 	 * student, each refreshed every hour or so: 120 in ten minutes covers a large class and stops a loop. Guessing
@@ -118,6 +127,11 @@ public class RateLimitingFilter extends OncePerRequestFilter {
 		if (post && isCvParse(path)) {
 			return List.of(rateLimitingConfig.resolveBucket(
 					"cv_parse:" + getCallerIdentifier(request), CV_PARSE_CAPACITY, CV_PARSE_WINDOW_MS));
+		}
+		if (post && STUDENT_SIGNUP_PATH.equals(path)) {
+			return List.of(rateLimitingConfig.resolveBucket(
+					"student_signup:" + getCallerIdentifier(request), STUDENT_SIGNUP_CAPACITY,
+					STUDENT_SIGNUP_WINDOW_MS));
 		}
 		if ("GET".equalsIgnoreCase(request.getMethod()) && path.startsWith(CALENDAR_FEED_PATH)) {
 			return List.of(
