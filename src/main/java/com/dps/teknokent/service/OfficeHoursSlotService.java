@@ -173,8 +173,9 @@ public class OfficeHoursSlotService {
 	}
 
 	/**
-	 * The academic's weekly ranges as dated blocks, from the start of today over the same eight weeks students can
-	 * book in, leaving out dates away. Meetings already booked do not cut them: these are the hours they keep.
+	 * The academic's weekly ranges and one-off hours as dated blocks, from the start of today over the same eight
+	 * weeks students can book in, leaving out dates away. Meetings already booked do not cut them: these are the
+	 * hours they keep.
 	 */
 	@Transactional(readOnly = true)
 	public List<Hours> hoursAhead(UUID instructorId) {
@@ -190,6 +191,13 @@ public class OfficeHoursSlotService {
 					hours.add(new Hours(day.with(rule.getStartTime()).toInstant(),
 							day.with(rule.getEndTime()).toInstant()));
 				}
+			}
+		}
+		Instant today = start.toLocalDate().atStartOfDay(MeetingSlotTimes.APP_ZONE).toInstant();
+		for (OfficeHoursOneOff oneOff : oneOffRepository.findByInstructorIdOrderByStartsAtAsc(instructorId)) {
+			if (oneOff.getEndsAt().isAfter(today) && oneOff.getStartsAt().isBefore(horizon.toInstant())
+					&& !isAway(away, oneOff.getStartsAt().atZone(MeetingSlotTimes.APP_ZONE).toLocalDate())) {
+				hours.add(new Hours(oneOff.getStartsAt(), oneOff.getEndsAt()));
 			}
 		}
 		hours.sort(Comparator.comparing(Hours::startsAt));

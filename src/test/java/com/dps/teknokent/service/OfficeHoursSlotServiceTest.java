@@ -302,4 +302,22 @@ class OfficeHoursSlotServiceTest {
 		assertThat(service.openSlots(ACADEMIC)).containsExactly(
 				new OfficeHoursSlotService.Slot(Instant.parse("2026-11-12T11:30:00Z"), 30));
 	}
+
+	@Test
+	void hoursAheadAlsoShowsOneOffHoursUnlessTheyAreOverOrOnADayAway() {
+		rules();
+		// Thursday 12 November 14:00-15:00 and Friday 13 November 10:00-11:00 in Turkey; Friday is a day away.
+		// The one on Sunday 8 November ended before today.
+		when(oneOffRepository.findByInstructorIdOrderByStartsAtAsc(ACADEMIC)).thenReturn(List.of(
+				oneOff("2026-11-08T11:00:00Z", "2026-11-08T12:00:00Z"),
+				oneOff("2026-11-12T11:00:00Z", "2026-11-12T12:00:00Z"),
+				oneOff("2026-11-13T07:00:00Z", "2026-11-13T08:00:00Z")));
+		OfficeHoursException friday = new OfficeHoursException();
+		friday.setStartsOn(LocalDate.of(2026, 11, 13));
+		friday.setEndsOn(LocalDate.of(2026, 11, 13));
+		when(exceptionRepository.findByInstructorIdOrderByStartsOnAsc(ACADEMIC)).thenReturn(List.of(friday));
+
+		assertThat(service.hoursAhead(ACADEMIC)).containsExactly(new OfficeHoursSlotService.Hours(
+				Instant.parse("2026-11-12T11:00:00Z"), Instant.parse("2026-11-12T12:00:00Z")));
+	}
 }
