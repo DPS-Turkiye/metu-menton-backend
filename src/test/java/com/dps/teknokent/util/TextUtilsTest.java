@@ -1,6 +1,7 @@
 package com.dps.teknokent.util;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 
 import org.junit.jupiter.api.Test;
 
@@ -57,5 +58,24 @@ class TextUtilsTest {
 		assertThat(TextUtils.normalizeInviteCode(null)).isEmpty();
 		// Turkish locale would give "İ" here, which is in no invite code.
 		assertThat(TextUtils.normalizeInviteCode("invite")).isEqualTo("INVITE");
+	}
+
+	@Test
+	void clipLeavesShortTextAloneAndEndsLongTextWithAnEllipsisWithinTheLimit() {
+		assertThat(TextUtils.clip("kısa", 10)).isEqualTo("kısa");
+		assertThat(TextUtils.clip("abcdefghij", 10)).isEqualTo("abcdefghij");
+		assertThat(TextUtils.clip("abcdefghijk", 10)).isEqualTo("abcdefghi…").hasSize(10);
+	}
+
+	@Test
+	void clipRefusesALimitWithNoRoomForTheEllipsis() {
+		assertThatIllegalArgumentException().isThrownBy(() -> TextUtils.clip("abc", 1));
+	}
+
+	@Test
+	void clipNeverSplitsASurrogatePair() {
+		String clipped = TextUtils.clip("abcdefgh😀xyz", 10);
+		assertThat(clipped).isEqualTo("abcdefgh…");
+		assertThat(clipped.length()).isLessThanOrEqualTo(10);
 	}
 }

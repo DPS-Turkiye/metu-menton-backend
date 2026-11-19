@@ -8,6 +8,7 @@ laptop, each with its own database and Redis, so nothing crosses between them.
 |---|---|---|
 | Backend | http://localhost:8080 | http://localhost:8090 |
 | Postgres / Redis (host ports) | 5435 / 6381 | 5434 / 6380 |
+| Files | your `.env` (`AWS_S3_*`) | MinIO on :9000, bucket `menton-odtu` |
 | Frontend | http://localhost:3000 | http://127.0.0.1:3100 |
 | Sign-in | your usual accounts | the persona picker at `/login/odtu/dev` |
 | Compose project | `menton-teknokent` | `menton-odtu` |
@@ -22,12 +23,12 @@ Neither stack touches your usual `docker compose up` stack (project `teamtnt`, p
 
 ```bash
 dev/editions/up.sh            # builds once, starts both, waits for /api/health
-dev/editions/down.sh          # stops both; add --volumes to drop both databases
+dev/editions/down.sh          # stops both; add --volumes to drop both databases and the MinIO files
 ```
 
 `up.sh` writes `.env.odtu` from your `.env` plus [`odtu.env`](odtu.env): `APP_EDITION=ODTU`, the dev login stub
-on, OTG off, no S3 bucket (storage unconfigured until MinIO), no meeting bot, pgvector matching off, and origins
-for :3100. Both databases start empty and run every migration, so the ODTU one also holds the Teknokent demo seeds
+on, OTG off, files in the compose MinIO (profile `minio`, started first; never AWS S3), no meeting bot, pgvector matching
+off, and origins for :3100. Both databases start empty and run every migration, so the ODTU one also holds the Teknokent demo seeds
 until the (b) seed cleanup exists. Locally both stacks share your Firebase project; the real (b) gets its own.
 
 ## Frontend

@@ -34,6 +34,7 @@ import com.dps.teknokent.dto.responses.AdminOverviewResponse.RequestRow;
 import com.dps.teknokent.dto.responses.AdminOverviewResponse.StartupRow;
 import com.dps.teknokent.dto.responses.AdminOverviewResponse.UserRow;
 import com.dps.teknokent.dto.responses.MentorshipResponse;
+import com.dps.teknokent.dto.responses.ProgramCountsResponse;
 import com.dps.teknokent.entity.AppUser;
 import com.dps.teknokent.entity.Bottleneck;
 import com.dps.teknokent.entity.Meeting;
@@ -85,6 +86,7 @@ public class AdminOverviewService {
 	private final MeetingRepository meetingRepository;
 	private final BottleneckRepository bottleneckRepository;
 	private final LoginProvisioner loginProvisioner;
+	private final ProgramParticipantCounts participantCounts;
 
 	@Transactional(readOnly = true)
 	public AdminOverviewResponse overview(UUID actorId) {
@@ -183,8 +185,10 @@ public class AdminOverviewService {
 		}
 		List<Meeting> allMeetings = sources.meetings();
 		Map<String, Instant> lastMeeting = lastPastMeetingByPair(allMeetings, now);
+		Map<UUID, ProgramCountsResponse> counts = participantCounts.of(programEntities);
 		List<ProgramRow> programs = programEntities.stream()
-				.map(program -> toProgram(program, usersById, organizations))
+				.map(program -> toProgram(program, usersById, organizations,
+						counts.getOrDefault(program.getId(), ProgramCountsResponse.NONE)))
 				.toList();
 		List<MentorshipRow> mentorships = sources.mentorships().stream()
 				.filter(mentorship -> inScope.test(mentorship.organizationId())
@@ -261,7 +265,8 @@ public class AdminOverviewService {
 	private ProgramRow toProgram(
 			Program program,
 			Map<UUID, AppUser> usersById,
-			Map<UUID, Organization> organizations) {
+			Map<UUID, Organization> organizations,
+			ProgramCountsResponse counts) {
 		// The program's coordinators: its creator when that is a coordinator, then the ones added in its settings.
 		// An admin who created the program is not its coordinator.
 		List<AppUser> coordinators = ProgramCoordination.coordinatorIds(program, programCoordinatorRepository).stream()
@@ -310,6 +315,8 @@ public class AdminOverviewService {
 				program.getStatus(),
 				program.getProgramType(),
 				program.getCreatedAt(),
+				program.getStartDate(),
+				program.getEndDate(),
 				coordinators.isEmpty() ? null : coordinators.get(0).getId(),
 				coordinators.isEmpty()
 						? null
@@ -319,7 +326,8 @@ public class AdminOverviewService {
 				accepted,
 				pending,
 				startups,
-				mentors);
+				mentors,
+				counts);
 	}
 
 	private static MentorshipRow toMentorship(

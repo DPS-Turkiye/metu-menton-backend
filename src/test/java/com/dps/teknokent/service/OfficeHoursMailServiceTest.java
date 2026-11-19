@@ -59,6 +59,8 @@ class OfficeHoursMailServiceTest {
 	private OfficeHoursMailOutboxService outbox;
 	@Mock
 	private AppUserRepository appUserRepository;
+	@Mock
+	private OfficeHoursInAppNotifications inAppNotifications;
 	@InjectMocks
 	private OfficeHoursMailService service;
 
@@ -110,6 +112,15 @@ class OfficeHoursMailServiceTest {
 						+ MeetingSlotTimes.formatForPeople(TUESDAY_3PM, AppLanguage.EN))
 				.contains("Topic: Ödev 2")
 				.contains("https://odtuclass.metu.edu.tr/course/view.php?id=7");
+	}
+
+	@Test
+	void eachStepAlsoTellsTheSameSideInMenton() {
+		service.requestChanged(request, Event.CANCELLED_BY_INSTRUCTOR, "Kurul toplantısı");
+		service.requestChanged(request, Event.NEW_REQUEST, null);
+
+		verify(inAppNotifications).requestChanged(student, academic, "meetingCancelled", "Ödev 2", false);
+		verify(inAppNotifications).requestChanged(academic, student, "newRequest", "Ödev 2", true);
 	}
 
 	@Test
