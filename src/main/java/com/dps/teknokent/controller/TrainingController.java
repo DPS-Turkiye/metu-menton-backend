@@ -11,13 +11,16 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.dps.teknokent.dto.requests.ActorRequest;
+import com.dps.teknokent.dto.requests.SavePrismLinkRequest;
 import com.dps.teknokent.dto.requests.SaveTrainingRequest;
 import com.dps.teknokent.dto.requests.SubmitTrainingAttemptRequest;
+import com.dps.teknokent.dto.responses.PrismLinkResponse;
 import com.dps.teknokent.dto.responses.StudentTrainingResponse;
 import com.dps.teknokent.dto.responses.TrainingAttemptResponse;
 import com.dps.teknokent.dto.responses.TrainingModuleResponse;
 import com.dps.teknokent.dto.responses.TrainingQuizResponse;
 import com.dps.teknokent.security.CurrentActor;
+import com.dps.teknokent.service.PrismTrainingService;
 import com.dps.teknokent.service.TrainingService;
 
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -31,6 +34,7 @@ import lombok.RequiredArgsConstructor;
 public class TrainingController {
 
 	private final TrainingService trainingService;
+	private final PrismTrainingService prismTrainingService;
 
 	@GetMapping("/api/coordinator/programs/{programId}/training")
 	public TrainingModuleResponse forEditor(@PathVariable UUID programId,
@@ -62,5 +66,21 @@ public class TrainingController {
 	public TrainingModuleResponse save(@PathVariable UUID programId,
 			@Valid @RequestBody SaveTrainingRequest request) {
 		return trainingService.save(CurrentActor.resolve(request.actorId()), programId, request);
+	}
+
+	@GetMapping("/api/coordinator/programs/{programId}/training/prism")
+	public PrismLinkResponse prismLink(@PathVariable UUID programId, @RequestParam(required = false) UUID actorId) {
+		return prismTrainingService.link(CurrentActor.resolve(actorId), programId);
+	}
+
+	@PutMapping("/api/coordinator/programs/{programId}/training/prism")
+	public PrismLinkResponse savePrismLink(@PathVariable UUID programId,
+			@Valid @RequestBody SavePrismLinkRequest request) {
+		return prismTrainingService.saveLink(CurrentActor.resolve(request.actorId()), programId, request.url());
+	}
+
+	@PostMapping("/api/training/peer/prism-completed")
+	public StudentTrainingResponse prismCompleted(@RequestBody(required = false) ActorRequest request) {
+		return trainingService.prismCompleted(CurrentActor.resolve(request == null ? null : request.actorId()));
 	}
 }

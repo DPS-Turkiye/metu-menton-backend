@@ -12,12 +12,15 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import org.jspecify.annotations.Nullable;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.dps.teknokent.config.PeerTrainingProperties;
 import com.dps.teknokent.domain.BadgeCode;
 import com.dps.teknokent.domain.BadgeKind;
 import com.dps.teknokent.domain.BadgeSource;
@@ -38,6 +41,7 @@ import com.dps.teknokent.dto.responses.PublicBadgeResponse;
 import com.dps.teknokent.entity.AppUser;
 import com.dps.teknokent.entity.InstitutionPerson;
 import com.dps.teknokent.entity.MentorProfile;
+import com.dps.teknokent.entity.PrismTrainingReview;
 import com.dps.teknokent.entity.Program;
 import com.dps.teknokent.entity.ProgramMentor;
 import com.dps.teknokent.entity.TrainingAttempt;
@@ -51,6 +55,7 @@ import com.dps.teknokent.repository.InstitutionPersonRepository;
 import com.dps.teknokent.repository.MentorCount;
 import com.dps.teknokent.repository.MentorProfileRepository;
 import com.dps.teknokent.repository.MentorshipRepository;
+import com.dps.teknokent.repository.PrismTrainingReviewRepository;
 import com.dps.teknokent.repository.ProgramMentorRepository;
 import com.dps.teknokent.repository.ProgramRepository;
 import com.dps.teknokent.repository.TrainingAttemptRepository;
@@ -67,13 +72,15 @@ import lombok.RequiredArgsConstructor;
  * coordinator or an admin (or with the program's mentor approval, see {@link #awardAfterMentorApproval}); it
  * grants MENTOR through the account's permissions and makes the person one of the program's mentors.
  * <p>
- * Not here yet, by decision: the training that awards it automatically (D2a–D2f; it will call
- * {@link #award} with {@link BadgeSource#RULE}), expiry (D3; {@link BadgeStatus#EXPIRED} is reserved), and what a
- * revoke does to running mentorships (D4). A revoke today ends the badge and the MENTOR permission it gave, and
- * leaves requests, mentorships and the program membership as they are.
+ * On ODTÜ a coordinator approves each student after their Prism training ({@link PrismTrainingService}); only the
+ * program's İŞKUR interns qualify while {@link PeerTrainingProperties#internsOnly()} is on. Not here yet, by decision:
+ * expiry (D3; {@link BadgeStatus#EXPIRED} is reserved), and what a revoke does to running mentorships (D4). A revoke
+ * today ends the badge and the MENTOR permission it gave, and leaves requests, mentorships and the program membership
+ * as they are.
  */
 @Service
 @RequiredArgsConstructor
+@EnableConfigurationProperties(PeerTrainingProperties.class)
 public class BadgeService {
 
 	static final BadgeCode GATE = BadgeCode.PEER_MENTOR;
@@ -98,6 +105,9 @@ public class BadgeService {
 	private final InstitutionPersonRepository institutionPeople;
 	private final MentorProfileRepository mentorProfiles;
 	private final MentorshipRepository mentorships;
+	private final PrismTrainingReviewRepository prismReviews;
+	private final IskurInternService iskurInterns;
+	private final PeerTrainingProperties peerTraining;
 
 	public List<BadgeCatalogueResponse> catalogue() {
 		return Arrays.stream(BadgeCode.values()).map(BadgeCatalogueResponse::of).toList();
@@ -138,10 +148,11 @@ public class BadgeService {
 		users.findAllById(others).forEach(user -> people.putIfAbsent(user.getId(), user));
 		Map<UUID, GateBadgeRowResponse.Training> training = trainingOf(program.getId(), people.keySet());
 		Map<UUID, GateBadgeRowResponse.Profile> profiles = profilesOf(people.keySet());
+		Map<UUID, GateBadgeRowResponse.Prism> prism = prismOf(program.getId(), people.keySet());
 		return people.values().stream()
 				.map(person -> row(person, program, latest.get(person.getId()),
 						training.getOrDefault(person.getId(), GateBadgeRowResponse.Training.NONE),
-						profiles.get(person.getId())))
+						profiles.get(person.getId()), prism.get(person.getId())))
 				.filter(row -> state == null || row.state() == state)
 				.sorted((left, right) -> left.fullName().compareToIgnoreCase(right.fullName()))
 				.toList();
@@ -232,6 +243,17 @@ public class BadgeService {
 		return a.getId().compareTo(b.getId()) >= 0 ? a : b;
 	}
 
+	/** The Prism training of each person on a program's roster who has a record of it; for staff only. */
+	private Map<UUID, GateBadgeRowResponse.Prism> prismOf(UUID programId, Collection<UUID> userIds) {
+		if (userIds.isEmpty()) {
+			return Map.of();
+		}
+		return prismReviews.findByProgramIdAndUserIdIn(programId, userIds).stream()
+				.collect(Collectors.toMap(PrismTrainingReview::getUserId,
+						review -> new GateBadgeRowResponse.Prism(review.getCompletedAt(), review.getDecision(),
+								review.getDecidedAt(), review.getScore())));
+	}
+
 	/** Watched, tries and best score on the program's current training version, for those who started it. */
 	private Map<UUID, GateBadgeRowResponse.Training> trainingOf(UUID programId, Collection<UUID> userIds) {
 		if (userIds.isEmpty()) {
@@ -257,7 +279,7 @@ public class BadgeService {
 	private static GateBadgeRowResponse withTraining(GateBadgeRowResponse row, GateBadgeRowResponse.Training training) {
 		return new GateBadgeRowResponse(row.userId(), row.fullName(), row.email(), row.programId(),
 				row.programName(), row.state(), row.awardId(), row.source(), row.awardedAt(), row.revokedAt(),
-				row.reason(), training, row.profile());
+				row.reason(), training, row.profile(), row.prism());
 	}
 
 	/**
@@ -271,9 +293,11 @@ public class BadgeService {
 		AppUser actor = domainLookupService.requireUser(actorId);
 		AppUser student = domainLookupService.requireUser(userId);
 		requireNotSelf(actor, student);
-		if (student.getStatus() != UserAccountStatus.APPROVED
-				|| !(isStudentOf(student, program) || isAcceptedMentorOf(student, program))) {
+		if (student.getStatus() != UserAccountStatus.APPROVED || !belongsTo(student, program)) {
 			throw new InvalidRequestException(Texts.forRequest("error.badgeNotStudentOfProgram"));
+		}
+		if (!internRule(program).test(student.getId())) {
+			throw new InvalidRequestException(Texts.forRequest("error.badgeInternsOnly"));
 		}
 		if (activeGate(student.getId(), program.getId()) != null) {
 			throw new ConflictException(Texts.forRequest("error.badgeAlreadyActive"));
@@ -425,6 +449,27 @@ public class BadgeService {
 		return program;
 	}
 
+	/**
+	 * Who may hold the program's gate badge under the interns-only rule (Arya, 19 Nov): its İŞKUR interns, as
+	 * {@link IskurInternService#internIds} counts them. The one place the rule lives; with it off, everyone passes.
+	 */
+	Predicate<UUID> internRule(Program program) {
+		if (!peerTraining.internsOnly()) {
+			return userId -> true;
+		}
+		Set<UUID> interns = iskurInterns.internIds(program.getId());
+		return interns::contains;
+	}
+
+	/** A student of the program (in any account status) or one of its accepted mentors. */
+	boolean belongsTo(AppUser person, Program program) {
+		return isStudentOf(person, program) || isAcceptedMentorOf(person, program);
+	}
+
+	boolean hasActiveGate(UUID userId, UUID programId) {
+		return activeGate(userId, programId) != null;
+	}
+
 	private static boolean isStudentOf(AppUser person, Program program) {
 		return person.has(UserRole.MENTEE) && program.getId().equals(person.getProgramId());
 	}
@@ -435,13 +480,13 @@ public class BadgeService {
 				.isPresent();
 	}
 
-	private static void requireNotSelf(AppUser actor, AppUser holder) {
+	static void requireNotSelf(AppUser actor, AppUser holder) {
 		if (actor.getId().equals(holder.getId())) {
 			throw new InvalidRequestException(Texts.forRequest("error.badgeOwnAccount"));
 		}
 	}
 
-	private static BadgeSource sourceOf(AppUser actor) {
+	static BadgeSource sourceOf(AppUser actor) {
 		return actor.has(UserRole.ADMIN) ? BadgeSource.ADMIN : BadgeSource.COORDINATOR;
 	}
 
@@ -463,15 +508,16 @@ public class BadgeService {
 	}
 
 	private static GateBadgeRowResponse row(AppUser person, Program program, @Nullable UserBadge award) {
-		return row(person, program, award, GateBadgeRowResponse.Training.NONE, null);
+		return row(person, program, award, GateBadgeRowResponse.Training.NONE, null, null);
 	}
 
 	private static GateBadgeRowResponse row(AppUser person, Program program, @Nullable UserBadge award,
-			GateBadgeRowResponse.Training training, GateBadgeRowResponse.@Nullable Profile profile) {
+			GateBadgeRowResponse.Training training, GateBadgeRowResponse.@Nullable Profile profile,
+			GateBadgeRowResponse.@Nullable Prism prism) {
 		return new GateBadgeRowResponse(person.getId(), person.getFullName(), person.getEmail(), program.getId(),
 				program.getName(), GateBadgeState.of(award == null ? null : award.getStatus()),
 				award == null ? null : award.getId(), award == null ? null : award.getSource(),
 				award == null ? null : award.getAwardedAt(), award == null ? null : award.getRevokedAt(),
-				award == null ? null : award.getReason(), training, profile);
+				award == null ? null : award.getReason(), training, profile, prism);
 	}
 }

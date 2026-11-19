@@ -7,7 +7,10 @@ import org.jspecify.annotations.Nullable;
 
 import com.dps.teknokent.domain.TrainingState;
 
-/** The signed-in student's training; never the questions' correct options. */
+/**
+ * The signed-in student's training; never the questions' correct options, and never the Prism score (staff only).
+ * {@code prismUrl}: the program's Prism training, in the PRISM_ states.
+ */
 public record StudentTrainingResponse(
 		TrainingState state,
 		@Nullable UUID programId,
@@ -19,5 +22,7 @@ public record StudentTrainingResponse(
 		@Nullable Instant nextAttemptAt,
 		@Nullable Integer lastScore,
 		int passMark,
-		int questionCount) {
+		int questionCount,
+		@Nullable String prismUrl,
+		@Nullable Instant prismCompletedAt) {
 }

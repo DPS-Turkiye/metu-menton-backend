@@ -87,6 +87,12 @@ class BadgeServiceTest {
 	private com.dps.teknokent.repository.MentorProfileRepository mentorProfiles;
 	@Mock
 	private com.dps.teknokent.repository.MentorshipRepository mentorships;
+	@Mock
+	private com.dps.teknokent.repository.PrismTrainingReviewRepository prismReviews;
+	@Mock
+	private IskurInternService iskurInterns;
+	@Mock
+	private com.dps.teknokent.config.PeerTrainingProperties peerTraining;
 
 	@InjectMocks
 	private BadgeService service;
@@ -200,6 +206,47 @@ class BadgeServiceTest {
 
 		assertThatThrownBy(() -> service.awardGate(coordinator.getId(), iskur.getId(), student.getId()))
 				.isInstanceOf(ConflictException.class);
+	}
+
+	// Arya, 19 Nov: only the program's İŞKUR interns become its Akran mentors, by "Rozet ver" as by Prism approval.
+	@Test
+	void withTheInternsOnlyRuleOnlyAnInternOfTheProgramCanBeAwarded() {
+		when(peerTraining.internsOnly()).thenReturn(true);
+		when(iskurInterns.internIds(iskur.getId())).thenReturn(java.util.Set.of());
+
+		assertThatThrownBy(() -> service.awardGate(coordinator.getId(), iskur.getId(), student.getId()))
+				.isInstanceOf(InvalidRequestException.class);
+		verify(awards, never()).save(any());
+
+		when(iskurInterns.internIds(iskur.getId())).thenReturn(java.util.Set.of(student.getId()));
+		assertThat(service.awardGate(coordinator.getId(), iskur.getId(), student.getId()).state())
+				.isEqualTo(GateBadgeState.ACTIVE);
+	}
+
+	@Test
+	void withTheRuleOffEveryoneOfTheProgramPassesWithoutLookingUpInterns() {
+		assertThat(service.internRule(iskur).test(UUID.randomUUID())).isTrue();
+		verifyNoInteractions(iskurInterns);
+	}
+
+	@Test
+	void theRosterShowsStaffEachPersonsPrismTrainingAndScore() {
+		when(users.findByProgramIdAndPermissionAndStatusOrderByCreatedAtAsc(iskur.getId(), UserRole.MENTEE,
+				UserAccountStatus.APPROVED)).thenReturn(List.of(student));
+		com.dps.teknokent.entity.PrismTrainingReview review = new com.dps.teknokent.entity.PrismTrainingReview();
+		review.setUserId(student.getId());
+		review.setCompletedAt(java.time.Instant.parse("2026-11-20T09:00:00Z"));
+		review.setDecision(com.dps.teknokent.domain.PrismDecision.RETAKE);
+		review.setDecidedAt(java.time.Instant.parse("2026-11-19T09:00:00Z"));
+		review.setScore("62/100");
+		when(prismReviews.findByProgramIdAndUserIdIn(eq(iskur.getId()), any())).thenReturn(List.of(review));
+
+		assertThat(service.roster(coordinator.getId(), iskur.getId(), null)).singleElement().satisfies(row -> {
+			assertThat(row.prism()).isNotNull();
+			assertThat(row.prism().score()).isEqualTo("62/100");
+			assertThat(row.prism().decision()).isEqualTo(com.dps.teknokent.domain.PrismDecision.RETAKE);
+			assertThat(row.prism().completedAt()).isEqualTo(review.getCompletedAt());
+		});
 	}
 
 	@Test
