@@ -20,6 +20,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 
 import org.hamcrest.Matchers;
@@ -48,6 +49,7 @@ import com.dps.teknokent.domain.UserRole;
 import com.dps.teknokent.dto.requests.IskurOnboardingRequest;
 import com.dps.teknokent.entity.AppUser;
 import com.dps.teknokent.entity.InstitutionPerson;
+import com.dps.teknokent.entity.IskurInternEmail;
 import com.dps.teknokent.entity.IskurOnboarding;
 import com.dps.teknokent.entity.IskurPlacement;
 import com.dps.teknokent.entity.IskurSkill;
@@ -56,6 +58,7 @@ import com.dps.teknokent.entity.IskurUnit;
 import com.dps.teknokent.entity.Program;
 import com.dps.teknokent.repository.AppUserRepository;
 import com.dps.teknokent.repository.InstitutionPersonRepository;
+import com.dps.teknokent.repository.IskurInternEmailRepository;
 import com.dps.teknokent.repository.IskurOnboardingRepository;
 import com.dps.teknokent.repository.IskurPlacementRepository;
 import com.dps.teknokent.repository.IskurSkillRepository;
@@ -90,6 +93,8 @@ class IskurOnboardingIntegrationTest {
 	private JsonMapper jsonMapper;
 	@Autowired
 	private AppUserRepository userRepository;
+	@Autowired
+	private IskurInternEmailRepository internEmailRepository;
 	@Autowired
 	private ProgramRepository programRepository;
 	@Autowired
@@ -635,7 +640,17 @@ class IskurOnboardingIntegrationTest {
 		if (joined != null) {
 			user.setProgramId(joined.getId());
 		}
-		return userRepository.saveAndFlush(user);
+		AppUser saved = userRepository.saveAndFlush(user);
+		if (joined != null && role == UserRole.MENTEE) {
+			internOf(joined, saved);
+		}
+		return saved;
+	}
+
+	/** Puts the person's address on the program's İŞKUR intern list, as the coordinator would. */
+	private void internOf(Program listing, AppUser person) {
+		internEmailRepository.saveAndFlush(new IskurInternEmail(listing.getId(),
+				person.getEmail().toLowerCase(Locale.ROOT), null, Instant.now()));
 	}
 
 	private void record(AppUser user, String department, int classYear) {

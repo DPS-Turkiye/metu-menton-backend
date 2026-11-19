@@ -206,6 +206,23 @@ class RateLimitingFilterTest {
 		assertThat(key).hasSize(64).doesNotContain(link).matches("[0-9a-f]+");
 	}
 
+	// Every sign-up comes through the web proxy's one address, so the budget is per Firebase login, not per address.
+	@Test
+	void studentSignupAllowsEachLoginTenTriesInTenMinutes() throws Exception {
+		signIn(new FirebaseIdentity("uid-student", "deniz@metu.edu.tr", true));
+		for (int i = 0; i < 10; i++) {
+			assertThat(call(from("POST", "/api/auth/register/student", "198.51.100.20")).getStatus()).isEqualTo(200);
+		}
+
+		MockHttpServletResponse refused = call(from("POST", "/api/auth/register/student", "198.51.100.20"));
+
+		assertThat(refused.getStatus()).isEqualTo(429);
+		assertThat(Long.parseLong(refused.getHeader(RateLimitingFilter.RETRY_AFTER_HEADER))).isBetween(1L, 600L);
+		signIn(new FirebaseIdentity("uid-classmate", "ece@metu.edu.tr", true));
+		assertThat(call(from("POST", "/api/auth/register/student", "198.51.100.20")).getStatus()).isEqualTo(200);
+		SecurityContextHolder.clearContext();
+	}
+
 	private MockHttpServletResponse call(MockHttpServletRequest request) throws Exception {
 		MockHttpServletResponse response = new MockHttpServletResponse();
 		filter.doFilter(request, response, new MockFilterChain());

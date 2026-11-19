@@ -31,6 +31,10 @@ public interface AppUserRepository extends JpaRepository<AppUser, UUID> {
 
 	boolean existsByEmailIgnoreCase(String email);
 
+	/** The accounts whose address, lowercased, is one of {@code emails} (already lowercase). */
+	@Query("select u from AppUser u where lower(u.email) in :emails")
+	List<AppUser> findByLowercaseEmailIn(@Param("emails") Collection<String> emails);
+
 	Optional<AppUser> findByEmailIgnoreCase(String email);
 
 	Optional<AppUser> findByFirebaseUid(String firebaseUid);
