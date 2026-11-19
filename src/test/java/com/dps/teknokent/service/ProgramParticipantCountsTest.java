@@ -91,7 +91,7 @@ class ProgramParticipantCountsTest {
 		when(institutionPeople.countByAcademicTrueAndActiveTrue()).thenReturn(2410L);
 		when(institutionPeople.countActiveAcademicsWithWeeklyHours()).thenReturn(1280L);
 		when(officeHoursRequests.countByStatusInAndCreatedAtGreaterThanEqual(
-				ProgramOfficeHoursService.AWAITING_DECISION, NOW.minus(ProgramOfficeHoursService.UNBOUNDED_LOOK_BACK)))
+				ProgramOfficeHoursService.AWAITING_DECISION, NOW.minus(ProgramOfficeHoursService.RECENT_WINDOW)))
 				.thenReturn(86L);
 
 		Map<UUID, ProgramCountsResponse> result = counts.of(List.of(officeHours));

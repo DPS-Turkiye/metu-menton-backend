@@ -1,5 +1,6 @@
 package com.dps.teknokent.service;
 
+import java.text.Collator;
 import java.time.Clock;
 import java.time.DayOfWeek;
 import java.time.Duration;
@@ -34,6 +35,7 @@ import com.dps.teknokent.domain.OfficeHoursRequestStatus;
 import com.dps.teknokent.domain.ProgramType;
 import com.dps.teknokent.domain.UserAccountStatus;
 import com.dps.teknokent.dto.requests.ProgramOfficeHoursAppointmentsQuery;
+import com.dps.teknokent.dto.requests.ProgramOfficeHoursStudentsQuery;
 import com.dps.teknokent.dto.responses.OfficeHoursTimeResponse;
 import com.dps.teknokent.dto.responses.PageResponse;
 import com.dps.teknokent.dto.responses.ProgramOfficeHoursAppointmentResponse;
@@ -42,6 +44,9 @@ import com.dps.teknokent.dto.responses.ProgramOfficeHoursAppointmentResponse.Per
 import com.dps.teknokent.dto.responses.ProgramOfficeHoursAppointmentsResponse;
 import com.dps.teknokent.dto.responses.ProgramOfficeHoursAppointmentsResponse.Counts;
 import com.dps.teknokent.dto.responses.ProgramOfficeHoursAppointmentsResponse.Row;
+import com.dps.teknokent.dto.responses.ProgramOfficeHoursStudentsResponse;
+import com.dps.teknokent.dto.responses.ProgramOfficeHoursStudentsResponse.StudentRequests;
+import com.dps.teknokent.dto.responses.ProgramOfficeHoursStudentsResponse.StudentRow;
 import com.dps.teknokent.entity.AppUser;
 import com.dps.teknokent.entity.InstitutionPerson;
 import com.dps.teknokent.entity.OfficeHoursMeeting;
@@ -55,6 +60,7 @@ import com.dps.teknokent.repository.InstitutionPersonRepository;
 import com.dps.teknokent.repository.OfficeHoursMeetingRepository;
 import com.dps.teknokent.repository.OfficeHoursRequestMessageRepository;
 import com.dps.teknokent.repository.OfficeHoursRequestRepository;
+import com.dps.teknokent.repository.OfficeHoursStudentLoad;
 import com.dps.teknokent.repository.OfficeHoursUserRepository;
 import com.dps.teknokent.util.MeetingSlotTimes;
 
@@ -70,14 +76,19 @@ public class ProgramOfficeHoursService {
 	static final int MAX_PAGE_SIZE = 100;
 	static final int DEFAULT_PAGE_SIZE = 25;
 	static final int MAX_RANGE_DAYS = 62;
-	/** Without a date range the list, and its open-request cards, cover the requests made in the last half year. */
-	static final Duration UNBOUNDED_LOOK_BACK = Duration.ofDays(26 * 7L);
+	/**
+	 * The requests Randevular (without a date range), its open-request cards and Öğrenciler cover: those made in the
+	 * last half year, a proxy for the current academic term until term dates exist.
+	 */
+	static final Duration RECENT_WINDOW = Duration.ofDays(26 * 7L);
 	/** PostgreSQL takes at most 32767 bind parameters, so long id lists are looked up in slices. */
 	static final int LOOKUP_CHUNK = 1000;
 
 	static final Set<OfficeHoursRequestStatus> AWAITING_DECISION = Set.of(OfficeHoursRequestStatus.PENDING,
 			OfficeHoursRequestStatus.MORE_INFO_REQUESTED);
 	private static final Locale TURKISH = Locale.forLanguageTag("tr");
+	/** Names and faculties in Turkish alphabetical order ("Çağrı" after "Can"). */
+	private static final Comparator<String> TURKISH_ORDER = Collator.getInstance(TURKISH)::compare;
 
 	private final CoordinatorProgramService coordinatorProgramService;
 	private final OfficeHoursRequestRepository requests;
@@ -167,6 +178,52 @@ public class ProgramOfficeHoursService {
 	}
 
 	/**
+	 * An Office Hours program's Öğrenciler: every student who asked for office hours in {@link #RECENT_WINDOW}, with
+	 * their requests counted by status, how many academicians they asked and when they last asked. A student known
+	 * only from a course (no Menton account) is listed by the name the course gave, as Randevular shows them. Topics,
+	 * descriptions and messages are not read.
+	 */
+	public ProgramOfficeHoursStudentsResponse students(UUID actorId, UUID programId,
+			ProgramOfficeHoursStudentsQuery query) {
+		requireOfficeHoursProgram(actorId, programId);
+		int size = query.size() <= 0 ? DEFAULT_PAGE_SIZE : Math.min(query.size(), MAX_PAGE_SIZE);
+		int page = Math.max(query.page(), 0);
+		List<OfficeHoursStudentLoad> loads = requests.loadByStudentSince(clock.instant().minus(RECENT_WINDOW));
+		People people = peopleByIds(loads.stream().map(OfficeHoursStudentLoad::getStudentId)
+				.collect(Collectors.toSet()));
+		@Nullable
+		String search = normalized(query.search());
+		@Nullable
+		String faculty = query.faculty() == null || query.faculty().isBlank() ? null : query.faculty().trim();
+
+		List<StudentRow> rows = loads.stream()
+				.map(load -> studentRow(load, people))
+				.filter(row -> search == null || row.student().name().toLowerCase(TURKISH).contains(search))
+				.filter(row -> faculty == null || faculty.equals(people.facultyOf(row.id())))
+				.filter(row -> !query.awaitingOnly() || row.requests().awaitingDecision() > 0)
+				.sorted(Comparator.comparing(StudentRow::lastRequestedAt).reversed()
+						.thenComparing(row -> row.student().name(), TURKISH_ORDER)
+						.thenComparing(StudentRow::id))
+				.toList();
+		List<String> faculties = loads.stream()
+				.map(load -> people.facultyOf(load.getStudentId()))
+				.filter(Objects::nonNull)
+				.distinct()
+				.sorted(TURKISH_ORDER)
+				.toList();
+		return new ProgramOfficeHoursStudentsResponse(faculties,
+				PageResponse.of(rows.stream().skip((long) page * size).limit(size).toList(), page, size, rows.size()));
+	}
+
+	private static StudentRow studentRow(OfficeHoursStudentLoad load, People people) {
+		UUID id = load.getStudentId();
+		return new StudentRow(id, people.student(id), people.classYearOf(id),
+				new StudentRequests(load.getAwaitingDecision(), load.getAlternativeProposed(), load.getAccepted(),
+						load.getDeclined(), load.getWithdrawn()),
+				load.getAcademicians(), load.getLastRequestedAt());
+	}
+
+	/**
 	 * The program's coordinators and the admin, and only while their account is approved: the shared program guard
 	 * checks the role alone, and this list names every student who booked office hours.
 	 */
@@ -182,7 +239,7 @@ public class ProgramOfficeHoursService {
 	}
 
 	private List<OfficeHoursRequest> recent(@Nullable OfficeHoursRequestStatus status, Instant now) {
-		Instant from = now.minus(UNBOUNDED_LOOK_BACK);
+		Instant from = now.minus(RECENT_WINDOW);
 		Instant to = now.plus(Duration.ofDays(1));
 		return status == null
 				? requests.findByCreatedAtGreaterThanEqualAndCreatedAtLessThanOrderByCreatedAtDesc(from, to)
@@ -221,7 +278,7 @@ public class ProgramOfficeHoursService {
 		LocalDate monday = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
 		Instant weekStart = startOf(monday);
 		Instant weekEnd = startOf(monday.plusWeeks(1));
-		Instant listed = now.minus(UNBOUNDED_LOOK_BACK);
+		Instant listed = now.minus(RECENT_WINDOW);
 		return new Counts(
 				requests.countByStatusInAndCreatedAtGreaterThanEqual(AWAITING_DECISION, listed),
 				requests.countByStatusInAndCreatedAtGreaterThanEqual(Set.of(OfficeHoursRequestStatus.COUNTER_PROPOSED),
@@ -368,6 +425,10 @@ public class ProgramOfficeHoursService {
 			ids.add(request.getStudentId());
 			ids.add(request.getInstructorId());
 		}
+		return peopleByIds(ids);
+	}
+
+	private People peopleByIds(Set<UUID> ids) {
 		Map<UUID, OfficeHoursUser> users = inChunks(ids, officeHoursUsers::findAllById).stream()
 				.collect(Collectors.toMap(OfficeHoursUser::getId, Function.identity(), (a, b) -> a));
 		Set<UUID> accountIds = users.values().stream()
@@ -401,6 +462,17 @@ public class ProgramOfficeHoursService {
 
 		Person academic(OfficeHoursRequest request) {
 			return person(request.getInstructorId(), true);
+		}
+
+		Person student(UUID officeHoursUserId) {
+			return person(officeHoursUserId, false);
+		}
+
+		@Nullable
+		Integer classYearOf(UUID officeHoursUserId) {
+			@Nullable
+			InstitutionPerson record = recordOf(officeHoursUserId);
+			return record == null ? null : record.getClassYear();
 		}
 
 		@Nullable

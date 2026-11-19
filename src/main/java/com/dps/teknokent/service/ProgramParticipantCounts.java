@@ -90,7 +90,7 @@ public class ProgramParticipantCounts {
 					Math.toIntExact(institutionPeople.countActiveAcademicsWithWeeklyHours()),
 					Math.toIntExact(officeHoursRequests.countByStatusInAndCreatedAtGreaterThanEqual(
 							ProgramOfficeHoursService.AWAITING_DECISION,
-							clock.instant().minus(ProgramOfficeHoursService.UNBOUNDED_LOOK_BACK)))));
+							clock.instant().minus(ProgramOfficeHoursService.RECENT_WINDOW)))));
 			officeHours.forEach(id -> counts.put(id, university));
 		}
 		return counts;
