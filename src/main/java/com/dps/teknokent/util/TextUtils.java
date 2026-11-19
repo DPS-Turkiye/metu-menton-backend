@@ -34,6 +34,25 @@ public final class TextUtils {
 		return value == null ? "" : value;
 	}
 
+	/**
+	 * {@code value} cut to at most {@code max} characters, ending in "…" when it was longer, so it fits a column
+	 * without
+	 * failing the insert. A surrogate pair is never split.
+	 */
+	public static String clip(String value, int max) {
+		if (max < 2) {
+			throw new IllegalArgumentException("clip needs room for a character and the ellipsis: " + max);
+		}
+		if (value.length() <= max) {
+			return value;
+		}
+		int end = max - 1;
+		if (Character.isHighSurrogate(value.charAt(end - 1))) {
+			end--;
+		}
+		return value.substring(0, end) + "…";
+	}
+
 	public static @Nullable String normalizeOptional(@Nullable String value) {
 		return value == null || value.isBlank() ? null : value.trim();
 	}

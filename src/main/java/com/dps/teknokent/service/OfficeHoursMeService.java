@@ -370,7 +370,7 @@ public class OfficeHoursMeService {
 
 	private static OfficeHoursAvailabilityResponse availabilityOf(OfficeHoursSettings settings) {
 		return new OfficeHoursAvailabilityResponse(List.of(), List.of(), settings.getStudentCapacity(),
-				settings.getDefaultMeetingDurationMinutes(), settings.getMeetingBufferMinutes());
+				settings.getDefaultMeetingDurationMinutes(), settings.getMeetingBufferMinutes(), List.of());
 	}
 
 	private static OfficeHoursProfileResponse profileOf(OfficeHoursSettings settings) {

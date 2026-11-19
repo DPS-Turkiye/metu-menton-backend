@@ -31,4 +31,14 @@ public interface InstitutionPersonRepository extends JpaRepository<InstitutionPe
 			where person.academic = true and person.active = true and person.faculty is not null
 			order by person.faculty""")
 	List<String> findAcademicFaculties();
+
+	long countByAcademicTrueAndActiveTrue();
+
+	/** The active academicians who set at least one weekly Office Hours slot. */
+	@Query("""
+			select count(person) from InstitutionPerson person
+			where person.academic = true and person.active = true and exists (
+				select rule.id from OfficeHoursRule rule, OfficeHoursUser instructor
+				where rule.instructorId = instructor.id and instructor.appUserId = person.user.id)""")
+	long countActiveAcademicsWithWeeklyHours();
 }

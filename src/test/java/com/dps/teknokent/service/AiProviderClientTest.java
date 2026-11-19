@@ -205,6 +205,8 @@ class AiProviderClientTest {
 					.isInstanceOf(AiFeatureDisabledException.class);
 			assertThatThrownBy(() -> client.syllabusPhases("Hafta 1", null, null, schema))
 					.isInstanceOf(AiFeatureDisabledException.class);
+			assertThatThrownBy(() -> client.weeklyProgram("1 · Keşfetmeye Başla", null, null, schema))
+					.isInstanceOf(AiFeatureDisabledException.class);
 			assertThatThrownBy(() -> client.generateMeetingReport("Ayşe: merhaba", schema))
 					.isInstanceOf(AiFeatureDisabledException.class);
 			assertThatThrownBy(() -> client.cleanTranscript("s1\tmerhaba", schema))

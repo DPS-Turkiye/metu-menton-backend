@@ -86,13 +86,14 @@ springdoc:
 
 ai:
   provider: ${AI_PROVIDER:openai}
-  # One switch per feature that sends data to the AI provider; all on unless a deployment turns one off.
+  # One switch per feature that sends data to the AI provider. Unset follows the edition (AiFeatures): on in
+  # TEKNOKENT, off in ODTU, where switching one on stops the startup.
   features:
-    profile-parsing: ${AI_PROFILE_PARSING_ENABLED:true}
-    syllabus: ${AI_SYLLABUS_ENABLED:true}
-    matching: ${AI_MATCHING_ENABLED:true}
-    meeting-report: ${AI_MEETING_REPORT_ENABLED:true}
-    task-handover: ${AI_TASK_HANDOVER_ENABLED:true}
+    profile-parsing: ${AI_PROFILE_PARSING_ENABLED:}
+    syllabus: ${AI_SYLLABUS_ENABLED:}
+    matching: ${AI_MATCHING_ENABLED:}
+    meeting-report: ${AI_MEETING_REPORT_ENABLED:}
+    task-handover: ${AI_TASK_HANDOVER_ENABLED:}
   openai:
     api-key: ${OPENAI_API_KEY:}
     base-url: ${OPENAI_BASE_URL:https://api.openai.com/v1}
@@ -107,9 +108,10 @@ ai:
     app-name: ${OPENROUTER_APP_NAME:TeamTNT Spring Backend}
 
 app:
-  # Which deployment this is: TEKNOKENT (startup mentoring, the default) or ODTU (office hours + İŞKUR). Each
-  # edition answers 404 for the other one's endpoints and accepts only its own program types.
-  edition: ${APP_EDITION:TEKNOKENT}
+  # Which deployment this is: TEKNOKENT (startup mentoring) or ODTU (office hours + İŞKUR). Each edition answers 404
+  # for the other one's endpoints and accepts only its own program types. No default: a missing value stops the
+  # start-up, so a server that loses the variable never comes up as the other edition.
+  edition: ${APP_EDITION:}
   firebase:
     project-id: ${FIREBASE_PROJECT_ID:}
     credentials-json: ${FIREBASE_CREDENTIALS_JSON:}
@@ -130,14 +132,27 @@ app:
       enabled: ${NOTIFICATION_REMINDERS_ENABLED:true}
       interval-ms: ${NOTIFICATION_REMINDERS_INTERVAL_MS:60000}
   s3:
-    region: ${AWS_REGION:}
+    # No endpoint: AWS S3, with the AWS region and keys unless the AWS_S3_* ones are set. An endpoint: an
+    # S3-compatible store such as MinIO, which only ever gets its own AWS_S3_* keys (S3Properties). The public
+    # endpoint is the address presigned links are signed for.
+    region: ${AWS_S3_REGION:}
     bucket: ${AWS_S3_BUCKET:}
-    access-key-id: ${AWS_ACCESS_KEY_ID:}
-    secret-access-key: ${AWS_SECRET_ACCESS_KEY:}
+    endpoint: ${AWS_S3_ENDPOINT:}
+    public-endpoint: ${AWS_S3_PUBLIC_ENDPOINT:}
+    access-key-id: ${AWS_S3_ACCESS_KEY_ID:}
+    secret-access-key: ${AWS_S3_SECRET_ACCESS_KEY:}
+    aws-region: ${AWS_REGION:}
+    aws-access-key-id: ${AWS_ACCESS_KEY_ID:}
+    aws-secret-access-key: ${AWS_SECRET_ACCESS_KEY:}
   registration:
     allowed-email-domains: ${REGISTRATION_ALLOWED_EMAIL_DOMAINS:}
+  bootstrap:
+    # ROLE:email:firebaseUid,... (ADMIN or COORDINATOR): staff accounts created at startup when missing (StaffBootstrap).
+    staff: ${APP_BOOTSTRAP_STAFF:}
   mail:
     region: ${AWS_REGION:eu-central-1}
+    access-key-id: ${AWS_ACCESS_KEY_ID:}
+    secret-access-key: ${AWS_SECRET_ACCESS_KEY:}
     from: ${MAIL_FROM:}
     public-url: ${APP_PUBLIC_URL:https://menton.com.tr}
   realtime:
@@ -146,6 +161,11 @@ app:
     allowed-origins: ${REALTIME_ALLOWED_ORIGINS:http://localhost:3000,http://127.0.0.1:3000,https://menton.com.tr,https://www.menton.com.tr}
     document-ttl-hours: ${REALTIME_DOCUMENT_TTL_HOURS:12}
     seed-lock-seconds: ${REALTIME_SEED_LOCK_SECONDS:30}
+  office-hours:
+    # Calendar links Moodle subscribes to (FR-OH-23). Off until a deployment turns them on: while off, every link
+    # and feed route answers 404.
+    calendar-feed:
+      enabled: ${OFFICE_HOURS_CALENDAR_FEED_ENABLED:false}
   # Office hours opened from Moodle (LTI 1.3). Empty values leave LTI off; see .env.example.
   lti:
     platform-issuer: ${LTI_PLATFORM_ISSUER:}
@@ -168,7 +188,8 @@ profile-parsing:
 
 matching:
   pgvector:
-    enabled: ${MATCHING_PGVECTOR_ENABLED:true}
+    # Unset follows AI matching: on in TEKNOKENT, off in ODTU (where switching it on stops the startup).
+    enabled: ${MATCHING_PGVECTOR_ENABLED:}
 
 meeting:
   provider:

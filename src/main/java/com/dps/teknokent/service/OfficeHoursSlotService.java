@@ -9,6 +9,7 @@ import java.time.temporal.TemporalAdjusters;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -25,11 +26,13 @@ import org.springframework.transaction.annotation.Transactional;
 import com.dps.teknokent.domain.OfficeHoursRequestStatus;
 import com.dps.teknokent.entity.OfficeHoursException;
 import com.dps.teknokent.entity.OfficeHoursMeeting;
+import com.dps.teknokent.entity.OfficeHoursOneOff;
 import com.dps.teknokent.entity.OfficeHoursRequest;
 import com.dps.teknokent.entity.OfficeHoursRule;
 import com.dps.teknokent.entity.OfficeHoursSettings;
 import com.dps.teknokent.repository.OfficeHoursExceptionRepository;
 import com.dps.teknokent.repository.OfficeHoursMeetingRepository;
+import com.dps.teknokent.repository.OfficeHoursOneOffRepository;
 import com.dps.teknokent.repository.OfficeHoursRequestRepository;
 import com.dps.teknokent.repository.OfficeHoursRuleRepository;
 import com.dps.teknokent.repository.OfficeHoursSettingsRepository;
@@ -53,29 +56,37 @@ public class OfficeHoursSlotService {
 	public record Slot(Instant startsAt, int durationMinutes) {
 	}
 
+	/** One weekly range on one date. */
+	public record Hours(Instant startsAt, Instant endsAt) {
+	}
+
 	private final OfficeHoursRuleRepository ruleRepository;
 	private final OfficeHoursExceptionRepository exceptionRepository;
 	private final OfficeHoursMeetingRepository meetingRepository;
 	private final OfficeHoursSettingsRepository settingsRepository;
 	private final OfficeHoursRequestRepository requestRepository;
+	private final OfficeHoursOneOffRepository oneOffRepository;
 	private final Clock clock;
 
 	@Autowired
 	public OfficeHoursSlotService(OfficeHoursRuleRepository ruleRepository,
 			OfficeHoursExceptionRepository exceptionRepository, OfficeHoursMeetingRepository meetingRepository,
-			OfficeHoursSettingsRepository settingsRepository, OfficeHoursRequestRepository requestRepository) {
+			OfficeHoursSettingsRepository settingsRepository, OfficeHoursRequestRepository requestRepository,
+			OfficeHoursOneOffRepository oneOffRepository) {
 		this(ruleRepository, exceptionRepository, meetingRepository, settingsRepository, requestRepository,
-				Clock.systemUTC());
+				oneOffRepository, Clock.systemUTC());
 	}
 
 	OfficeHoursSlotService(OfficeHoursRuleRepository ruleRepository, OfficeHoursExceptionRepository exceptionRepository,
 			OfficeHoursMeetingRepository meetingRepository, OfficeHoursSettingsRepository settingsRepository,
-			OfficeHoursRequestRepository requestRepository, Clock clock) {
+			OfficeHoursRequestRepository requestRepository, OfficeHoursOneOffRepository oneOffRepository,
+			Clock clock) {
 		this.ruleRepository = ruleRepository;
 		this.exceptionRepository = exceptionRepository;
 		this.meetingRepository = meetingRepository;
 		this.settingsRepository = settingsRepository;
 		this.requestRepository = requestRepository;
+		this.oneOffRepository = oneOffRepository;
 		this.clock = clock;
 	}
 
@@ -139,8 +150,58 @@ public class OfficeHoursSlotService {
 				}
 			}
 		}
+		// One-off hours are cut into meetings of the default length; a day off hides them like the weekly ranges.
+		// A one-off laid over a weekly range would offer the same start twice, so a start already offered is skipped.
+		Set<Instant> offered = slots.stream().map(Slot::startsAt).collect(Collectors.toCollection(HashSet::new));
+		int oneOffMinutes = settings(instructorId).getDefaultMeetingDurationMinutes();
+		Duration oneOffLength = Duration.ofMinutes(oneOffMinutes);
+		for (OfficeHoursOneOff oneOff : oneOffRepository.findByInstructorIdOrderByStartsAtAsc(instructorId)) {
+			if (!oneOff.getEndsAt().isAfter(earliest) || !oneOff.getStartsAt().isBefore(horizon.toInstant())
+					|| isAway(away, oneOff.getStartsAt().atZone(MeetingSlotTimes.APP_ZONE).toLocalDate())) {
+				continue;
+			}
+			for (Instant startsAt = oneOff.getStartsAt(); !startsAt.plus(oneOffLength)
+					.isAfter(oneOff.getEndsAt()); startsAt = startsAt.plus(oneOffLength)) {
+				if (!startsAt.isBefore(earliest) && !overlaps(meetings, startsAt, oneOffLength, buffer)
+						&& offered.add(startsAt)) {
+					slots.add(new Slot(startsAt, oneOffMinutes));
+				}
+			}
+		}
 		slots.sort(Comparator.comparing(Slot::startsAt));
 		return slots;
+	}
+
+	/**
+	 * The academic's weekly ranges and one-off hours as dated blocks, from the start of today over the same eight
+	 * weeks students can book in, leaving out dates away. Meetings already booked do not cut them: these are the
+	 * hours they keep.
+	 */
+	@Transactional(readOnly = true)
+	public List<Hours> hoursAhead(UUID instructorId) {
+		ZonedDateTime start = clock.instant().atZone(MeetingSlotTimes.APP_ZONE);
+		ZonedDateTime horizon = start.plusWeeks(HORIZON_WEEKS);
+		List<OfficeHoursException> away = exceptionRepository.findByInstructorIdOrderByStartsOnAsc(instructorId);
+		List<Hours> hours = new ArrayList<>();
+		for (OfficeHoursRule rule : ruleRepository.findByInstructorIdOrderByDayOfWeekAscStartTimeAsc(instructorId)) {
+			ZonedDateTime day = start.toLocalDate().atStartOfDay(MeetingSlotTimes.APP_ZONE)
+					.with(TemporalAdjusters.nextOrSame(rule.day()));
+			for (; day.isBefore(horizon); day = day.plusWeeks(1)) {
+				if (!isAway(away, day.toLocalDate())) {
+					hours.add(new Hours(day.with(rule.getStartTime()).toInstant(),
+							day.with(rule.getEndTime()).toInstant()));
+				}
+			}
+		}
+		Instant today = start.toLocalDate().atStartOfDay(MeetingSlotTimes.APP_ZONE).toInstant();
+		for (OfficeHoursOneOff oneOff : oneOffRepository.findByInstructorIdOrderByStartsAtAsc(instructorId)) {
+			if (oneOff.getEndsAt().isAfter(today) && oneOff.getStartsAt().isBefore(horizon.toInstant())
+					&& !isAway(away, oneOff.getStartsAt().atZone(MeetingSlotTimes.APP_ZONE).toLocalDate())) {
+				hours.add(new Hours(oneOff.getStartsAt(), oneOff.getEndsAt()));
+			}
+		}
+		hours.sort(Comparator.comparing(Hours::startsAt));
+		return hours;
 	}
 
 	/**
