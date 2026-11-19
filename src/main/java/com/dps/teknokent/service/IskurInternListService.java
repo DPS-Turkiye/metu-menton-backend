@@ -32,6 +32,7 @@ import com.dps.teknokent.util.EmailDomains;
 import com.dps.teknokent.util.Texts;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * The coordinator's İŞKUR intern list (weekend launch, part B): the addresses whose accounts count as the program's
@@ -39,6 +40,7 @@ import lombok.RequiredArgsConstructor;
  * a
  * team, so the placement screen never holds someone who is no longer an intern.
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class IskurInternListService {
@@ -71,7 +73,8 @@ public class IskurInternListService {
 			if (email.isEmpty()) {
 				continue;
 			}
-			if (!EmailDomains.isEmail(email)) {
+			// ASCII only: Java's and Postgres's lowercasing agree on it, and university addresses are ASCII anyway.
+			if (!EmailDomains.isEmail(email) || !isAscii(email)) {
 				if (rejected.size() < MAX_REJECTED_SHOWN) {
 					rejected.add(raw.strip());
 				}
@@ -88,6 +91,8 @@ public class IskurInternListService {
 		internEmails.saveAll(fresh.stream()
 				.map(email -> new IskurInternEmail(program.getId(), email, actorId, now))
 				.toList());
+		log.info("İŞKUR intern list: actor {} added {} addresses to program {} ({} unreadable)", actorId, fresh.size(),
+				program.getId(), rejected.size());
 		return build(program, rejected);
 	}
 
@@ -104,6 +109,8 @@ public class IskurInternListService {
 			throw new ConflictException(Texts.forRequest("error.iskurInternPlaced"));
 		}
 		internEmails.delete(entry);
+		log.info("İŞKUR intern list: actor {} removed entry {} from program {}", actorId, entry.getId(),
+				program.getId());
 		return build(program, List.of());
 	}
 
@@ -145,6 +152,10 @@ public class IskurInternListService {
 				: IskurInternAccountState.OUTSIDE_PROGRAM;
 		return new IskurInternListResponse.Entry(row.getId(), row.getEmail(), row.getAddedAt(), state, null, null,
 				placed);
+	}
+
+	private static boolean isAscii(String email) {
+		return email.chars().allMatch(c -> c < 0x80);
 	}
 
 	private static int count(List<IskurInternListResponse.Entry> entries, IskurInternAccountState state) {

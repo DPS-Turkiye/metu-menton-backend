@@ -19,18 +19,19 @@ CREATE INDEX ix_iskur_intern_email_added_by ON iskur_intern_email (added_by);
 -- (program_id, email) order already serves it, so no second index on email.
 
 -- Keep everyone the workspace already treats as an intern: the placed, and those who started the onboarding form.
--- Without this, a placed person would lose their team screens the moment the list took over.
+-- Without this, a placed person would lose their team screens the moment the list took over. Erased accounts carry a
+-- placeholder address, so they are left out.
 INSERT INTO iskur_intern_email (id, program_id, email, added_by, added_at)
 SELECT gen_random_uuid(), known.program_id, known.email, NULL, now()
 FROM (
     SELECT p.program_id, lower(btrim(u.email)) AS email
     FROM iskur_placement p
     JOIN app_user u ON u.id = p.user_id
-    WHERE u.email IS NOT NULL AND btrim(u.email) <> ''
+    WHERE u.email IS NOT NULL AND btrim(u.email) <> '' AND u.status <> 'DELETED'
     UNION
     SELECT o.program_id, lower(btrim(u.email)) AS email
     FROM iskur_onboarding o
     JOIN app_user u ON u.id = o.user_id
-    WHERE u.email IS NOT NULL AND btrim(u.email) <> ''
+    WHERE u.email IS NOT NULL AND btrim(u.email) <> '' AND u.status <> 'DELETED'
 ) AS known
 ON CONFLICT (program_id, email) DO NOTHING;

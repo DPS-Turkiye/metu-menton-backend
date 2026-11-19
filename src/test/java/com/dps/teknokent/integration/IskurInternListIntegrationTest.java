@@ -97,7 +97,7 @@ class IskurInternListIntegrationTest {
 		user("Dış Kişi", "dis.kisi@example.test", UserRole.MENTEE, otherProgram);
 
 		add(coordinator, "\" AYSE.YILDIZ@example.test \"", "\"ayse.yildiz@example.test\"", "\"yeni@example.test\"",
-				"\"dis.kisi@example.test\"", "\"adres-degil\"", "\"  \"")
+				"\"dis.kisi@example.test\"", "\"adres-degil\"", "\"İlker@example.test\"", "\"  \"")
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.programId").value(program.getId().toString()))
 				.andExpect(jsonPath("$.entries[*].email").value(Matchers.contains(
@@ -114,7 +114,7 @@ class IskurInternListIntegrationTest {
 				.andExpect(jsonPath("$.counts.interns").value(1))
 				.andExpect(jsonPath("$.counts.notSignedUp").value(1))
 				.andExpect(jsonPath("$.counts.outsideProgram").value(1))
-				.andExpect(jsonPath("$.rejected").value(Matchers.contains("adres-degil")));
+				.andExpect(jsonPath("$.rejected").value(Matchers.contains("adres-degil", "İlker@example.test")));
 
 		add(coordinator, "\"YENI@example.test\"").andExpect(status().isOk())
 				.andExpect(jsonPath("$.counts.listed").value(3))
