@@ -53,8 +53,8 @@ import tools.jackson.databind.json.JsonMapper;
  * institution's record backs (student → MENTEE, academic → ACADEMICIAN), then hands the browser a one-time code it
  * trades for a Firebase custom token. Everything after that (bearer filter, /me, the session cookie) is unchanged.
  * A login that only proves who someone is ({@link InstitutionLoginProvider#grantsAccess()} false: OTG, or a CAS
- * person who is neither a student nor an academic) finds the account but never creates one: a newcomer's code yields a Firebase login without an account, which the
- * frontend sends to the ordinary sign-up.
+ * person who is neither a student nor an academic) finds the account but never creates one: a newcomer's code yields
+ * a Firebase login without an account, which the frontend sends to the ordinary sign-up.
  */
 @Slf4j
 @Service

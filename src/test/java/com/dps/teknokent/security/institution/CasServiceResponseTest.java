@@ -59,7 +59,8 @@ class CasServiceResponseTest {
 		String xxe = """
 				<?xml version="1.0"?>
 				<!DOCTYPE cas:serviceResponse [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>
-				""" + OPEN + "<cas:authenticationSuccess><cas:user>&xxe;</cas:user></cas:authenticationSuccess>" + CLOSE;
+				""" + OPEN + "<cas:authenticationSuccess><cas:user>&xxe;</cas:user></cas:authenticationSuccess>"
+				+ CLOSE;
 
 		assertThatThrownBy(() -> CasServiceResponse.parse(xxe)).isInstanceOf(IllegalArgumentException.class);
 	}
@@ -69,7 +70,8 @@ class CasServiceResponseTest {
 	void anEntityExpansionBombIsRefused() {
 		String bomb = """
 				<!DOCTYPE lolz [<!ENTITY lol "lol"><!ENTITY lol2 "&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;">]>
-				""" + OPEN + "<cas:authenticationSuccess><cas:user>&lol2;</cas:user></cas:authenticationSuccess>" + CLOSE;
+				""" + OPEN + "<cas:authenticationSuccess><cas:user>&lol2;</cas:user></cas:authenticationSuccess>"
+				+ CLOSE;
 
 		assertThatThrownBy(() -> CasServiceResponse.parse(bomb)).isInstanceOf(IllegalArgumentException.class);
 	}

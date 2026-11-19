@@ -177,7 +177,8 @@ class CasLoginProviderTest {
 
 	@Test
 	void anEmailAttributeThatHoldsNoAddressIsABadGateway() {
-		String ticket = cas.signIn(provider.startLogin("state-1"), "e123456", Map.of("mail", List.of("not-an-address")));
+		String ticket = cas.signIn(provider.startLogin("state-1"), "e123456",
+				Map.of("mail", List.of("not-an-address")));
 
 		assertBadGateway(() -> provider.completeLogin("state-1", Map.of("ticket", ticket)));
 	}

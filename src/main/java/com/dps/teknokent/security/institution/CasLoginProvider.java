@@ -137,8 +137,8 @@ public class CasLoginProvider implements InstitutionLoginProvider {
 			throw new InvalidRequestException(Texts.forRequest("error.casLoginRejected"));
 		}
 		return switch (validate(state, ticket)) {
-			case CasServiceResponse.Failure failure -> throw rejected(failure);
-			case CasServiceResponse.Success success -> identity(success);
+		case CasServiceResponse.Failure failure -> throw rejected(failure);
+		case CasServiceResponse.Success success -> identity(success);
 		};
 	}
 
@@ -249,9 +249,9 @@ public class CasLoginProvider implements InstitutionLoginProvider {
 
 	private static String validatePath(@Nullable String version) {
 		return switch (require("CAS_VERSION", version)) {
-			case "3", "3.0" -> "/p3/serviceValidate";
-			case "2", "2.0" -> "/serviceValidate";
-			default -> throw new IllegalStateException("CAS_VERSION must be 2.0 or 3.0.");
+		case "3", "3.0" -> "/p3/serviceValidate";
+		case "2", "2.0" -> "/serviceValidate";
+		default -> throw new IllegalStateException("CAS_VERSION must be 2.0 or 3.0.");
 		};
 	}
 
