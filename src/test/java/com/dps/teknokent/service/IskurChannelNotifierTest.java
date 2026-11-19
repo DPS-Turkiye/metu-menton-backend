@@ -93,7 +93,7 @@ class IskurChannelNotifierTest {
 
 	@Test
 	void notifiesTheOthersInTheChannelDuringTheWorkingDayAndRemembersIt() {
-		notifier(THURSDAY_MORNING).messagePosted(posted(team, false));
+		notifier(THURSDAY_MORNING.plusSeconds(5)).messagePosted(posted(team, false));
 
 		ArgumentCaptor<AppUser> recipients = ArgumentCaptor.forClass(AppUser.class);
 		verify(notifications, times(2)).create(recipients.capture(), eq(NotificationCategory.MESSAGE),
@@ -144,6 +144,18 @@ class IskurChannelNotifierTest {
 		notifier(THURSDAY_MORNING).messagePosted(posted(team, false));
 
 		verify(notifications, never()).create(any(), any(), anyString(), anyString(), anyString());
+	}
+
+	@Test
+	void readingUpToTheNotifiedMessageOpensTheNextNotification() {
+		IskurChannelRead readTheLastOne = new IskurChannelRead(team.getId(), ayse.getId());
+		readTheLastOne.setNotifiedAt(THURSDAY_MORNING.minusSeconds(600));
+		readTheLastOne.setLastReadAt(THURSDAY_MORNING.minusSeconds(600));
+		when(reads.findByChannelId(team.getId())).thenReturn(List.of(readTheLastOne));
+
+		notifier(THURSDAY_MORNING).messagePosted(posted(team, false));
+
+		verify(notifications).create(eq(ayse), any(), anyString(), anyString(), anyString());
 	}
 
 	@Test

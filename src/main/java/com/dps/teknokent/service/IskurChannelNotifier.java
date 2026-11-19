@@ -2,7 +2,6 @@ package com.dps.teknokent.service;
 
 import java.time.Clock;
 import java.time.DayOfWeek;
-import java.time.Instant;
 import java.time.LocalTime;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
@@ -139,7 +138,6 @@ public class IskurChannelNotifier {
 			return;
 		}
 		String placeName = placeName(channel);
-		Instant now = clock.instant();
 		List<IskurChannelRead> notified = new ArrayList<>();
 		for (AppUser recipient : repositories.users().findAllById(hrefs.keySet())) {
 			if (recipient.getStatus() != UserAccountStatus.APPROVED) {
@@ -160,7 +158,8 @@ public class IskurChannelNotifier {
 			}
 			IskurChannelRead read = readsByUser.computeIfAbsent(recipient.getId(),
 					userId -> new IskurChannelRead(channel.getId(), userId));
-			read.setNotifiedAt(now);
+			// The message's own time, the same clock read marks use: reading this message re-opens notifications.
+			read.setNotifiedAt(message.getCreatedAt());
 			notified.add(read);
 		}
 		repositories.reads().saveAll(notified);
