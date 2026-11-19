@@ -1,5 +1,6 @@
 package com.dps.teknokent.dto.responses;
 
+import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
@@ -37,6 +38,8 @@ public record IskurTeamTasksResponse(
 			int plannedMinutes,
 			boolean overTarget,
 			boolean assignable,
+			// The days the person works, from their onboarding form; empty until they send it.
+			List<DayOfWeek> workDays,
 			List<IskurTaskResponse> tasks) {
 	}
 
