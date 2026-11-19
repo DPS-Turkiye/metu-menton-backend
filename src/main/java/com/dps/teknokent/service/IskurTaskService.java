@@ -79,18 +79,20 @@ public class IskurTaskService {
 	private final AppUserRepository users;
 	private final ProgramRepository programs;
 	private final NotificationService notifications;
+	private final IskurOnboardingService onboarding;
 	private final Clock clock;
 
 	@Autowired
 	public IskurTaskService(IskurInternService interns, IskurPlacementRepository placements,
 			IskurTeamRepository teams, IskurUnitRepository units, IskurTaskRepository tasks, AppUserRepository users,
-			ProgramRepository programs, NotificationService notifications) {
-		this(interns, placements, teams, units, tasks, users, programs, notifications, Clock.systemUTC());
+			ProgramRepository programs, NotificationService notifications, IskurOnboardingService onboarding) {
+		this(interns, placements, teams, units, tasks, users, programs, notifications, onboarding,
+				Clock.systemUTC());
 	}
 
 	IskurTaskService(IskurInternService interns, IskurPlacementRepository placements, IskurTeamRepository teams,
 			IskurUnitRepository units, IskurTaskRepository tasks, AppUserRepository users, ProgramRepository programs,
-			NotificationService notifications, Clock clock) {
+			NotificationService notifications, IskurOnboardingService onboarding, Clock clock) {
 		this.interns = interns;
 		this.placements = placements;
 		this.teams = teams;
@@ -99,6 +101,7 @@ public class IskurTaskService {
 		this.users = users;
 		this.programs = programs;
 		this.notifications = notifications;
+		this.onboarding = onboarding;
 		this.clock = clock;
 	}
 
@@ -130,6 +133,11 @@ public class IskurTaskService {
 		LocalDate today = today();
 		if (request.dueDate().isBefore(today) || request.dueDate().isAfter(today.plusDays(MAX_DAYS_AHEAD))) {
 			throw new InvalidRequestException(Texts.forRequest("error.iskurTaskDueDate", MAX_DAYS_AHEAD));
+		}
+		// Due on one of the assignee's work days, once they have given them (onboarding); before that, any day.
+		Set<DayOfWeek> workDays = onboarding.workDays(me.getProgramId(), assignee.getUserId());
+		if (!workDays.isEmpty() && !workDays.contains(request.dueDate().getDayOfWeek())) {
+			throw new InvalidRequestException(Texts.forRequest("error.iskurTaskNotWorkDay"));
 		}
 
 		IskurTask task = new IskurTask(me.getProgramId(), me.getTeamId(), assignee.getUserId(), actorId,
@@ -302,9 +310,12 @@ public class IskurTaskService {
 				.map(task -> response(task, new Access(me, task.getAssigneeId().equals(me.getUserId()), leader),
 						teamName, people))
 				.toList();
+		List<DayOfWeek> workDays = onboarding.workDays(placement.getProgramId(), placement.getUserId()).stream()
+				.sorted()
+				.toList();
 		return new IskurTeamTasksResponse.Member(placement.getUserId(),
 				people.getOrDefault(placement.getUserId(), ""), placement.getTeamRole(), days, target, planned,
-				target != null && planned > target, assignable, rows);
+				target != null && planned > target, assignable, workDays, rows);
 	}
 
 	private static IskurTaskResponse response(IskurTask task, Access access, String teamName,

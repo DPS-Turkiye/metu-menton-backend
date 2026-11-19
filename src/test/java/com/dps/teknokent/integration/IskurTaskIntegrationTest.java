@@ -1,6 +1,7 @@
 package com.dps.teknokent.integration;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.doReturn;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.httpBasic;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -14,6 +15,7 @@ import java.time.DayOfWeek;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.temporal.TemporalAdjusters;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.UUID;
 
@@ -25,6 +27,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
@@ -51,6 +54,7 @@ import com.dps.teknokent.repository.IskurUnitRepository;
 import com.dps.teknokent.repository.NotificationRepository;
 import com.dps.teknokent.repository.ProgramRepository;
 import com.dps.teknokent.security.AppUserPrincipal;
+import com.dps.teknokent.service.IskurOnboardingService;
 import com.dps.teknokent.util.MeetingSlotTimes;
 
 /** Ekibim's tasks and "Görev detayı", through the ODTÜ edition's real security chain and an H2 database. */
@@ -75,6 +79,8 @@ class IskurTaskIntegrationTest {
 	private IskurTaskRepository taskRepository;
 	@Autowired
 	private NotificationRepository notificationRepository;
+	@MockitoSpyBean
+	private IskurOnboardingService onboarding;
 
 	private Program program;
 	private AppUser zeynep;
@@ -170,6 +176,21 @@ class IskurTaskIntegrationTest {
 		assign(zeynep, outsider, "Başka ekip", 60, today, false).andExpect(status().isBadRequest());
 		assign(mert, ayse, "Üye atayamaz", 60, today, false).andExpect(status().isForbidden());
 		assertThat(taskRepository.findAll()).isEmpty();
+	}
+
+	@Test
+	void aTaskIsDueOnOneOfTheAssigneesWorkDaysOnceTheyHaveGivenThem() throws Exception {
+		LocalDate workDay = today;
+		LocalDate offDay = today.plusDays(1);
+		doReturn(EnumSet.of(workDay.getDayOfWeek())).when(onboarding).workDays(program.getId(), mert.getId());
+
+		assign(zeynep, mert, "Gün dışı", 60, offDay, false).andExpect(status().isBadRequest());
+		assign(zeynep, mert, "Görev gününde", 60, workDay, false)
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.members[2].workDays").value(Matchers.contains(workDay.getDayOfWeek().name())))
+				// Ayşe has not sent her form: any day, and no days to show.
+				.andExpect(jsonPath("$.members[1].workDays").isEmpty());
+		assign(zeynep, ayse, "Formsuz", 60, offDay, false).andExpect(status().isOk());
 	}
 
 	@Test
