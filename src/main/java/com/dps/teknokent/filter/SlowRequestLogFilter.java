@@ -8,6 +8,8 @@ import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
+import com.dps.teknokent.util.RequestPaths;
+
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.RequestDispatcher;
 import jakarta.servlet.ServletException;
@@ -48,12 +50,14 @@ public class SlowRequestLogFilter extends OncePerRequestFilter {
 					&& request.getAttribute(RequestDispatcher.ERROR_EXCEPTION) instanceof IOException cause) {
 				long announced = request.getContentLengthLong();
 				log.warn("Request body cut off: {} {} -> {} after {} ms ({}, {})",
-						request.getMethod(), request.getRequestURI(), response.getStatus(), elapsedMs,
+						request.getMethod(), RequestPaths.redacted(request.getRequestURI()), response.getStatus(),
+						elapsedMs,
 						announced < 0 ? "length not announced" : announced + " bytes announced",
 						cause.getClass().getSimpleName());
 			} else if (elapsedMs >= thresholdMs) {
 				log.warn("Slow request: {} {} -> {} in {} ms",
-						request.getMethod(), request.getRequestURI(), response.getStatus(), elapsedMs);
+						request.getMethod(), RequestPaths.redacted(request.getRequestURI()), response.getStatus(),
+						elapsedMs);
 			}
 		}
 	}

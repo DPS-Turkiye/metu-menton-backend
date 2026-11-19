@@ -25,6 +25,14 @@ public interface OfficeHoursMeetingRepository extends JpaRepository<OfficeHoursM
 
 	Optional<OfficeHoursMeeting> findByRequestId(UUID requestId);
 
+	/** Every meeting the person is in, as the student or as the academic, from {@code from} on. */
+	@Query("""
+			select meeting from OfficeHoursMeeting meeting
+			where (meeting.studentId = :userId or meeting.instructorId = :userId) and meeting.scheduledAt >= :from
+			order by meeting.scheduledAt
+			""")
+	List<OfficeHoursMeeting> findForPersonFrom(@Param("userId") UUID userId, @Param("from") Instant from);
+
 	/** Live meetings starting in (from, until] that still owe either side its reminder; a cancelled one owes none. */
 	@Query("""
 			select m from OfficeHoursMeeting m

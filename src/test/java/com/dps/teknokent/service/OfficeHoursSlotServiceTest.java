@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.time.Clock;
@@ -230,6 +231,27 @@ class OfficeHoursSlotServiceTest {
 	}
 
 	@Test
+	void hoursAheadKeepsWholeRangesFromTodayWithoutTheDatesAwayAndUncutByMeetings() {
+		rules(rule(DayOfWeek.MONDAY, 8, 10, 30), rule(DayOfWeek.TUESDAY, 14, 16, 30));
+		OfficeHoursException away = new OfficeHoursException();
+		away.setStartsOn(LocalDate.of(2026, 11, 10));
+		away.setEndsOn(LocalDate.of(2026, 11, 10));
+		when(exceptionRepository.findByInstructorIdOrderByStartsOnAsc(ACADEMIC)).thenReturn(List.of(away));
+
+		List<OfficeHoursSlotService.Hours> hours = service.hoursAhead(ACADEMIC);
+
+		// Today's 08:00-10:00 has begun but still shows; the 10 November Tuesday is a day away.
+		assertThat(hours.get(0)).isEqualTo(new OfficeHoursSlotService.Hours(
+				Instant.parse("2026-11-09T05:00:00Z"), Instant.parse("2026-11-09T07:00:00Z")));
+		assertThat(hours).extracting(OfficeHoursSlotService.Hours::startsAt)
+				.doesNotContain(Instant.parse("2026-11-10T11:00:00Z"))
+				.contains(Instant.parse("2026-11-17T11:00:00Z"), Instant.parse("2026-12-29T11:00:00Z"))
+				.isSorted()
+				.allSatisfy(startsAt -> assertThat(startsAt).isBefore(Instant.parse("2027-01-05T00:00:00Z")));
+		verifyNoInteractions(meetingRepository, requestRepository);
+	}
+
+	@Test
 	void cutsOneOffHoursIntoDefaultLengthMeetingsUnlessTheDayIsOff() {
 		rules();
 		OfficeHoursSettings settings = settings(0);
@@ -279,5 +301,23 @@ class OfficeHoursSlotServiceTest {
 
 		assertThat(service.openSlots(ACADEMIC)).containsExactly(
 				new OfficeHoursSlotService.Slot(Instant.parse("2026-11-12T11:30:00Z"), 30));
+	}
+
+	@Test
+	void hoursAheadAlsoShowsOneOffHoursUnlessTheyAreOverOrOnADayAway() {
+		rules();
+		// Thursday 12 November 14:00-15:00 and Friday 13 November 10:00-11:00 in Turkey; Friday is a day away.
+		// The one on Sunday 8 November ended before today.
+		when(oneOffRepository.findByInstructorIdOrderByStartsAtAsc(ACADEMIC)).thenReturn(List.of(
+				oneOff("2026-11-08T11:00:00Z", "2026-11-08T12:00:00Z"),
+				oneOff("2026-11-12T11:00:00Z", "2026-11-12T12:00:00Z"),
+				oneOff("2026-11-13T07:00:00Z", "2026-11-13T08:00:00Z")));
+		OfficeHoursException friday = new OfficeHoursException();
+		friday.setStartsOn(LocalDate.of(2026, 11, 13));
+		friday.setEndsOn(LocalDate.of(2026, 11, 13));
+		when(exceptionRepository.findByInstructorIdOrderByStartsOnAsc(ACADEMIC)).thenReturn(List.of(friday));
+
+		assertThat(service.hoursAhead(ACADEMIC)).containsExactly(new OfficeHoursSlotService.Hours(
+				Instant.parse("2026-11-12T11:00:00Z"), Instant.parse("2026-11-12T12:00:00Z")));
 	}
 }

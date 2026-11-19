@@ -17,6 +17,7 @@ import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.server.ResponseStatusException;
 
 import com.dps.teknokent.dto.responses.ApiErrorResponse;
+import com.dps.teknokent.util.RequestPaths;
 import com.dps.teknokent.util.Texts;
 
 import jakarta.servlet.http.HttpServletRequest;
@@ -40,7 +41,7 @@ public class GlobalExceptionHandler {
 				HttpStatus.BAD_REQUEST.value(),
 				HttpStatus.BAD_REQUEST.getReasonPhrase(),
 				exception.getMessage(),
-				request.getRequestURI(),
+				RequestPaths.redacted(request.getRequestURI()),
 				Map.of(),
 				exception.code());
 	}
@@ -53,7 +54,7 @@ public class GlobalExceptionHandler {
 				HttpStatus.CONFLICT.value(),
 				HttpStatus.CONFLICT.getReasonPhrase(),
 				exception.getMessage(),
-				request.getRequestURI(),
+				RequestPaths.redacted(request.getRequestURI()),
 				Map.of(),
 				exception.code());
 	}
@@ -66,7 +67,8 @@ public class GlobalExceptionHandler {
 	@ResponseStatus(HttpStatus.CONFLICT)
 	public ApiErrorResponse handleDataIntegrityViolation(DataIntegrityViolationException exception,
 			HttpServletRequest request) {
-		log.warn("The database refused a write on {} {}: {}", request.getMethod(), request.getRequestURI(),
+		log.warn("The database refused a write on {} {}: {}", request.getMethod(),
+				RequestPaths.redacted(request.getRequestURI()),
 				exception.getMostSpecificCause().getMessage());
 		return response(HttpStatus.CONFLICT, Texts.forRequest("error.dataConflict"), request, Map.of());
 	}
@@ -76,17 +78,18 @@ public class GlobalExceptionHandler {
 	@ResponseStatus(HttpStatus.BAD_GATEWAY)
 	public ApiErrorResponse handleMeetingProvider(MeetingProviderException exception, HttpServletRequest request) {
 		if (exception.getCause() instanceof RestClientResponseException answer) {
-			log.warn("{} on {}: the meeting provider answered {} {}", exception.getMessage(), request.getRequestURI(),
+			log.warn("{} on {}: the meeting provider answered {} {}", exception.getMessage(),
+					RequestPaths.redacted(request.getRequestURI()),
 					answer.getStatusCode(), answer.getResponseBodyAsString());
 		} else {
-			log.warn("{} on {}", exception.getMessage(), request.getRequestURI(), exception);
+			log.warn("{} on {}", exception.getMessage(), RequestPaths.redacted(request.getRequestURI()), exception);
 		}
 		return new ApiErrorResponse(
 				Instant.now(),
 				HttpStatus.BAD_GATEWAY.value(),
 				HttpStatus.BAD_GATEWAY.getReasonPhrase(),
 				Texts.forRequest("error.meetingProviderUnavailable"),
-				request.getRequestURI(),
+				RequestPaths.redacted(request.getRequestURI()),
 				Map.of(),
 				MeetingProviderException.CODE);
 	}
@@ -99,7 +102,7 @@ public class GlobalExceptionHandler {
 				HttpStatus.FORBIDDEN.value(),
 				HttpStatus.FORBIDDEN.getReasonPhrase(),
 				Texts.forRequest("error.aiFeatureDisabled"),
-				request.getRequestURI(),
+				RequestPaths.redacted(request.getRequestURI()),
 				Map.of(),
 				AiFeatureDisabledException.CODE);
 	}
@@ -142,7 +145,7 @@ public class GlobalExceptionHandler {
 				status.value(),
 				status.getReasonPhrase(),
 				message,
-				request.getRequestURI(),
+				RequestPaths.redacted(request.getRequestURI()),
 				fieldErrors);
 	}
 }

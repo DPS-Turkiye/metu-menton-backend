@@ -56,6 +56,10 @@ public class OfficeHoursSlotService {
 	public record Slot(Instant startsAt, int durationMinutes) {
 	}
 
+	/** One weekly range on one date. */
+	public record Hours(Instant startsAt, Instant endsAt) {
+	}
+
 	private final OfficeHoursRuleRepository ruleRepository;
 	private final OfficeHoursExceptionRepository exceptionRepository;
 	private final OfficeHoursMeetingRepository meetingRepository;
@@ -166,6 +170,38 @@ public class OfficeHoursSlotService {
 		}
 		slots.sort(Comparator.comparing(Slot::startsAt));
 		return slots;
+	}
+
+	/**
+	 * The academic's weekly ranges and one-off hours as dated blocks, from the start of today over the same eight
+	 * weeks students can book in, leaving out dates away. Meetings already booked do not cut them: these are the
+	 * hours they keep.
+	 */
+	@Transactional(readOnly = true)
+	public List<Hours> hoursAhead(UUID instructorId) {
+		ZonedDateTime start = clock.instant().atZone(MeetingSlotTimes.APP_ZONE);
+		ZonedDateTime horizon = start.plusWeeks(HORIZON_WEEKS);
+		List<OfficeHoursException> away = exceptionRepository.findByInstructorIdOrderByStartsOnAsc(instructorId);
+		List<Hours> hours = new ArrayList<>();
+		for (OfficeHoursRule rule : ruleRepository.findByInstructorIdOrderByDayOfWeekAscStartTimeAsc(instructorId)) {
+			ZonedDateTime day = start.toLocalDate().atStartOfDay(MeetingSlotTimes.APP_ZONE)
+					.with(TemporalAdjusters.nextOrSame(rule.day()));
+			for (; day.isBefore(horizon); day = day.plusWeeks(1)) {
+				if (!isAway(away, day.toLocalDate())) {
+					hours.add(new Hours(day.with(rule.getStartTime()).toInstant(),
+							day.with(rule.getEndTime()).toInstant()));
+				}
+			}
+		}
+		Instant today = start.toLocalDate().atStartOfDay(MeetingSlotTimes.APP_ZONE).toInstant();
+		for (OfficeHoursOneOff oneOff : oneOffRepository.findByInstructorIdOrderByStartsAtAsc(instructorId)) {
+			if (oneOff.getEndsAt().isAfter(today) && oneOff.getStartsAt().isBefore(horizon.toInstant())
+					&& !isAway(away, oneOff.getStartsAt().atZone(MeetingSlotTimes.APP_ZONE).toLocalDate())) {
+				hours.add(new Hours(oneOff.getStartsAt(), oneOff.getEndsAt()));
+			}
+		}
+		hours.sort(Comparator.comparing(Hours::startsAt));
+		return hours;
 	}
 
 	/**
