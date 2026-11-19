@@ -25,11 +25,13 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import com.dps.teknokent.domain.OfficeHoursRequestStatus;
 import com.dps.teknokent.entity.OfficeHoursException;
 import com.dps.teknokent.entity.OfficeHoursMeeting;
+import com.dps.teknokent.entity.OfficeHoursOneOff;
 import com.dps.teknokent.entity.OfficeHoursRequest;
 import com.dps.teknokent.entity.OfficeHoursRule;
 import com.dps.teknokent.entity.OfficeHoursSettings;
 import com.dps.teknokent.repository.OfficeHoursExceptionRepository;
 import com.dps.teknokent.repository.OfficeHoursMeetingRepository;
+import com.dps.teknokent.repository.OfficeHoursOneOffRepository;
 import com.dps.teknokent.repository.OfficeHoursRequestRepository;
 import com.dps.teknokent.repository.OfficeHoursRuleRepository;
 import com.dps.teknokent.repository.OfficeHoursSettingsRepository;
@@ -51,18 +53,28 @@ class OfficeHoursSlotServiceTest {
 	private OfficeHoursSettingsRepository settingsRepository;
 	@Mock
 	private OfficeHoursRequestRepository requestRepository;
+	@Mock
+	private OfficeHoursOneOffRepository oneOffRepository;
 
 	private OfficeHoursSlotService service;
 
 	@BeforeEach
 	void setUp() {
 		service = new OfficeHoursSlotService(ruleRepository, exceptionRepository, meetingRepository,
-				settingsRepository, requestRepository, Clock.fixed(NOW, ZoneOffset.UTC));
+				settingsRepository, requestRepository, oneOffRepository, Clock.fixed(NOW, ZoneOffset.UTC));
 		lenient().when(settingsRepository.findById(ACADEMIC)).thenReturn(Optional.of(settings(0)));
 		lenient().when(exceptionRepository.findByInstructorIdOrderByStartsOnAsc(ACADEMIC)).thenReturn(List.of());
 		lenient().when(meetingRepository.findByInstructorIdAndCancelledAtIsNullAndScheduledAtAfter(any(), any()))
 				.thenReturn(List.of());
 		lenient().when(requestRepository.findByInstructorIdAndStatusIn(eq(ACADEMIC), any())).thenReturn(List.of());
+		lenient().when(oneOffRepository.findByInstructorIdOrderByStartsAtAsc(ACADEMIC)).thenReturn(List.of());
+	}
+
+	private static OfficeHoursOneOff oneOff(String startsAt, String endsAt) {
+		OfficeHoursOneOff oneOff = new OfficeHoursOneOff();
+		oneOff.setStartsAt(Instant.parse(startsAt));
+		oneOff.setEndsAt(Instant.parse(endsAt));
+		return oneOff;
 	}
 
 	private static OfficeHoursRequest open(UUID id, OfficeHoursRequestStatus status, String preferred,
@@ -215,5 +227,57 @@ class OfficeHoursSlotServiceTest {
 
 		assertThat(service.openSlotAt(ACADEMIC, Instant.parse("2026-11-10T11:00:00Z")))
 				.map(OfficeHoursSlotService.Slot::durationMinutes).contains(45);
+	}
+
+	@Test
+	void cutsOneOffHoursIntoDefaultLengthMeetingsUnlessTheDayIsOff() {
+		rules();
+		OfficeHoursSettings settings = settings(0);
+		settings.setDefaultMeetingDurationMinutes(30);
+		when(settingsRepository.findById(ACADEMIC)).thenReturn(Optional.of(settings));
+		// Thursday 12 November 14:00–15:00 and Friday 13 November 10:00–11:00 in Turkey; Friday is a day off.
+		when(oneOffRepository.findByInstructorIdOrderByStartsAtAsc(ACADEMIC)).thenReturn(List.of(
+				oneOff("2026-11-12T11:00:00Z", "2026-11-12T12:00:00Z"),
+				oneOff("2026-11-13T07:00:00Z", "2026-11-13T08:00:00Z")));
+		OfficeHoursException friday = new OfficeHoursException();
+		friday.setStartsOn(LocalDate.of(2026, 11, 13));
+		friday.setEndsOn(LocalDate.of(2026, 11, 13));
+		when(exceptionRepository.findByInstructorIdOrderByStartsOnAsc(ACADEMIC)).thenReturn(List.of(friday));
+
+		assertThat(service.openSlots(ACADEMIC)).containsExactly(
+				new OfficeHoursSlotService.Slot(Instant.parse("2026-11-12T11:00:00Z"), 30),
+				new OfficeHoursSlotService.Slot(Instant.parse("2026-11-12T11:30:00Z"), 30));
+	}
+
+	@Test
+	void aOneOffLaidOverAWeeklyRangeDoesNotOfferTheSameStartTwice() {
+		rules(rule(DayOfWeek.TUESDAY, 14, 15, 30));
+		OfficeHoursSettings settings = settings(0);
+		settings.setDefaultMeetingDurationMinutes(30);
+		when(settingsRepository.findById(ACADEMIC)).thenReturn(Optional.of(settings));
+		// Tuesday 10 November 14:00–15:30 in Turkey: 14:00 and 14:30 come from the weekly range already.
+		when(oneOffRepository.findByInstructorIdOrderByStartsAtAsc(ACADEMIC))
+				.thenReturn(List.of(oneOff("2026-11-10T11:00:00Z", "2026-11-10T12:30:00Z")));
+
+		assertThat(service.openSlots(ACADEMIC)).extracting(OfficeHoursSlotService.Slot::startsAt)
+				.filteredOn(startsAt -> startsAt.isBefore(Instant.parse("2026-11-11T00:00:00Z")))
+				.containsExactly(Instant.parse("2026-11-10T11:00:00Z"), Instant.parse("2026-11-10T11:30:00Z"),
+						Instant.parse("2026-11-10T12:00:00Z"));
+	}
+
+	@Test
+	void aOneOffTimeAnOpenRequestHoldsIsNotOffered() {
+		rules();
+		OfficeHoursSettings settings = settings(0);
+		settings.setDefaultMeetingDurationMinutes(30);
+		when(settingsRepository.findById(ACADEMIC)).thenReturn(Optional.of(settings));
+		// Thursday 12 November 14:00–15:00 in Turkey; a pending request asks for 14:00.
+		when(oneOffRepository.findByInstructorIdOrderByStartsAtAsc(ACADEMIC))
+				.thenReturn(List.of(oneOff("2026-11-12T11:00:00Z", "2026-11-12T12:00:00Z")));
+		when(requestRepository.findByInstructorIdAndStatusIn(eq(ACADEMIC), any())).thenReturn(List.of(
+				open(UUID.randomUUID(), OfficeHoursRequestStatus.PENDING, "2026-11-12T14:00", null)));
+
+		assertThat(service.openSlots(ACADEMIC)).containsExactly(
+				new OfficeHoursSlotService.Slot(Instant.parse("2026-11-12T11:30:00Z"), 30));
 	}
 }

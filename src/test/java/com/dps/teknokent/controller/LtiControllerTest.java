@@ -163,7 +163,7 @@ class LtiControllerTest {
 		OfficeHoursAvailabilityResponse saved = new OfficeHoursAvailabilityResponse(List.of(
 				new OfficeHoursAvailabilityResponse.Rule(UUID.randomUUID(), DayOfWeek.TUESDAY, LocalTime.of(14, 0),
 						LocalTime.of(16, 0), 30)),
-				List.of(), null, 45, 15);
+				List.of(), null, 45, 15, List.of());
 		when(availabilityService.find(USER_ID)).thenReturn(saved);
 		when(availabilityService.update(eq(USER_ID), any())).thenReturn(saved);
 
