@@ -237,6 +237,9 @@ public class TrainingService {
 	public StudentTrainingResponse prismCompleted(UUID actorId) {
 		Context context = context(domainLookupService.requireUser(actorId));
 		Program program = context.program();
+		if (context.state() == TrainingState.PRISM_PENDING) {
+			return studentView(context);
+		}
 		if (program == null
 				|| (context.state() != TrainingState.PRISM_TODO && context.state() != TrainingState.PRISM_RETAKE)) {
 			throw new InvalidRequestException(Texts.forRequest("error.trainingNotOpen"));

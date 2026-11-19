@@ -419,9 +419,9 @@ class TrainingServiceTest {
 	}
 
 	@Test
-	void sayingPrismIsFinishedIsRefusedWhileWaitingOrOutsideAProgram() {
+	void sayingPrismIsFinishedAgainWhileWaitingChangesNothingAndOutsideAProgramIsRefused() {
 		AppUser waiting = onPrism(TrainingState.PRISM_PENDING);
-		assertThatThrownBy(() -> service.prismCompleted(waiting.getId())).isInstanceOf(InvalidRequestException.class);
+		assertThat(service.prismCompleted(waiting.getId()).state()).isEqualTo(TrainingState.PRISM_PENDING);
 
 		waiting.setProgramId(null);
 		assertThat(service.forStudent(waiting.getId()).state()).isEqualTo(TrainingState.NOT_AVAILABLE);

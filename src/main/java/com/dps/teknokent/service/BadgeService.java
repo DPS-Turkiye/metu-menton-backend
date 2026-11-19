@@ -470,6 +470,15 @@ public class BadgeService {
 		return activeGate(userId, programId) != null;
 	}
 
+	/** Whether the person's latest gate badge in the program was taken back (the student's BLOCKED). */
+	boolean hasRevokedGate(UUID userId, UUID programId) {
+		return awards.findByUserIdOrderByAwardedAtDesc(userId).stream()
+				.filter(award -> award.getBadgeCode() == GATE && programId.equals(award.getProgramId()))
+				.findFirst()
+				.filter(award -> award.getStatus() == BadgeStatus.REVOKED)
+				.isPresent();
+	}
+
 	private static boolean isStudentOf(AppUser person, Program program) {
 		return person.has(UserRole.MENTEE) && program.getId().equals(person.getProgramId());
 	}

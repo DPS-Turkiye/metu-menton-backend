@@ -742,6 +742,42 @@ class UserDeletionIntegrationTest {
 	}
 
 	@Test
+	void aStudentsPrismScoreGoesWithThemAndTheirDecisionsKeepNoName() throws Exception {
+		AppUser target = user(UserRole.MENTEE, "Mert Demir", null);
+		AppUser other = user(UserRole.MENTEE, "Ayşe Yılmaz", null);
+		UUID program = UUID.randomUUID();
+		com.dps.teknokent.entity.PrismTrainingReview own = new com.dps.teknokent.entity.PrismTrainingReview();
+		own.setId(UUID.randomUUID());
+		own.setProgramId(program);
+		own.setUserId(target.getId());
+		own.setScore("62/100");
+		entityManager.persist(own);
+		com.dps.teknokent.entity.PrismTrainingReview decided = new com.dps.teknokent.entity.PrismTrainingReview();
+		decided.setId(UUID.randomUUID());
+		decided.setProgramId(program);
+		decided.setUserId(other.getId());
+		decided.setDecision(com.dps.teknokent.domain.PrismDecision.RETAKE);
+		decided.setDecidedAt(Instant.now());
+		decided.setDecidedBy(target.getId());
+		entityManager.persist(decided);
+		com.dps.teknokent.entity.PrismTrainingLink link = new com.dps.teknokent.entity.PrismTrainingLink();
+		link.setProgramId(program);
+		link.setUrl("https://prism.example.test/egitim");
+		link.setUpdatedAt(Instant.now());
+		link.setUpdatedBy(target.getId());
+		entityManager.persist(link);
+		flushAndClear();
+
+		delete(admin, target.getId(), target.getEmail()).andExpect(status().isOk());
+
+		assertThat(entityManager.find(com.dps.teknokent.entity.PrismTrainingReview.class, own.getId())).isNull();
+		assertThat(entityManager.find(com.dps.teknokent.entity.PrismTrainingReview.class, decided.getId())
+				.getDecidedBy()).isNull();
+		assertThat(entityManager.find(com.dps.teknokent.entity.PrismTrainingLink.class, program).getUpdatedBy())
+				.isNull();
+	}
+
+	@Test
 	void aPeerMentorsEvidenceGoesWithThemFilesAndLinks() throws Exception {
 		AppUser target = user(UserRole.MENTEE, "Mert Demir", null);
 		StoredDocument transcript = document(target.getId(), null, DocumentKind.PEER_EVIDENCE, null);

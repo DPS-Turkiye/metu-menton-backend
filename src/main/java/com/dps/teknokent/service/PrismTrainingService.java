@@ -139,8 +139,10 @@ public class PrismTrainingService {
 	/**
 	 * Approve or "take the test again" for every address on the list, each on its own: an address the program does
 	 * not have is NOT_FOUND (whether or not it has an account elsewhere); someone already holding the badge is
-	 * ALREADY_MENTOR and left as they are; an unapproved account, the coordinator themself, or someone the
-	 * interns-only rule leaves out is NOT_ELIGIBLE. A repeated address counts once.
+	 * ALREADY_MENTOR and left as they are; an unapproved account, the coordinator themself, someone the interns-only
+	 * rule leaves out, or someone whose badge here was taken back is NOT_ELIGIBLE (giving that back stays a deliberate
+	 * "Rozet ver", not a line in a pasted list). A repeated address counts once. An address without a score keeps the
+	 * score recorded before.
 	 */
 	@Transactional
 	public List<PrismDecisionResultResponse> decide(UUID actorId, UUID programId, PrismDecision decision,
@@ -172,22 +174,29 @@ public class PrismTrainingService {
 			return result(email, PrismDecisionOutcome.ALREADY_MENTOR, person);
 		}
 		if (person.getId().equals(actor.getId()) || person.getStatus() != UserAccountStatus.APPROVED
-				|| !interns.test(person.getId())) {
+				|| !interns.test(person.getId()) || badgeService.hasRevokedGate(person.getId(), program.getId())) {
 			return result(email, PrismDecisionOutcome.NOT_ELIGIBLE, person);
 		}
 		PrismTrainingReview review = reviewOf(program.getId(), person.getId());
+		// Asked to retake already, and not back since: the decision stands and they are not told twice.
+		boolean alreadyToldToRetake = decision == PrismDecision.RETAKE
+				&& stateOf(review) == TrainingState.PRISM_RETAKE;
 		review.setDecision(decision);
 		review.setDecidedAt(Instant.now());
 		review.setDecidedBy(actor.getId());
-		review.setScore(score);
+		if (score != null) {
+			review.setScore(score);
+		}
 		reviews.save(review);
 		if (decision == PrismDecision.APPROVED) {
 			badgeService.award(person, BadgeService.GATE, program, BadgeService.sourceOf(actor), actor.getId());
 			return result(email, PrismDecisionOutcome.APPROVED, person);
 		}
-		notificationService.create(person, NotificationCategory.BADGE,
-				Texts.get(person, "notification.prismRetake.title"),
-				Texts.get(person, "notification.prismRetake.body", program.getName()), TRAINING_PAGE);
+		if (!alreadyToldToRetake) {
+			notificationService.create(person, NotificationCategory.BADGE,
+					Texts.get(person, "notification.prismRetake.title"),
+					Texts.get(person, "notification.prismRetake.body", program.getName()), TRAINING_PAGE);
+		}
 		return result(email, PrismDecisionOutcome.RETAKE, person);
 	}
 

@@ -319,6 +319,39 @@ class PrismTrainingServiceTest {
 	}
 
 	@Test
+	void someoneWhoseBadgeWasTakenBackIsNotReapprovedFromAList() {
+		AppUser revoked = member("geri@example.test");
+		interns = Set.of(revoked.getId());
+		when(badgeService.hasRevokedGate(revoked.getId(), iskur.getId())).thenReturn(true);
+
+		assertThat(decide(PrismDecision.APPROVED, new PrismDecisionRequest.Entry("geri@example.test", "90")))
+				.singleElement()
+				.satisfies(result -> assertThat(result.outcome()).isEqualTo(PrismDecisionOutcome.NOT_ELIGIBLE));
+		verify(badgeService, never()).award(any(), any(), any(), any(), any());
+		verify(reviews, never()).save(any());
+	}
+
+	@Test
+	void aSecondRetakeIsNotToldTwiceAndAnAddressWithoutAScoreKeepsTheOneBefore() {
+		AppUser intern = member("stajyer@example.test");
+		interns = Set.of(intern.getId());
+
+		decide(PrismDecision.RETAKE, new PrismDecisionRequest.Entry("stajyer@example.test", "41"));
+		decide(PrismDecision.RETAKE, new PrismDecisionRequest.Entry("stajyer@example.test", null));
+
+		verify(notificationService, org.mockito.Mockito.times(1)).create(eq(intern), any(), anyString(), anyString(),
+				anyString());
+		assertThat(stored.get(intern.getId()).getScore()).isEqualTo("41");
+
+		service.markCompleted(intern, iskur);
+		stored.get(intern.getId()).setCompletedAt(Instant.now().plusSeconds(60));
+		decide(PrismDecision.RETAKE, new PrismDecisionRequest.Entry("stajyer@example.test", "55"));
+		verify(notificationService, org.mockito.Mockito.times(2)).create(eq(intern), any(), anyString(), anyString(),
+				anyString());
+		assertThat(stored.get(intern.getId()).getScore()).isEqualTo("55");
+	}
+
+	@Test
 	void anAddressTheProgramDoesNotHaveIsNotFoundEvenWithAnAccountElsewhere() {
 		AppUser elsewhere = person("baska@example.test", UserRole.MENTEE);
 		when(users.findByEmailIgnoreCase("baska@example.test")).thenReturn(Optional.of(elsewhere));

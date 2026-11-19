@@ -230,6 +230,21 @@ class BadgeServiceTest {
 	}
 
 	@Test
+	void aRevokedGateCountsOnlyWhenItIsTheLatestInThatProgram() {
+		UserBadge revoked = active(student, iskur);
+		revoked.setStatus(BadgeStatus.REVOKED);
+		Program other = program("Başka program", ProgramType.PEER_MENTORING);
+		when(awards.findByUserIdOrderByAwardedAtDesc(student.getId())).thenReturn(List.of(active(student, other),
+				revoked));
+		assertThat(service.hasRevokedGate(student.getId(), iskur.getId())).isTrue();
+		assertThat(service.hasRevokedGate(student.getId(), other.getId())).isFalse();
+
+		when(awards.findByUserIdOrderByAwardedAtDesc(student.getId())).thenReturn(List.of(active(student, iskur),
+				revoked));
+		assertThat(service.hasRevokedGate(student.getId(), iskur.getId())).isFalse();
+	}
+
+	@Test
 	void theRosterShowsStaffEachPersonsPrismTrainingAndScore() {
 		when(users.findByProgramIdAndPermissionAndStatusOrderByCreatedAtAsc(iskur.getId(), UserRole.MENTEE,
 				UserAccountStatus.APPROVED)).thenReturn(List.of(student));
