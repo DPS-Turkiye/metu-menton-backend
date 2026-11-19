@@ -156,6 +156,14 @@ app:
     # ROLE:email:firebaseUid,... (ADMIN or COORDINATOR): staff accounts created at startup when missing (StaffBootstrap).
     staff: ${APP_BOOTSTRAP_STAFF:}
   mail:
+    # ses (the default, and what an empty value means), smtp, log or off. docs/configuration.md#e-mail
+    transport: ${APP_MAIL_TRANSPORT:ses}
+    smtp:
+      host: ${SMTP_HOST:}
+      port: ${SMTP_PORT:587}
+      username: ${SMTP_USERNAME:}
+      password: ${SMTP_PASSWORD:}
+      starttls: ${SMTP_STARTTLS:required}
     region: ${AWS_REGION:eu-central-1}
     access-key-id: ${AWS_ACCESS_KEY_ID:}
     secret-access-key: ${AWS_SECRET_ACCESS_KEY:}

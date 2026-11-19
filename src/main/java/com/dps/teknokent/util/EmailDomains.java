@@ -36,6 +36,16 @@ public final class EmailDomains {
 		return raw == null ? "" : raw.trim().toLowerCase(Locale.ROOT);
 	}
 
+	/** The part after the "@", for a log line that must not hold the address; "?" when there is none. */
+	public static String domainOf(@Nullable String email) {
+		if (email == null) {
+			return "?";
+		}
+		int at = email.lastIndexOf('@');
+		String domain = at < 0 ? "" : email.substring(at + 1).trim().toLowerCase(Locale.ROOT);
+		return domain.isEmpty() ? "?" : domain;
+	}
+
 	public static boolean isEmail(String normalized) {
 		return EMAIL.matcher(normalized).matches();
 	}

@@ -22,6 +22,7 @@
 		<archunit.version>1.5.1</archunit.version>
 		<awssdk.version>2.59.1</awssdk.version>
 		<firebase-admin.version>9.12.0</firebase-admin.version>
+		<greenmail.version>2.1.15</greenmail.version>
 		<pdfbox.version>3.0.8</pdfbox.version>
 		<springdoc.version>3.2.0</springdoc.version>
 
@@ -125,6 +126,11 @@
 			<groupId>org.springframework.security</groupId>
 			<artifactId>spring-security-oauth2-jose</artifactId>
 		</dependency>
+		<!-- JavaMailSender for APP_MAIL_TRANSPORT=smtp. No spring.mail.* is set, so Boot configures no sender of its own. -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-mail</artifactId>
+		</dependency>
 		<dependency>
 			<groupId>com.google.firebase</groupId>
 			<artifactId>firebase-admin</artifactId>
@@ -165,6 +171,23 @@
 			<groupId>com.h2database</groupId>
 			<artifactId>h2</artifactId>
 			<scope>test</scope>
+		</dependency>
+		<!-- An in-memory SMTP server for the SMTP transport's tests. Its JUnit 4 rule and its own copy of the mail classes stay out. -->
+		<dependency>
+			<groupId>com.icegreen</groupId>
+			<artifactId>greenmail</artifactId>
+			<version>${greenmail.version}</version>
+			<scope>test</scope>
+			<exclusions>
+				<exclusion>
+					<groupId>junit</groupId>
+					<artifactId>junit</artifactId>
+				</exclusion>
+				<exclusion>
+					<groupId>org.eclipse.angus</groupId>
+					<artifactId>jakarta.mail</artifactId>
+				</exclusion>
+			</exclusions>
 		</dependency>
 		<!-- Checks which layer may use which (ArchitectureTest). -->
 		<dependency>

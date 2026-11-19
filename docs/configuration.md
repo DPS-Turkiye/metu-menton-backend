@@ -25,12 +25,52 @@ Never commit `.env`: it holds real keys.
 | `DATABASE_HOST`, `DATABASE_PORT`, `DATABASE_NAME`, `DATABASE_USERNAME`, `DATABASE_PASSWORD` | PostgreSQL. |
 | `DATABASE_POOL_SIZE` | Connections per instance; keep (instances × this) under the database's limit. |
 | `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD` | Redis (no password in compose; set one in production). |
-| `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | SES, and S3 unless the `AWS_S3_*` ones below are set. |
+| `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | SES (when it is the mail transport), and S3 unless the `AWS_S3_*` ones below are set. |
 | `AWS_S3_BUCKET` | Where files are stored; empty leaves storage unconfigured. |
 | `AWS_S3_ENDPOINT` | An S3-compatible store (MinIO) instead of AWS S3; path-style, and needs its own keys. `APP_EDITION=ODTU` refuses to start with a bucket and no such endpoint. |
 | `AWS_S3_PUBLIC_ENDPOINT` | The address presigned links are signed for, when the browser cannot reach `AWS_S3_ENDPOINT`; empty uses that. |
 | `AWS_S3_REGION`, `AWS_S3_ACCESS_KEY_ID`, `AWS_S3_SECRET_ACCESS_KEY` | The store's own region and keys. Empty falls back to `AWS_REGION`, and, only with no endpoint, to the `AWS_*` keys: an S3-compatible store never gets the AWS ones. |
-| `MAIL_FROM` | SES sender; empty sends no e-mail. |
+
+## E-mail
+
+`MailService` sends every e-mail (Office Hours steps, reminders, invitations, password resets) through one
+transport, chosen at start-up. A failed send is logged and never fails the request that caused it.
+
+| Variable | Purpose |
+|---|---|
+| `APP_MAIL_TRANSPORT` | `ses` (the default; empty means `ses` too), `smtp`, `log` or `off`. Anything else stops the start-up. |
+| `MAIL_FROM` | The sender address. With `ses`, empty sends no e-mail. With `smtp` it is required. |
+| `SMTP_HOST` | The mail server, a host name or IP address alone. Required with `smtp`. |
+| `SMTP_PORT` | `587` when empty. |
+| `SMTP_USERNAME`, `SMTP_PASSWORD` | The login; set both, or neither for a server that accepts this machine without one. A login needs `SMTP_STARTTLS=required`. The password is never logged. |
+| `SMTP_STARTTLS` | `required` (the default): encrypted, or not sent. `optional`: encrypted when the server offers it. `off`: plain. |
+
+- **`ses`** is Amazon SES with the `AWS_*` region and keys above, exactly as before the setting existed.
+- **`smtp`** is for a deployment with its own mail server (ODTÜ). A missing `SMTP_HOST` or `MAIL_FROM`, half a
+  login, or a bad port or `SMTP_STARTTLS` value stops the start-up with a message naming the variable. So does a
+  login with `optional` or `off`, because it could cross the network unencrypted; without a login those two only
+  log a warning. Connecting, each answer from the server and each write time out after 10 seconds. The server's
+  certificate must match `SMTP_HOST` and be trusted by the JVM. A failure is logged with the recipient's domain and
+  the server's reply code, never the address. Port 465 (TLS from the first byte, without STARTTLS) is not
+  supported.
+- **`log`** sends nothing and logs each mail's subject and the recipient's domain, never the text or the full
+  address. For development; it works without `MAIL_FROM`.
+- **`off`** sends nothing and says so once at start-up. The app behaves as it does with an empty `MAIL_FROM`.
+
+### What to ask the mail server's owner (ODTÜ)
+
+1. **Host and port** of the SMTP server this machine may use.
+2. **TLS:** does it offer STARTTLS (port 587 or 25), and is its certificate issued for that host name by a public
+   CA? If it only offers TLS from the first byte (port 465), say so: that needs a small change here.
+3. **Login:** a username and password for Menton, or is this server's IP address allowed without one? If by
+   address: which address must we send from?
+4. **The allowed sender:** which From address may Menton use (such as `noreply@…metu.edu.tr`), and may it carry a
+   display name ("ODTÜ Menton")? Where do replies and bounces to it go?
+5. **Sending limits:** messages per minute, hour and day, and recipients per message. Menton sends one recipient
+   per message, two at a time.
+6. **SPF and DKIM** for the sender's domain: is this mail server already in the domain's SPF record, and does it
+   sign with DKIM? Is there a DMARC policy? Without these, mail to addresses outside ODTÜ lands in spam.
+7. **Network:** is the mail server reachable from Menton's server (firewall rule for the port)?
 
 ## Sign-in
 

@@ -1,6 +1,5 @@
 package com.dps.teknokent.service;
 
-import java.nio.charset.StandardCharsets;
 import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
 
@@ -11,30 +10,22 @@ import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import lombok.extern.slf4j.Slf4j;
-import software.amazon.awssdk.core.exception.SdkException;
-import software.amazon.awssdk.services.sesv2.SesV2Client;
-import software.amazon.awssdk.services.sesv2.model.Body;
-import software.amazon.awssdk.services.sesv2.model.Content;
-import software.amazon.awssdk.services.sesv2.model.Destination;
-import software.amazon.awssdk.services.sesv2.model.EmailContent;
-import software.amazon.awssdk.services.sesv2.model.Message;
-import software.amazon.awssdk.services.sesv2.model.SendEmailRequest;
 
 @Slf4j
 @Service
 public class MailService {
 
-	private final SesV2Client sesClient;
+	private final MailTransport transport;
 	private final String fromAddress;
 	private final String publicUrl;
 	private final Executor afterCommitExecutor;
 
 	public MailService(
-			SesV2Client sesClient,
+			MailTransport transport,
 			@Value("${app.mail.from:}") String fromAddress,
 			@Value("${app.mail.public-url:https://menton.com.tr}") String publicUrl,
 			@Qualifier("mailExecutor") Executor afterCommitExecutor) {
-		this.sesClient = sesClient;
+		this.transport = transport;
 		this.afterCommitExecutor = afterCommitExecutor;
 		this.fromAddress = fromAddress.trim();
 		this.publicUrl = publicUrl.trim().replaceAll("/+$", "");
@@ -45,16 +36,16 @@ public class MailService {
 	}
 
 	public boolean isConfigured() {
-		return !fromAddress.isEmpty();
+		return transport.readyWith(fromAddress);
 	}
 
-	/** Sends right away and says whether SES accepted it; a bounce reported later is not seen here. */
+	/** Sends right away and says whether the mail was accepted; a bounce reported later is not seen here. */
 	public boolean sendNow(String to, String subject, String body) {
 		return isConfigured() && to != null && !to.isBlank() && send(to, subject, body);
 	}
 
 	public void sendAfterCommit(String to, String subject, String body) {
-		if (fromAddress.isEmpty() || to == null || to.isBlank()) {
+		if (!isConfigured() || to == null || to.isBlank()) {
 			return;
 		}
 		if (!TransactionSynchronizationManager.isSynchronizationActive()) {
@@ -65,7 +56,7 @@ public class MailService {
 			@Override
 			public void afterCommit() {
 				// afterCommit runs before the transaction hands its connection back, so sending here would hold
-				// that connection for the whole SES round trip.
+				// that connection for the whole round trip to the mail server.
 				try {
 					afterCommitExecutor.execute(() -> {
 						try {
@@ -83,25 +74,6 @@ public class MailService {
 	}
 
 	private boolean send(String to, String subject, String body) {
-		try {
-			sesClient.sendEmail(SendEmailRequest.builder()
-					.fromEmailAddress(fromAddress)
-					.destination(Destination.builder().toAddresses(to.trim()).build())
-					.content(EmailContent.builder()
-							.simple(Message.builder()
-									.subject(utf8(subject))
-									.body(Body.builder().text(utf8(body)).build())
-									.build())
-							.build())
-					.build());
-			return true;
-		} catch (SdkException e) {
-			log.warn("Email to {} could not be sent: {}", to, e.getMessage());
-			return false;
-		}
-	}
-
-	private static Content utf8(String value) {
-		return Content.builder().data(value).charset(StandardCharsets.UTF_8.name()).build();
+		return transport.send(fromAddress, to, subject, body);
 	}
 }
