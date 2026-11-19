@@ -19,8 +19,8 @@ public class MailConfig {
 	@Bean
 	SesV2Client sesV2Client(
 			@Value("${app.mail.region:eu-central-1}") String region,
-			@Value("${app.s3.access-key-id:}") String accessKeyId,
-			@Value("${app.s3.secret-access-key:}") String secretAccessKey) {
+			@Value("${app.mail.access-key-id:}") String accessKeyId,
+			@Value("${app.mail.secret-access-key:}") String secretAccessKey) {
 		// The SDK default has no cap on a whole call (retries included); an email is small, 10 s is plenty.
 		var builder = SesV2Client.builder()
 				.region(Region.of(region))

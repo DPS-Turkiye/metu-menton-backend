@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -13,6 +14,7 @@ import java.time.DayOfWeek;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
@@ -31,14 +33,17 @@ import org.springframework.web.server.ResponseStatusException;
 import com.dps.teknokent.domain.OfficeHoursRole;
 import com.dps.teknokent.dto.requests.CreateMentorAvailabilityRuleRequest;
 import com.dps.teknokent.dto.requests.MentorAvailabilityExceptionRequest;
+import com.dps.teknokent.dto.requests.OfficeHoursOneOffRequest;
 import com.dps.teknokent.dto.requests.UpdateOfficeHoursAvailabilityRequest;
 import com.dps.teknokent.dto.responses.OfficeHoursAvailabilityResponse;
 import com.dps.teknokent.entity.OfficeHoursException;
+import com.dps.teknokent.entity.OfficeHoursOneOff;
 import com.dps.teknokent.entity.OfficeHoursRule;
 import com.dps.teknokent.entity.OfficeHoursSettings;
 import com.dps.teknokent.exception.InvalidRequestException;
 import com.dps.teknokent.repository.OfficeHoursEnrollmentRepository;
 import com.dps.teknokent.repository.OfficeHoursExceptionRepository;
+import com.dps.teknokent.repository.OfficeHoursOneOffRepository;
 import com.dps.teknokent.repository.OfficeHoursRuleRepository;
 import com.dps.teknokent.repository.OfficeHoursSettingsRepository;
 
@@ -56,13 +61,15 @@ class OfficeHoursAvailabilityServiceTest {
 	private OfficeHoursRuleRepository ruleRepository;
 	@Mock
 	private OfficeHoursExceptionRepository exceptionRepository;
+	@Mock
+	private OfficeHoursOneOffRepository oneOffRepository;
 
 	private OfficeHoursAvailabilityService service;
 
 	@BeforeEach
 	void setUp() {
 		service = new OfficeHoursAvailabilityService(enrollmentRepository, settingsRepository, ruleRepository,
-				exceptionRepository, Clock.fixed(NOW, ZoneOffset.UTC));
+				exceptionRepository, oneOffRepository, Clock.fixed(NOW, ZoneOffset.UTC));
 	}
 
 	private void instructorSomewhere(boolean instructor) {
@@ -75,7 +82,11 @@ class OfficeHoursAvailabilityServiceTest {
 
 	private static UpdateOfficeHoursAvailabilityRequest request(List<CreateMentorAvailabilityRuleRequest> rules,
 			List<MentorAvailabilityExceptionRequest> exceptions) {
-		return new UpdateOfficeHoursAvailabilityRequest(rules, exceptions, 5, 30, 10);
+		return new UpdateOfficeHoursAvailabilityRequest(rules, exceptions, 5, 30, 10, null);
+	}
+
+	private static OfficeHoursOneOffRequest oneOff(String startsAt, String endsAt) {
+		return new OfficeHoursOneOffRequest(OffsetDateTime.parse(startsAt), OffsetDateTime.parse(endsAt), " B-204 ");
 	}
 
 	@Test
@@ -176,5 +187,49 @@ class OfficeHoursAvailabilityServiceTest {
 				.isInstanceOf(InvalidRequestException.class);
 		assertThatThrownBy(() -> service.update(INSTRUCTOR, request(List.of(), List.of(day, day))))
 				.isInstanceOf(InvalidRequestException.class);
+	}
+
+	@Test
+	void savesOneOffHoursAndLeavesThemAloneWhenAClientSendsNone() {
+		instructorSomewhere(true);
+		when(settingsRepository.findById(any())).thenReturn(Optional.empty());
+		UpdateOfficeHoursAvailabilityRequest withOneOff = new UpdateOfficeHoursAvailabilityRequest(List.of(),
+				List.of(), 5, 30, 10, List.of(oneOff("2026-11-12T14:00:00+03:00", "2026-11-12T15:00:00+03:00")));
+
+		service.update(INSTRUCTOR, withOneOff);
+
+		ArgumentCaptor<List<OfficeHoursOneOff>> saved = ArgumentCaptor.captor();
+		verify(oneOffRepository).saveAll(saved.capture());
+		assertThat(saved.getValue()).singleElement().satisfies(entity -> {
+			assertThat(entity.getStartsAt()).isEqualTo(Instant.parse("2026-11-12T11:00:00Z"));
+			assertThat(entity.getPlace()).isEqualTo("B-204");
+		});
+
+		service.update(INSTRUCTOR, request(List.of(), List.of()));
+		verify(oneOffRepository, times(1)).saveAll(any());
+		verify(oneOffRepository, times(1)).deleteAll(any());
+	}
+
+	@Test
+	void refusesOneOffHoursThatAreTooShortOverlapFallOnADayOffOrRunPastMidnight() {
+		instructorSomewhere(true);
+		MentorAvailabilityExceptionRequest thursdayOff = new MentorAvailabilityExceptionRequest(
+				LocalDate.of(2026, 11, 12), LocalDate.of(2026, 11, 12), null);
+
+		assertThatThrownBy(() -> service.update(INSTRUCTOR, new UpdateOfficeHoursAvailabilityRequest(List.of(),
+				List.of(), 5, 30, 10, List.of(oneOff("2026-11-12T14:00:00+03:00", "2026-11-12T14:10:00+03:00")))))
+				.isInstanceOf(InvalidRequestException.class);
+		assertThatThrownBy(() -> service.update(INSTRUCTOR, new UpdateOfficeHoursAvailabilityRequest(List.of(),
+				List.of(), 5, 30, 10, List.of(oneOff("2026-11-12T14:00:00+03:00", "2026-11-12T15:00:00+03:00"),
+						oneOff("2026-11-12T14:30:00+03:00", "2026-11-12T16:00:00+03:00")))))
+				.isInstanceOf(InvalidRequestException.class);
+		assertThatThrownBy(() -> service.update(INSTRUCTOR, new UpdateOfficeHoursAvailabilityRequest(List.of(),
+				List.of(thursdayOff), 5, 30, 10,
+				List.of(oneOff("2026-11-12T14:00:00+03:00", "2026-11-12T15:00:00+03:00")))))
+				.isInstanceOf(InvalidRequestException.class);
+		assertThatThrownBy(() -> service.update(INSTRUCTOR, new UpdateOfficeHoursAvailabilityRequest(List.of(),
+				List.of(), 5, 30, 10, List.of(oneOff("2026-11-12T23:00:00+03:00", "2026-11-13T01:00:00+03:00")))))
+				.isInstanceOf(InvalidRequestException.class);
+		verify(oneOffRepository, never()).saveAll(any());
 	}
 }

@@ -187,7 +187,7 @@ class OfficeHoursMeServiceTest {
 		when(userRepository.findByAppUserId(ACCOUNT)).thenReturn(Optional.empty())
 				.thenReturn(Optional.of(person(PERSON, ACCOUNT, "Elif Şahin")));
 		UpdateOfficeHoursAvailabilityRequest hours = new UpdateOfficeHoursAvailabilityRequest(List.of(), List.of(),
-				null, 30, 10);
+				null, 30, 10, null);
 
 		service.saveAvailability(ACCOUNT, hours);
 

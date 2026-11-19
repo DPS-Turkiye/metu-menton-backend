@@ -67,8 +67,12 @@ CSV and XLSX exports escape cells that a spreadsheet would run as formulas.
 ## Secrets
 
 - `.env` holds real credentials and is git-ignored; `.env.example` is the template with safe local defaults.
-- A released image (`APP_VERSION` set by the deploy workflow) refuses to start while `SECURITY_PASSWORD`,
-  `DATABASE_PASSWORD` or `REALTIME_TOKEN_SECRET` is still a placeholder (`PlaceholderSecretCheck`).
+- The backend refuses to start while `SECURITY_PASSWORD`, `DATABASE_PASSWORD` or `REALTIME_TOKEN_SECRET` is still
+  a placeholder, or while `SECURITY_PASSWORD` or `REALTIME_TOKEN_SECRET` is blank (`PlaceholderSecretCheck`). Only an
+  unreleased build (`APP_VERSION` unset or `local`) whose only profile is `dev` may keep them; a released image
+  (`APP_VERSION` set to the tag) refuses even then.
+- Once LTI is configured, the backend refuses to start without `LTI_TOOL_PRIVATE_KEY` unless `dev` is its only profile: a
+  throwaway key would change on every restart and break the launches Moodle signs (`LtiToolKeys`).
 - Swagger is off unless `SWAGGER_ENABLED=true`; keep it off in production, where the API map would be public.
 - Error responses carry a translated message and a stable `code`, never a stack trace, SQL or an outside provider's
   message.

@@ -37,6 +37,28 @@ services:
     ports:
       - "${REDIS_PORT:-6379}:6379"
 
+  # S3-compatible file store for the ODTÜ edition, which never writes to AWS S3. Off by default:
+  #   docker compose --profile minio up -d minio   → S3 API on http://localhost:9000, bucket menton-odtu
+  # Local development only. MinIO no longer publishes its own images, so this pins Bitnami's last frozen build;
+  # the object store for ODTÜ's servers is chosen separately. The keys are local throwaway values (.env.example).
+  minio:
+    profiles: ["minio"]
+    image: bitnamilegacy/minio:2025.7.23-debian-12-r5@sha256:6dabb4a2088c9a79908de3bc05f4586c23ad2182c8908e7e3acbf61c1467fb20
+    environment:
+      MINIO_ROOT_USER: menton-local
+      MINIO_ROOT_PASSWORD: menton-local-secret
+      MINIO_DEFAULT_BUCKETS: menton-odtu
+    ports:
+      # Loopback only: the keys above are public. The app reaches it over the compose network as minio:9000.
+      - "127.0.0.1:${MINIO_PORT:-9000}:9000"
+    volumes:
+      - minio_data:/bitnami/minio/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
   # Local Moodle 4.5 standing in for ODTÜClass while office hours (LTI 1.3) are built. Off by default:
   #   docker compose --profile moodle up -d   → http://localhost:8081 (first start installs Moodle, a few minutes)
   # Moodle keeps its own "moodle" database in the postgres service. See dev/moodle/README.md.
@@ -105,5 +127,6 @@ services:
 volumes:
   postgres_data:
     driver: local
+  minio_data:
   moodle_data:
   moodledata_data:

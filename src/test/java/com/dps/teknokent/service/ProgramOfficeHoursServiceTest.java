@@ -105,7 +105,7 @@ class ProgramOfficeHoursServiceTest {
 		people(record(ayse, "Endüstri Mühendisliği", null, null),
 				record(ahmet, "Bilgisayar Mühendisliği", "Prof. Dr.", "Mühendislik Fakültesi"));
 		when(requests.countByStatusInAndCreatedAtGreaterThanEqual(anyCollection(),
-				eq(NOW.minus(ProgramOfficeHoursService.UNBOUNDED_LOOK_BACK)))).thenReturn(86L, 12L);
+				eq(NOW.minus(ProgramOfficeHoursService.RECENT_WINDOW)))).thenReturn(86L, 12L);
 		when(meetings.countByScheduledAtGreaterThanEqualAndScheduledAtLessThan(
 				Instant.parse("2026-11-08T21:00:00Z"), Instant.parse("2026-11-15T21:00:00Z"))).thenReturn(214L);
 		when(requests.countByStatusAndUpdatedAtGreaterThanEqualAndUpdatedAtLessThan(OfficeHoursRequestStatus.DECLINED,
@@ -141,7 +141,7 @@ class ProgramOfficeHoursServiceTest {
 		service.list(COORDINATOR, PROGRAM, query(null, null, null));
 
 		verify(requests).findByCreatedAtGreaterThanEqualAndCreatedAtLessThanOrderByCreatedAtDesc(
-				NOW.minus(ProgramOfficeHoursService.UNBOUNDED_LOOK_BACK), Instant.parse("2026-11-14T09:00:00Z"));
+				NOW.minus(ProgramOfficeHoursService.RECENT_WINDOW), Instant.parse("2026-11-14T09:00:00Z"));
 	}
 
 	@Test
@@ -168,7 +168,7 @@ class ProgramOfficeHoursServiceTest {
 				"2026-11-16T00:00", null);
 		OfficeHoursRequest booked = request(ilker, zeynep, OfficeHoursRequestStatus.ACCEPTED, "Uzun zaman önce",
 				"2026-11-11T09:00", null);
-		booked.setCreatedAt(NOW.minus(ProgramOfficeHoursService.UNBOUNDED_LOOK_BACK).minusSeconds(60));
+		booked.setCreatedAt(NOW.minus(ProgramOfficeHoursService.RECENT_WINDOW).minusSeconds(60));
 		OfficeHoursMeeting meeting = meeting(booked, Instant.parse("2026-11-11T06:00:00Z"));
 		when(meetings.findByScheduledAtGreaterThanEqualAndScheduledAtLessThan(Instant.parse("2026-11-08T21:00:00Z"),
 				Instant.parse("2026-11-15T21:00:00Z"))).thenReturn(List.of(meeting));

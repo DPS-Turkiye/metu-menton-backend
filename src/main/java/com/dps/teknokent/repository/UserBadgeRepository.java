@@ -1,10 +1,13 @@
 package com.dps.teknokent.repository;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import com.dps.teknokent.domain.BadgeCode;
 import com.dps.teknokent.domain.BadgeStatus;
@@ -25,4 +28,12 @@ public interface UserBadgeRepository extends JpaRepository<UserBadge, UUID> {
 
 	/** Any award of the badge, active or not: a rule never awards one again after a revoke. */
 	boolean existsByUserIdAndBadgeCode(UUID userId, BadgeCode badgeCode);
+
+	/** At most one award per person, badge and program is active (uq_user_badge_active), so this counts people. */
+	@Query("""
+			select award.programId as programId, count(award) as total from UserBadge award
+			where award.programId in :programIds and award.badgeCode = :badgeCode and award.status = :status
+			group by award.programId""")
+	List<ProgramTally> countByProgramIdInAndBadgeCodeAndStatus(@Param("programIds") Collection<UUID> programIds,
+			@Param("badgeCode") BadgeCode badgeCode, @Param("status") BadgeStatus status);
 }
