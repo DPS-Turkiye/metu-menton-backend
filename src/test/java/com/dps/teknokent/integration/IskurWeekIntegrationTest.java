@@ -15,6 +15,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
 
@@ -53,6 +54,7 @@ import com.dps.teknokent.domain.ProgramType;
 import com.dps.teknokent.domain.UserRole;
 import com.dps.teknokent.entity.AppUser;
 import com.dps.teknokent.entity.InstitutionPerson;
+import com.dps.teknokent.entity.IskurInternEmail;
 import com.dps.teknokent.entity.IskurMeetingGapAlert;
 import com.dps.teknokent.entity.IskurPlacement;
 import com.dps.teknokent.entity.IskurSupportActivity;
@@ -70,6 +72,7 @@ import com.dps.teknokent.entity.ProgramCoordinator;
 import com.dps.teknokent.entity.ProgramMentor;
 import com.dps.teknokent.repository.AppUserRepository;
 import com.dps.teknokent.repository.InstitutionPersonRepository;
+import com.dps.teknokent.repository.IskurInternEmailRepository;
 import com.dps.teknokent.repository.IskurMeetingGapAlertRepository;
 import com.dps.teknokent.repository.IskurPlacementRepository;
 import com.dps.teknokent.repository.IskurSupportActivityRepository;
@@ -112,6 +115,8 @@ class IskurWeekIntegrationTest {
 	private JsonMapper jsonMapper;
 	@Autowired
 	private AppUserRepository userRepository;
+	@Autowired
+	private IskurInternEmailRepository internEmailRepository;
 	@Autowired
 	private InstitutionPersonRepository institutionPersonRepository;
 	@Autowired
@@ -732,7 +737,17 @@ class IskurWeekIntegrationTest {
 		if (joined != null) {
 			user.setProgramId(joined.getId());
 		}
-		return userRepository.saveAndFlush(user);
+		AppUser saved = userRepository.saveAndFlush(user);
+		if (joined != null && role == UserRole.MENTEE) {
+			internOf(joined, saved);
+		}
+		return saved;
+	}
+
+	/** Puts the person's address on the program's İŞKUR intern list, as the coordinator would. */
+	private void internOf(Program listing, AppUser person) {
+		internEmailRepository.saveAndFlush(new IskurInternEmail(listing.getId(),
+				person.getEmail().toLowerCase(Locale.ROOT), null, Instant.now()));
 	}
 
 	private AppUser student(String name) {

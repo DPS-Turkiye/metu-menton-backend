@@ -11,6 +11,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 
 import org.hamcrest.Matchers;
@@ -36,6 +37,7 @@ import com.dps.teknokent.domain.UserAccountStatus;
 import com.dps.teknokent.domain.UserRole;
 import com.dps.teknokent.entity.AppUser;
 import com.dps.teknokent.entity.IskurChannel;
+import com.dps.teknokent.entity.IskurInternEmail;
 import com.dps.teknokent.entity.IskurMessage;
 import com.dps.teknokent.entity.IskurPlacement;
 import com.dps.teknokent.entity.IskurTeam;
@@ -44,6 +46,7 @@ import com.dps.teknokent.entity.Program;
 import com.dps.teknokent.entity.ProgramCoordinator;
 import com.dps.teknokent.repository.AppUserRepository;
 import com.dps.teknokent.repository.IskurChannelRepository;
+import com.dps.teknokent.repository.IskurInternEmailRepository;
 import com.dps.teknokent.repository.IskurMessageRepository;
 import com.dps.teknokent.repository.IskurPlacementRepository;
 import com.dps.teknokent.repository.IskurTeamRepository;
@@ -70,6 +73,8 @@ class IskurChannelIntegrationTest {
 	private IskurChannelMembershipService membership;
 	@Autowired
 	private AppUserRepository userRepository;
+	@Autowired
+	private IskurInternEmailRepository internEmailRepository;
 	@Autowired
 	private ProgramRepository programRepository;
 	@Autowired
@@ -556,7 +561,17 @@ class IskurChannelIntegrationTest {
 		if (joined != null) {
 			user.setProgramId(joined.getId());
 		}
-		return userRepository.saveAndFlush(user);
+		AppUser saved = userRepository.saveAndFlush(user);
+		if (joined != null && role == UserRole.MENTEE) {
+			internOf(joined, saved);
+		}
+		return saved;
+	}
+
+	/** Puts the person's address on the program's İŞKUR intern list, as the coordinator would. */
+	private void internOf(Program listing, AppUser person) {
+		internEmailRepository.saveAndFlush(new IskurInternEmail(listing.getId(),
+				person.getEmail().toLowerCase(Locale.ROOT), null, Instant.now()));
 	}
 
 	private Program program(String name, AppUser creator) {
