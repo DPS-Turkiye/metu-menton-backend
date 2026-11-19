@@ -59,7 +59,8 @@ CREATE TABLE iskur_task (
     CONSTRAINT chk_iskur_task_actual CHECK (actual_minutes IS NULL OR actual_minutes BETWEEN 1 AND 1350),
     CONSTRAINT chk_iskur_task_done CHECK ((status = 'DONE') = (completed_at IS NOT NULL)),
     CONSTRAINT chk_iskur_task_done_time CHECK (status <> 'DONE' OR actual_minutes IS NOT NULL),
-    CONSTRAINT chk_iskur_task_handover CHECK (status <> 'HANDED_OVER' OR btrim(handover_reason) <> '')
+    CONSTRAINT chk_iskur_task_handover CHECK (status <> 'HANDED_OVER'
+        OR (handover_reason IS NOT NULL AND btrim(handover_reason) <> ''))
 );
 
 CREATE INDEX ix_iskur_task_team_due ON iskur_task (team_id, due_date);
@@ -101,7 +102,7 @@ CREATE TABLE iskur_work_week (
         ((status = 'REVISION_REQUESTED') = (COALESCE(decision, '') = 'REVISION')),
     CONSTRAINT chk_iskur_work_week_rejected CHECK ((status = 'REJECTED') = (COALESCE(decision, '') = 'REJECT')),
     CONSTRAINT chk_iskur_work_week_reason CHECK (decision IS NULL OR decision = 'APPROVE'
-        OR btrim(decision_reason) <> ''),
+        OR (decision_reason IS NOT NULL AND btrim(decision_reason) <> '')),
     CONSTRAINT chk_iskur_work_week_objection CHECK ((objection IS NULL) = (objected_at IS NULL)),
     CONSTRAINT chk_iskur_work_week_objection_on CHECK (objection IS NULL OR decision IN ('REVISION', 'REJECT'))
 );
