@@ -116,13 +116,8 @@ public class IskurOnboardingService {
 		IskurOnboarding form = editableForm(program, actorId);
 		apply(form, program, request);
 		Set<UUID> asked = requireComplete(form, program);
-		// Ratings of units the intern did not pick, and the answers of a withdrawn leadership application, go.
+		// Ratings of units the intern did not pick go.
 		form.getSkills().keySet().retainAll(asked);
-		if (!form.isWantsLeadership()) {
-			form.setLeadershipMotivation(null);
-			form.setLeadershipExperience(null);
-			form.setLeadershipConflict(null);
-		}
 		Instant now = Instant.now();
 		form.setSubmittedAt(now);
 		form.setUpdatedAt(now);
@@ -258,9 +253,14 @@ public class IskurOnboardingService {
 				.orElseThrow(() -> new ResourceNotFoundException(Texts.forRequest("error.iskurNotAnIntern")));
 	}
 
+	/**
+	 * The caller's form, locked: a draft save, an upload and a submit of the same form run one at a time, and each sees
+	 * whether the one before it submitted. A first form is inserted at once; two racing first saves meet the unique key
+	 * and the loser answers 409.
+	 */
 	private IskurOnboarding editableForm(Program program, UUID userId) {
-		IskurOnboarding form = onboardings.findByProgramIdAndUserId(program.getId(), userId)
-				.orElseGet(() -> new IskurOnboarding(program.getId(), userId, Instant.now()));
+		IskurOnboarding form = onboardings.findForUpdate(program.getId(), userId)
+				.orElseGet(() -> onboardings.saveAndFlush(new IskurOnboarding(program.getId(), userId, Instant.now())));
 		if (form.isSubmitted()) {
 			throw new ConflictException(Texts.forRequest("error.iskurOnboardingSubmitted"));
 		}
@@ -303,11 +303,13 @@ public class IskurOnboardingService {
 		form.getTeamRoles().retainAll(roles);
 		form.getTeamRoles().addAll(roles);
 
+		// Answers to an application the intern is not making are not kept, not even in a draft.
 		IskurOnboardingRequest.Leadership leadership = request.leadership();
-		form.setWantsLeadership(leadership != null && leadership.wants());
-		form.setLeadershipMotivation(leadership == null ? null : answer(leadership.motivation()));
-		form.setLeadershipExperience(leadership == null ? null : answer(leadership.experience()));
-		form.setLeadershipConflict(leadership == null ? null : answer(leadership.conflict()));
+		boolean wants = leadership != null && leadership.wants();
+		form.setWantsLeadership(wants);
+		form.setLeadershipMotivation(wants ? answer(leadership.motivation()) : null);
+		form.setLeadershipExperience(wants ? answer(leadership.experience()) : null);
+		form.setLeadershipConflict(wants ? answer(leadership.conflict()) : null);
 		form.setUpdatedAt(Instant.now());
 	}
 

@@ -28,6 +28,7 @@ import com.dps.teknokent.domain.UserDeletionCleanupKind;
 import com.dps.teknokent.domain.UserRole;
 import com.dps.teknokent.dto.responses.PeerWeeklySummary;
 import com.dps.teknokent.entity.AppUser;
+import com.dps.teknokent.entity.IskurOnboarding;
 import com.dps.teknokent.entity.Meeting;
 import com.dps.teknokent.entity.MeetingProposal;
 import com.dps.teknokent.entity.MentorProfile;
@@ -402,6 +403,11 @@ class UserDataEraser {
 			entityManager.remove(interest);
 		}
 		erasePeerReports(id);
+		// Through the entity, so its ranges, preferences, ratings and roles go with it; its files went above.
+		entityManager.createQuery("select o from IskurOnboarding o where o.userId = :id", IskurOnboarding.class)
+				.setParameter("id", id)
+				.getResultList()
+				.forEach(entityManager::remove);
 		entityManager.flush();
 
 		update("delete from ProfileAnalysis a where a.appUserId = :id", "id", id);

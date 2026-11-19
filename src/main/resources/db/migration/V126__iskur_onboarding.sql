@@ -42,7 +42,12 @@ CREATE TABLE iskur_onboarding (
     updated_at              TIMESTAMPTZ NOT NULL,
     CONSTRAINT uq_iskur_onboarding_user UNIQUE (program_id, user_id),
     CONSTRAINT chk_iskur_onboarding_days CHECK (weekly_days IS NULL OR weekly_days BETWEEN 1 AND 3),
-    CONSTRAINT chk_iskur_onboarding_prior CHECK (prior_iskur_days IS NULL OR prior_iskur_days BETWEEN 0 AND 140)
+    CONSTRAINT chk_iskur_onboarding_prior CHECK (prior_iskur_days IS NULL OR prior_iskur_days BETWEEN 0 AND 140),
+    -- Answers to a leadership application nobody is making are not kept.
+    CONSTRAINT chk_iskur_onboarding_leadership CHECK (wants_leadership OR (leadership_motivation IS NULL
+        AND leadership_experience IS NULL AND leadership_conflict IS NULL)),
+    CONSTRAINT chk_iskur_onboarding_submitted CHECK (submitted_at IS NULL
+        OR (weekly_days IS NOT NULL AND prior_iskur_days IS NOT NULL))
 );
 
 CREATE INDEX ix_iskur_onboarding_user ON iskur_onboarding (user_id);

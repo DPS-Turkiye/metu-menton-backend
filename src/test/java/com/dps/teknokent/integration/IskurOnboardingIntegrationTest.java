@@ -267,7 +267,9 @@ class IskurOnboardingIntegrationTest {
 		submit(mert, withRoles(complete(), List.of())).andExpect(status().isBadRequest());
 		submit(mert, withUnits(complete(), List.of())).andExpect(status().isBadRequest());
 		submit(mert, withPrior(complete(), null)).andExpect(status().isBadRequest());
-		assertThat(onboardingRepository.findByProgramIdAndUserId(program.getId(), mert.getId())).isEmpty();
+		// A refused submit rolls back in production; inside this test's one transaction the draft row stays, unsent.
+		assertThat(onboardingRepository.findByProgramIdAndUserId(program.getId(), mert.getId())
+				.map(IskurOnboarding::isSubmitted)).hasValue(false);
 		assertThat(onboardingService.workDays(program.getId(), mert.getId())).isEmpty();
 	}
 
@@ -286,6 +288,14 @@ class IskurOnboardingIntegrationTest {
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.form.leadership.wants").value(true))
 				.andExpect(jsonPath("$.form.leadership.motivation").value("Planlamayı severim."));
+	}
+
+	@Test
+	void keepsNoLeadershipAnswersInADraftThatDoesNotApply() throws Exception {
+		save(mert, withLeadership(complete(), new IskurOnboardingRequest.Leadership(false, "Taslak", "Deneyim", null)))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.form.leadership.motivation").doesNotExist())
+				.andExpect(jsonPath("$.form.leadership.experience").doesNotExist());
 	}
 
 	@Test
