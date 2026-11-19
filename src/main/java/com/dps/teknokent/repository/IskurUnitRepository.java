@@ -10,4 +10,6 @@ import com.dps.teknokent.entity.IskurUnit;
 public interface IskurUnitRepository extends JpaRepository<IskurUnit, UUID> {
 
 	List<IskurUnit> findByProgramIdOrderBySortOrderAscCreatedAtAsc(UUID programId);
+
+	boolean existsByProgramId(UUID programId);
 }
