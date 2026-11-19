@@ -19,6 +19,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
+import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
@@ -200,7 +201,10 @@ class IskurInternListIntegrationTest {
 		asStudent(get("/api/peer-mentoring/requests"), plain).andExpect(status().isOk());
 		asStudent(get("/api/peer-mentoring/appointments"), plain).andExpect(status().isOk());
 		asStudent(get("/api/student/profile-completion"), plain).andExpect(status().isOk());
-		asStudent(get("/api/office-hours/me/academicians"), plain).andExpect(status().isOk());
+		// Office Hours answers only the web server's own credential (ROLE_SERVICE), which names the student.
+		mockMvc.perform(get("/api/office-hours/me/academicians").param("actorId", plain.getId().toString())
+				.with(SecurityMockMvcRequestPostProcessors.user("frontend").roles("SERVICE")))
+				.andExpect(status().isOk());
 
 		add(coordinator, "\"duz@example.test\"").andExpect(status().isOk());
 		asStudent(get("/api/iskur/onboarding"), plain).andExpect(status().isOk());
