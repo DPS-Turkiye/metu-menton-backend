@@ -35,6 +35,7 @@ public class IskurSupportActivityService {
 
 	/** The rules frame lists five activities. */
 	static final int DEFAULT_ACTIVITIES = 5;
+	private static final Locale TR = Locale.forLanguageTag("tr");
 
 	private final CoordinatorProgramService coordinatorProgramService;
 	private final ProgramRepository programs;
@@ -152,11 +153,12 @@ public class IskurSupportActivityService {
 				.orElseThrow(() -> new ResourceNotFoundException(Texts.forRequest("error.iskurSupportNotFound")));
 	}
 
+	/** Titles are Turkish text, so they compare under Turkish case rules: "OFİS" is "ofis", "SAATI" is not. */
 	private static void requireFreeTitle(List<IskurSupportActivity> pool, String title, @Nullable UUID except) {
-		String wanted = title.toLowerCase(Locale.ROOT);
+		String wanted = title.toLowerCase(TR);
 		boolean taken = pool.stream()
 				.filter(activity -> except == null || !activity.getId().equals(except))
-				.anyMatch(activity -> activity.getTitle().toLowerCase(Locale.ROOT).equals(wanted));
+				.anyMatch(activity -> activity.getTitle().toLowerCase(TR).equals(wanted));
 		if (taken) {
 			throw new ConflictException(Texts.forRequest("error.iskurSupportTitleTaken"));
 		}

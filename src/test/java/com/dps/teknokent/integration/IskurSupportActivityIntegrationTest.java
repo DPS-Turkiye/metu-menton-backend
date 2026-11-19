@@ -88,8 +88,8 @@ class IskurSupportActivityIntegrationTest {
 				.andExpect(jsonPath("$.activities[0].description").value("Kütüphanede"))
 				.andExpect(jsonPath("$.activities[1].active").value(false))
 				.andExpect(jsonPath("$.activities[1].sortOrder").value(1));
-		// Titles are unique in the pool, whatever the case.
-		send(post(BASE, program.getId()), body(coordinator, "AÇIK OFIS SAATI", null, null))
+		// Titles are unique in the pool under Turkish case rules.
+		send(post(BASE, program.getId()), body(coordinator, "AÇIK OFİS SAATİ", null, null))
 				.andExpect(status().isConflict());
 
 		UUID id = activityRepository.findByProgramIdOrderBySortOrderAscCreatedAtAsc(program.getId()).getFirst()
