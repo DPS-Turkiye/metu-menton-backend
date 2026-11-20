@@ -19,12 +19,14 @@ import com.dps.teknokent.domain.MentorshipRequestFormat;
 import com.dps.teknokent.domain.MentorshipRequestStatus;
 import com.dps.teknokent.domain.MentorshipRequestUrgency;
 import com.dps.teknokent.domain.UserRole;
+import com.dps.teknokent.dto.responses.MentorRatingResponse;
 import com.dps.teknokent.entity.AppUser;
 import com.dps.teknokent.entity.Meeting;
 import com.dps.teknokent.entity.MeetingFeedback;
 import com.dps.teknokent.entity.MentorshipRequest;
 import com.dps.teknokent.entity.Organization;
 import com.dps.teknokent.repository.MeetingFeedbackRepository.MentorshipRating;
+import com.dps.teknokent.service.MentorRatingService;
 
 import jakarta.persistence.EntityManager;
 
@@ -70,6 +72,25 @@ class MeetingFeedbackRatingQueryTest {
 		assertThat(rows.get(second.getId()).getAverage()).isEqualTo(2.0);
 		assertThat(rows.get(second.getId()).getFeedbackCount()).isEqualTo(1);
 		assertThat(feedbackRepository.ratingsByMentorship(UUID.randomUUID())).isEmpty();
+	}
+
+	@Test
+	void aMeetingPlannedWithoutAMentorshipRequestCountsTowardTheRatingWithNoRequestId() {
+		MentorshipRequest request = request();
+		feedback(meeting(request), mentee, List.of(4, 4, 4, 4));
+		feedback(meeting(null), mentee, List.of(2, 2, 2, 2));
+		entityManager.flush();
+		entityManager.clear();
+
+		assertThat(feedbackRepository.ratingsByMentorship(mentor.getId()))
+				.extracting(MentorshipRating::getRequestId)
+				.containsExactlyInAnyOrder(request.getId(), null);
+
+		MentorRatingResponse rating = new MentorRatingService(feedbackRepository).rating(mentor.getId());
+		assertThat(rating.average()).isEqualTo(3.0);
+		assertThat(rating.feedbackCount()).isEqualTo(2);
+		assertThat(rating.mentorships()).extracting(MentorRatingResponse.Mentorship::mentorshipRequestId)
+				.containsExactly(request.getId());
 	}
 
 	private AppUser user(String email, UserRole role, Organization organization) {

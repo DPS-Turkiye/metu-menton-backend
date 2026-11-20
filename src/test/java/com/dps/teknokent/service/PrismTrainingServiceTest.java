@@ -228,6 +228,30 @@ class PrismTrainingServiceTest {
 		when(links.findById(iskur.getId())).thenReturn(Optional.empty());
 
 		assertThat(service.forStudent(intern, iskur).state()).isEqualTo(TrainingState.NOT_AVAILABLE);
+
+		// A review with no decision and no "tamamladım" yet is still nothing to do.
+		stored.put(intern.getId(), new PrismTrainingReview());
+		assertThat(service.forStudent(intern, iskur).state()).isEqualTo(TrainingState.NOT_AVAILABLE);
+	}
+
+	// Lane D's journey: results applied before the link was set (or after it was cleared).
+	@Test
+	void aStudentAskedToRetakeOrWaitingSeesThatWithoutALink() {
+		AppUser retake = member("tekrar@example.test");
+		AppUser waiting = person("bekleyen@example.test", UserRole.MENTEE);
+		interns = Set.of(retake.getId(), waiting.getId());
+		when(links.findById(iskur.getId())).thenReturn(Optional.empty());
+		decide(PrismDecision.RETAKE, new PrismDecisionRequest.Entry("tekrar@example.test", "41"));
+		service.markCompleted(waiting, iskur);
+
+		var forRetake = service.forStudent(retake, iskur);
+		assertThat(forRetake.state()).isEqualTo(TrainingState.PRISM_RETAKE);
+		assertThat(forRetake.url()).isNull();
+
+		var forWaiting = service.forStudent(waiting, iskur);
+		assertThat(forWaiting.state()).isEqualTo(TrainingState.PRISM_PENDING);
+		assertThat(forWaiting.url()).isNull();
+		assertThat(forWaiting.completedAt()).isNotNull();
 	}
 
 	@Test

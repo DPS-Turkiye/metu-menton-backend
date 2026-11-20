@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+import org.jspecify.annotations.Nullable;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.EntityGraph;
@@ -19,6 +20,8 @@ public interface MeetingFeedbackRepository extends JpaRepository<MeetingFeedback
 
 	/** One mentorship's share of a mentor's rating: every 1–5 answer mentees gave on its meetings. */
 	interface MentorshipRating {
+		/** None for meetings planned without a mentorship request (meeting.mentorship_request_id is optional). */
+		@Nullable
 		UUID getRequestId();
 
 		Double getAverage();
