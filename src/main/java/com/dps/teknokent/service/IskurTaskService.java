@@ -29,6 +29,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
 import com.dps.teknokent.domain.IskurTaskStatus;
@@ -60,7 +61,8 @@ import com.dps.teknokent.util.Texts;
 /**
  * Team tasks (Figma 2.1 "Ekibim / görev atama" and the proposed "Görev detayı"): a leader assigns work to their own
  * sub-group or to themselves, the assignee records the actual time and the output, then completes the task or hands it
- * over to next week. A leader sees the whole team's tasks; a member sees only their own.
+ * over to next week. A leader sees the whole team's tasks; a member sees only their own. The output may come with
+ * files, which the assignee hands in and the team's leaders read.
  */
 @Service
 public class IskurTaskService {
@@ -80,19 +82,22 @@ public class IskurTaskService {
 	private final ProgramRepository programs;
 	private final NotificationService notifications;
 	private final IskurOnboardingService onboarding;
+	private final IskurTaskOutputFiles outputFiles;
 	private final Clock clock;
 
 	@Autowired
 	public IskurTaskService(IskurInternService interns, IskurPlacementRepository placements,
 			IskurTeamRepository teams, IskurUnitRepository units, IskurTaskRepository tasks, AppUserRepository users,
-			ProgramRepository programs, NotificationService notifications, IskurOnboardingService onboarding) {
-		this(interns, placements, teams, units, tasks, users, programs, notifications, onboarding,
+			ProgramRepository programs, NotificationService notifications, IskurOnboardingService onboarding,
+			IskurTaskOutputFiles outputFiles) {
+		this(interns, placements, teams, units, tasks, users, programs, notifications, onboarding, outputFiles,
 				Clock.systemUTC());
 	}
 
 	IskurTaskService(IskurInternService interns, IskurPlacementRepository placements, IskurTeamRepository teams,
 			IskurUnitRepository units, IskurTaskRepository tasks, AppUserRepository users, ProgramRepository programs,
-			NotificationService notifications, IskurOnboardingService onboarding, Clock clock) {
+			NotificationService notifications, IskurOnboardingService onboarding, IskurTaskOutputFiles outputFiles,
+			Clock clock) {
 		this.interns = interns;
 		this.placements = placements;
 		this.teams = teams;
@@ -102,6 +107,7 @@ public class IskurTaskService {
 		this.programs = programs;
 		this.notifications = notifications;
 		this.onboarding = onboarding;
+		this.outputFiles = outputFiles;
 		this.clock = clock;
 	}
 
@@ -158,9 +164,7 @@ public class IskurTaskService {
 	@Transactional(readOnly = true)
 	public IskurTaskResponse task(UUID actorId, UUID taskId) {
 		IskurTask task = requireTask(taskId);
-		Access access = accessOf(actorId, task);
-		return response(task, access, teamName(task.getTeamId()), names(Set.of(task.getAssigneeId()),
-				task.getCreatedBy()));
+		return response(task, accessOf(actorId, task));
 	}
 
 	/**
@@ -201,18 +205,69 @@ public class IskurTaskService {
 				task.handOver(reason, now);
 			}
 		}
-		IskurTask saved = savedOrConflict(() -> tasks.saveAndFlush(task));
-		return response(saved, access, teamName(saved.getTeamId()), names(Set.of(saved.getAssigneeId()),
-				saved.getCreatedBy()));
+		return response(savedOrConflict(() -> tasks.saveAndFlush(task)), access);
 	}
 
-	private static void requireCompletable(IskurTask task) {
+	private void requireCompletable(IskurTask task) {
 		if (task.getActualMinutes() == null) {
 			throw new InvalidRequestException(Texts.forRequest("error.iskurTaskActualRequired"));
 		}
-		if (task.isNeedsOutput() && task.getOutputLink() == null && task.getOutputNote() == null) {
+		if (task.isNeedsOutput() && task.getOutputLink() == null && task.getOutputNote() == null
+				&& outputFiles.count(task.getId()) == 0) {
 			throw new InvalidRequestException(Texts.forRequest("error.iskurTaskOutputRequired"));
 		}
+	}
+
+	/**
+	 * The assignee hands in a file with their task, up to {@link IskurTaskOutputFiles#MAX_FILES_PER_TASK}. A done task
+	 * takes none until it is reopened. The task row is locked while its files are counted and changed, so two uploads
+	 * at once cannot both slip under the limit; the version bump still makes an upload racing a completion a 409.
+	 */
+	@Transactional
+	public IskurTaskResponse attachOutput(UUID actorId, UUID taskId, @Nullable MultipartFile file) {
+		IskurTask task = requireTaskForUpdate(taskId);
+		Access access = requireWorkable(actorId, task);
+		Instant now = clock.instant();
+		outputFiles.add(task.getId(), actorId, file, now);
+		task.setUpdatedAt(now);
+		return response(savedOrConflict(() -> tasks.saveAndFlush(task)), access);
+	}
+
+	/** The uploader takes their own file back, while the task is not done. */
+	@Transactional
+	public IskurTaskResponse removeOutput(UUID actorId, UUID taskId, UUID outputId) {
+		IskurTask task = requireTaskForUpdate(taskId);
+		Access access = requireWorkable(actorId, task);
+		// With no bucket the stored object could not go, and would stay behind without its row.
+		outputFiles.requireEnabled();
+		IskurTaskOutputFiles.Entry entry = outputFiles.require(task.getId(), outputId);
+		if (!entry.output().getUploadedBy().equals(actorId)) {
+			throw forbidden("error.iskurTaskOutputUploaderOnly");
+		}
+		outputFiles.remove(entry);
+		task.setUpdatedAt(clock.instant());
+		return response(savedOrConflict(() -> tasks.saveAndFlush(task)), access);
+	}
+
+	/** A handed-in file, for the task's assignee and the leaders of its team; checked on every download. */
+	@Transactional(readOnly = true)
+	public IskurApplicationService.DocumentContent output(UUID actorId, UUID taskId, UUID outputId) {
+		IskurTask task = requireTask(taskId);
+		accessOf(actorId, task);
+		return outputFiles.content(outputFiles.require(task.getId(), outputId));
+	}
+
+	/** The assignee, on a task that still takes changes: the program is open and the task is not done. */
+	private Access requireWorkable(UUID actorId, IskurTask task) {
+		Access access = accessOf(actorId, task);
+		if (!access.works()) {
+			throw forbidden("error.iskurTaskAssigneeOnly");
+		}
+		requireOpenProgram(task.getProgramId());
+		if (task.getStatus() == IskurTaskStatus.DONE) {
+			throw new ConflictException(Texts.forRequest("error.iskurTaskDoneLocked"));
+		}
+		return access;
 	}
 
 	/** A leader of the team takes a task back; the log lines that used it keep their own title and minutes. */
@@ -224,6 +279,7 @@ public class IskurTaskService {
 			throw forbidden("error.iskurLeadersOnly");
 		}
 		requireOpenProgram(task.getProgramId());
+		outputFiles.removeAll(task.getId());
 		savedOrConflict(() -> {
 			tasks.delete(task);
 			tasks.flush();
@@ -256,11 +312,14 @@ public class IskurTaskService {
 		List<IskurPlacement> ordered = ordered(me, teammates, byName);
 		Map<UUID, List<IskurTask>> byAssignee = weekTasks.stream()
 				.collect(Collectors.groupingBy(IskurTask::getAssigneeId));
+		Map<UUID, List<IskurTaskOutputFiles.Entry>> files = outputFiles
+				.byTask(weekTasks.stream().map(IskurTask::getId).toList());
+		boolean filesEnabled = outputFiles.enabled();
 		List<IskurPlacement> shown = leader ? ordered : List.of(me);
 
 		List<IskurTeamTasksResponse.Member> members = shown.stream()
 				.map(placement -> member(placement, me, leader, people, team.getName(),
-						byAssignee.getOrDefault(placement.getUserId(), List.of())))
+						byAssignee.getOrDefault(placement.getUserId(), List.of()), files, filesEnabled))
 				.toList();
 		List<IskurTeamTasksResponse.RosterPerson> roster = ordered.stream()
 				.map(placement -> new IskurTeamTasksResponse.RosterPerson(placement.getUserId(),
@@ -297,7 +356,8 @@ public class IskurTaskService {
 	}
 
 	private IskurTeamTasksResponse.Member member(IskurPlacement placement, IskurPlacement me, boolean leader,
-			Map<UUID, String> people, String teamName, List<IskurTask> own) {
+			Map<UUID, String> people, String teamName, List<IskurTask> own,
+			Map<UUID, List<IskurTaskOutputFiles.Entry>> files, boolean filesEnabled) {
 		Integer days = placement.getWeeklyDays() == null ? null : placement.getWeeklyDays().intValue();
 		Integer target = days == null ? null : IskurWeeklySplit.of(days, placement.getMentoringMinutes()).teamMinutes();
 		int planned = own.stream()
@@ -308,7 +368,7 @@ public class IskurTaskService {
 				|| me.getUserId().equals(placement.getLeaderId()));
 		List<IskurTaskResponse> rows = own.stream()
 				.map(task -> response(task, new Access(me, task.getAssigneeId().equals(me.getUserId()), leader),
-						teamName, people))
+						teamName, people, files.getOrDefault(task.getId(), List.of()), filesEnabled))
 				.toList();
 		List<DayOfWeek> workDays = onboarding.workDays(placement.getProgramId(), placement.getUserId()).stream()
 				.sorted()
@@ -318,16 +378,33 @@ public class IskurTaskService {
 				target != null && planned > target, assignable, workDays, rows);
 	}
 
+	/** One task with its team, people and files looked up; the list builds its rows from what it loaded once. */
+	private IskurTaskResponse response(IskurTask task, Access access) {
+		return response(task, access, teamName(task.getTeamId()),
+				names(Set.of(task.getAssigneeId()), task.getCreatedBy()), outputFiles.ofTask(task.getId()),
+				outputFiles.enabled());
+	}
+
 	private static IskurTaskResponse response(IskurTask task, Access access, String teamName,
-			Map<UUID, String> people) {
+			Map<UUID, String> people, List<IskurTaskOutputFiles.Entry> files, boolean filesEnabled) {
 		UUID by = task.getCreatedBy();
+		UUID viewer = access.placement().getUserId();
+		boolean open = task.getStatus() != IskurTaskStatus.DONE;
+		List<IskurTaskResponse.OutputFile> handedIn = files.stream()
+				.map(entry -> new IskurTaskResponse.OutputFile(entry.output().getId(),
+						entry.file().getOriginalFilename(), entry.file().getContentType(),
+						entry.file().getSizeBytes(), entry.output().getCreatedAt(),
+						access.works() && open && entry.output().getUploadedBy().equals(viewer)))
+				.toList();
+		boolean canAttach = access.works() && open && filesEnabled
+				&& handedIn.size() < IskurTaskOutputFiles.MAX_FILES_PER_TASK;
 		return new IskurTaskResponse(task.getId(), task.getTeamId(), teamName,
 				new IskurTaskResponse.Person(task.getAssigneeId(), people.getOrDefault(task.getAssigneeId(), "")),
 				by == null ? null : new IskurTaskResponse.Person(by, people.getOrDefault(by, "")),
 				task.getTitle(), task.getKind(), task.getEstimatedMinutes(), task.getDueDate(), task.isNeedsOutput(),
 				task.getDescription(), task.getStatus(), task.getActualMinutes(), task.getOutputLink(),
 				task.getOutputNote(), task.getHandoverReason(), task.getCompletedAt(), task.getCreatedAt(),
-				access.works(), access.manages());
+				access.works(), access.manages(), handedIn, filesEnabled, canAttach);
 	}
 
 	/** Who may open the task: its assignee, or a leader of its team. Anyone else is told it does not exist. */
@@ -343,6 +420,11 @@ public class IskurTaskService {
 			throw new ResourceNotFoundException(Texts.forRequest("error.iskurTaskNotFound"));
 		}
 		return new Access(mine, works, manages);
+	}
+
+	private IskurTask requireTaskForUpdate(UUID taskId) {
+		return tasks.findForUpdate(taskId)
+				.orElseThrow(() -> new ResourceNotFoundException(Texts.forRequest("error.iskurTaskNotFound")));
 	}
 
 	private IskurTask requireTask(UUID taskId) {

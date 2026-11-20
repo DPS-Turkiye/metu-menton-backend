@@ -2,14 +2,20 @@ package com.dps.teknokent.service;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.regex.Pattern;
 import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
 import java.util.zip.ZipInputStream;
 
 import org.jspecify.annotations.Nullable;
@@ -27,6 +33,7 @@ import com.dps.teknokent.repository.AppUserRepository;
 import com.dps.teknokent.repository.MeetingRepository;
 import com.dps.teknokent.repository.StoredDocumentRepository;
 import com.dps.teknokent.util.PdfBytes;
+import com.dps.teknokent.util.Texts;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -47,13 +54,38 @@ public class DocumentService {
 			"xlsx", "xl/workbook.xml",
 			"pptx", "ppt/presentation.xml");
 	private static final Set<String> IMAGE_EXTENSIONS = Set.of("png", "jpg", "jpeg", "webp");
+	private static final byte[] PNG_SIGNATURE = { (byte) 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A };
+	private static final byte[] JPEG_SIGNATURE = { (byte) 0xFF, (byte) 0xD8, (byte) 0xFF };
+	private static final String ZIP_TYPE = "application/zip";
+	/** What a work-file kind accepts, with the type each is stored and served as. */
+	private static final Map<String, String> WORK_FILE_TYPES = Map.of(
+			"pdf", "application/pdf",
+			"png", "image/png",
+			"jpg", "image/jpeg",
+			"jpeg", "image/jpeg",
+			"docx", DOCX_TYPE,
+			"xlsx", XLSX_TYPE,
+			"pptx", PPTX_TYPE,
+			"zip", ZIP_TYPE);
 	private static final Set<String> IMAGE_TYPES = Set.of("image/png", "image/jpeg", "image/webp");
 	private static final Set<String> DANGEROUS_ARCHIVE_SUFFIXES = Set.of(
 			".js", ".jar", ".exe", ".dll", ".bat", ".cmd", ".sh", ".ps1", ".vbs", ".msi");
+	// A handed-in ZIP may hold source code (.js, .py, .html): nothing here runs it, and it is only ever downloaded as
+	// an attachment. Only what runs on its own on a double click is refused.
+	private static final Set<String> SELF_RUNNING_SUFFIXES = Set.of(
+			".exe", ".msi", ".bat", ".cmd", ".com", ".scr", ".ps1", ".vbs", ".jar", ".app", ".dmg", ".sh", ".lnk",
+			".reg");
 	private static final int MAX_DOCX_ENTRIES = 2_000;
 	private static final long MAX_DOCX_TOTAL_UNCOMPRESSED_BYTES = 40L * 1024L * 1024L;
 	private static final long MAX_DOCX_ENTRY_UNCOMPRESSED_BYTES = 20L * 1024L * 1024L;
 	private static final int MAX_DOCX_COMPRESSION_RATIO = 200;
+	// A plain ZIP is only ever stored and handed back, never unpacked here; the limit keeps the check itself bounded.
+	private static final long MAX_ZIP_UNCOMPRESSED_BYTES = 100L * 1024L * 1024L;
+	/** The width of stored_document.original_filename. */
+	private static final int MAX_FILENAME_LENGTH = 255;
+	private static final Pattern PATH_SEPARATOR = Pattern.compile("/");
+	// Windows drops these from the end of a name when it extracts, so "x.exe." and "x.exe " land as "x.exe".
+	private static final Pattern TRAILING_DOTS_AND_SPACES = Pattern.compile("[.\\s]+$");
 	private static final int ZIP_READ_BUFFER = 8 * 1024;
 
 	private final AppUserRepository appUserRepository;
@@ -206,6 +238,10 @@ public class DocumentService {
 					"A file name is required.");
 		}
 		String extension = extensionOf(filename);
+		if (kind.workFiles()) {
+			String sniffedType = workFileType(userId, organizationId, kindValue, filename, extension, bytes);
+			return persist(userId, organizationId, kind, filename, sniffedType, bytes, meetingId);
+		}
 		if (kind.pdfOnly() && !extension.equals("pdf")) {
 			throw rejectUpload(userId, organizationId, kindValue, filename, fileSize, "extension-not-pdf",
 					"Please upload a PDF.");
@@ -256,7 +292,17 @@ public class DocumentService {
 					"Please upload a PDF, DOCX or XLSX file.");
 		}
 		validateFileContent(userId, organizationId, kindValue, filename, extension, bytes);
+		return persist(userId, organizationId, kind, filename, resolvedType, bytes, meetingId);
+	}
 
+	private StoredDocumentResponse persist(
+			UUID userId,
+			@Nullable UUID organizationId,
+			DocumentKind kind,
+			String filename,
+			String resolvedType,
+			byte[] bytes,
+			@Nullable UUID meetingId) {
 		UUID id = UUID.randomUUID();
 		String keyPrefix = userId != null
 				? "documents/" + userId + "/" + kind.value()
@@ -358,9 +404,105 @@ public class DocumentService {
 		}
 	}
 
+	/**
+	 * The type a work file is stored as, decided by its bytes: the extension only says which format to check them
+	 * against, and what the browser called the file is ignored. A file that is not what its name says is refused.
+	 */
+	private String workFileType(
+			UUID userId,
+			@Nullable UUID organizationId,
+			String kindValue,
+			String filename,
+			String extension,
+			byte[] bytes) {
+		String type = WORK_FILE_TYPES.get(extension);
+		if (type == null) {
+			throw rejectUpload(userId, organizationId, kindValue, filename, (long) bytes.length,
+					"extension-not-allowed", Texts.forRequest("error.workFileType"));
+		}
+		if (filename.length() > MAX_FILENAME_LENGTH) {
+			throw rejectUpload(userId, organizationId, kindValue, filename, (long) bytes.length,
+					"filename-too-long", Texts.forRequest("error.workFileName", MAX_FILENAME_LENGTH));
+		}
+		String officeMainPart = OFFICE_MAIN_PARTS.get(extension);
+		List<String> entries = new ArrayList<>();
+		boolean genuine = switch (extension) {
+		case "pdf" -> PdfBytes.looksComplete(bytes);
+		case "png" -> startsWith(bytes, PNG_SIGNATURE);
+		case "jpg", "jpeg" -> startsWith(bytes, JPEG_SIGNATURE);
+		case "zip" -> isSafeArchive(bytes, null, SELF_RUNNING_SUFFIXES, MAX_ZIP_UNCOMPRESSED_BYTES,
+				MAX_ZIP_UNCOMPRESSED_BYTES, entries) && centralDirectoryAgrees(bytes, entries);
+		default -> officeMainPart != null
+				&& isSafeArchive(bytes, officeMainPart, DANGEROUS_ARCHIVE_SUFFIXES,
+						MAX_DOCX_ENTRY_UNCOMPRESSED_BYTES, MAX_DOCX_TOTAL_UNCOMPRESSED_BYTES, entries)
+				&& centralDirectoryAgrees(bytes, entries);
+		};
+		if (!genuine) {
+			throw rejectUpload(userId, organizationId, kindValue, filename, (long) bytes.length,
+					"content-does-not-match-" + extension,
+					Texts.forRequest("zip".equals(extension) ? "error.workFileZip" : "error.workFileContent"));
+		}
+		return type;
+	}
+
 	private static boolean isSafeOfficeFile(byte[] bytes, String mainPart) {
+		return isSafeArchive(bytes, mainPart, DANGEROUS_ARCHIVE_SUFFIXES, MAX_DOCX_ENTRY_UNCOMPRESSED_BYTES,
+				MAX_DOCX_TOTAL_UNCOMPRESSED_BYTES, null);
+	}
+
+	/**
+	 * The entries the ZIP's central directory lists are exactly the ones its local headers hold, and none has a name
+	 * that could mean something else on extraction. The stream check above reads local headers only and stops at the
+	 * first bytes that are not one, while Explorer and 7-Zip extract what the central directory says: a file hidden
+	 * after junk bytes would pass one and be extracted by the other.
+	 */
+	private static boolean centralDirectoryAgrees(byte[] bytes, List<String> streamEntries) {
+		Path copy = null;
+		try {
+			copy = Files.createTempFile("work-file-", ".zip");
+			Files.write(copy, bytes);
+			List<String> listed = new ArrayList<>();
+			try (ZipFile archive = new ZipFile(copy.toFile(), StandardCharsets.UTF_8)) {
+				archive.stream()
+						.filter(entry -> !entry.isDirectory())
+						.forEach(entry -> listed.add(entry.getName()));
+			}
+			List<String> local = new ArrayList<>(streamEntries);
+			local.sort(null);
+			listed.sort(null);
+			return local.equals(listed) && listed.stream().noneMatch(DocumentService::hasUnsafeCharacter);
+		} catch (IOException | IllegalArgumentException unreadable) {
+			return false;
+		} finally {
+			deleteQuietly(copy);
+		}
+	}
+
+	private static boolean hasUnsafeCharacter(String entryName) {
+		return entryName.chars().anyMatch(c -> c < 0x20 || c == 0x7F || c == ':');
+	}
+
+	private static void deleteQuietly(@Nullable Path file) {
+		if (file == null) {
+			return;
+		}
+		try {
+			Files.deleteIfExists(file);
+		} catch (IOException error) {
+			log.warn("Could not remove the temporary copy {} of an uploaded archive: {}", file, error.getMessage());
+		}
+	}
+
+	/**
+	 * A readable ZIP with nothing that escapes it, ends in a {@code blockedSuffixes} name or expands like a bomb. With
+	 * a {@code mainPart} it must also be the Office format that part belongs to; without one, any ZIP with a file in
+	 * it passes. The names of its files go into {@code names} when one is given.
+	 */
+	private static boolean isSafeArchive(byte[] bytes, @Nullable String mainPart, Set<String> blockedSuffixes,
+			long maxEntryBytes, long maxTotalBytes, @Nullable List<String> names) {
 		boolean hasContentTypes = false;
 		boolean hasMainDocument = false;
+		int files = 0;
 		int entries = 0;
 		long totalUncompressedBytes = 0;
 		try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(bytes))) {
@@ -373,7 +515,11 @@ public class DocumentService {
 				if (entry.isDirectory()) {
 					continue;
 				}
+				files++;
 				String name = entry.getName();
+				if (names != null) {
+					names.add(name);
+				}
 				if (name.contains("..") || name.startsWith("/") || name.startsWith("\\")) {
 					return false;
 				}
@@ -381,10 +527,10 @@ public class DocumentService {
 				if ("[content_types].xml".equals(lower)) {
 					hasContentTypes = true;
 				}
-				if (mainPart.equals(lower)) {
+				if (lower.equals(mainPart)) {
 					hasMainDocument = true;
 				}
-				if (lower.contains("vbaproject.bin") || hasDangerousSuffix(lower)) {
+				if (lower.contains("vbaproject.bin") || hasBlockedSuffix(lower, blockedSuffixes)) {
 					return false;
 				}
 
@@ -394,8 +540,7 @@ public class DocumentService {
 				while ((read = zip.read(buffer)) != -1) {
 					entryBytes += read;
 					totalUncompressedBytes += read;
-					if (entryBytes > MAX_DOCX_ENTRY_UNCOMPRESSED_BYTES
-							|| totalUncompressedBytes > MAX_DOCX_TOTAL_UNCOMPRESSED_BYTES) {
+					if (entryBytes > maxEntryBytes || totalUncompressedBytes > maxTotalBytes) {
 						return false;
 					}
 				}
@@ -412,17 +557,40 @@ public class DocumentService {
 		} catch (IOException error) {
 			return false;
 		}
-		return hasContentTypes && hasMainDocument;
+		return mainPart == null ? files > 0 : hasContentTypes && hasMainDocument;
+	}
+
+	/**
+	 * The file's name ends in a blocked suffix, once the trailing dots and spaces Windows drops are gone. A folder on
+	 * the way counts only as a macOS application, a folder named *.app with its program inside.
+	 */
+	private static boolean hasBlockedSuffix(String entryName, Set<String> blockedSuffixes) {
+		String[] segments = PATH_SEPARATOR.split(entryName.replace('\\', '/'));
+		for (int index = 0; index < segments.length; index++) {
+			String segment = TRAILING_DOTS_AND_SPACES.matcher(segments[index]).replaceAll("");
+			boolean file = index == segments.length - 1;
+			if (file ? endsWithAny(segment, blockedSuffixes)
+					: blockedSuffixes.contains(".app") && segment.endsWith(".app")) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private static boolean endsWithAny(String name, Set<String> suffixes) {
+		for (String suffix : suffixes) {
+			if (name.endsWith(suffix)) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	private boolean hasImageSignature(byte[] bytes) {
 		if (bytes == null) {
 			return false;
 		}
-		if (startsWith(bytes, new byte[] { (byte) 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A })) {
-			return true;
-		}
-		if (startsWith(bytes, new byte[] { (byte) 0xFF, (byte) 0xD8, (byte) 0xFF })) {
+		if (startsWith(bytes, PNG_SIGNATURE) || startsWith(bytes, JPEG_SIGNATURE)) {
 			return true;
 		}
 		return bytes.length >= 12
@@ -430,7 +598,7 @@ public class DocumentService {
 				&& bytes[8] == 'W' && bytes[9] == 'E' && bytes[10] == 'B' && bytes[11] == 'P';
 	}
 
-	private boolean startsWith(byte[] bytes, byte[] prefix) {
+	private static boolean startsWith(byte[] bytes, byte[] prefix) {
 		if (bytes.length < prefix.length) {
 			return false;
 		}
@@ -459,14 +627,5 @@ public class DocumentService {
 				filename,
 				sizeBytes);
 		return new InvalidRequestException(message);
-	}
-
-	private static boolean hasDangerousSuffix(String filename) {
-		for (String suffix : DANGEROUS_ARCHIVE_SUFFIXES) {
-			if (filename.endsWith(suffix)) {
-				return true;
-			}
-		}
-		return false;
 	}
 }

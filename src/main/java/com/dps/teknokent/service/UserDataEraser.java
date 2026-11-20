@@ -356,6 +356,8 @@ class UserDataEraser {
 		update("delete from DocumentRequestUpload u where u.storedDocument.id in :ids", "ids", ids);
 		update("update ActionItem a set a.submissionDocumentId = null where a.submissionDocumentId in :ids", "ids",
 				ids);
+		// A handed-in İŞKUR task file is the person's own upload, so it goes; its task stays with the team.
+		update("delete from IskurTaskOutput o where o.documentId in :ids", "ids", ids);
 		update("delete from StoredDocument d where d.id in :ids", "ids", ids);
 		return going.stream().map(StoredDocument::getS3Key).toList();
 	}
