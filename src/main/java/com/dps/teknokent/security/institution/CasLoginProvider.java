@@ -199,6 +199,7 @@ public class CasLoginProvider implements InstitutionLoginProvider {
 			if (bytes.length > MAX_ANSWER_LENGTH) {
 				throw unavailable("validation answered with an oversized body", null);
 			}
+			// CAS answers in UTF-8; the parser gets a String, so an encoding in the XML prolog plays no part.
 			return new String(bytes, StandardCharsets.UTF_8);
 		}
 	}

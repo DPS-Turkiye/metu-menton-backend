@@ -30,7 +30,8 @@ public final class InstitutionRecords {
 
 	/**
 	 * For a login that carries only part of the record ({@link InstitutionLoginProvider#sendsWholeRecord()} false):
-	 * what it says is written, what it leaves out stays as the row has it.
+	 * what it says is written, what it leaves out stays as the row has it. The kinds and the address are always
+	 * written: they are what the login vouches for, and a kind the institution no longer names must lapse.
 	 */
 	public static void applyKnown(InstitutionIdentity identity, InstitutionPerson person, Instant now) {
 		person.setKinds(identity.kinds());
