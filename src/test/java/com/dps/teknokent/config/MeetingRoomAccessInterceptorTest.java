@@ -13,6 +13,7 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -231,6 +232,24 @@ class MeetingRoomAccessInterceptorTest {
 		Message<?> other = message(StompCommand.SUBSCRIBE, "/topic/meetings/" + otherMeetingId, sessionAttributes);
 
 		assertThatThrownBy(() -> interceptor.preSend(other, null)).isInstanceOf(MessagingException.class);
+	}
+
+	// An ODTÜ account's token names no team. Whatever the room and whatever the frame, it opens nothing here, and
+	// the room's rules are never even asked.
+	@Test
+	void aTokenWithoutATeamCanNeitherSubscribeToNorSendToAMeetingRoom() {
+		MeetingRoomAccessInterceptor interceptor = interceptor();
+		Map<String, Object> sessionAttributes = sessionAttributes();
+		sessionAttributes.put(
+				RealtimeHandshakeInterceptor.IDENTITY_ATTRIBUTE,
+				new RealtimeIdentity(userId, null, connectedAt.minusSeconds(600)));
+
+		for (Message<?> frame : List.of(subscribe(sessionAttributes), documentUpdate(sessionAttributes),
+				presenceUpdate(sessionAttributes),
+				message(StompCommand.SEND, "/topic/meetings/" + meetingId, sessionAttributes))) {
+			assertThatThrownBy(() -> interceptor.preSend(frame, null)).isInstanceOf(MessagingException.class);
+		}
+		verifyNoInteractions(meetingRoomAccessService);
 	}
 
 	private MeetingRoomAccessInterceptor interceptor() {
