@@ -65,4 +65,27 @@ class RealtimeTokenControllerTest {
 
 		verify(realtimeTokenService).issue(eq(USER_ID), eq(ORGANIZATION_ID), isNull());
 	}
+
+	// An ODTÜ account has no team to name.
+	@Test
+	void issuesATokenForAnAccountWithoutATeam() throws Exception {
+		mockMvc.perform(post("/api/realtime/token")
+				.with(user("proxy"))
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+						{"userId": "%s"}
+						""".formatted(USER_ID)))
+				.andExpect(status().isOk());
+
+		verify(realtimeTokenService).issue(eq(USER_ID), isNull(), isNull());
+	}
+
+	@Test
+	void refusesATokenRequestThatNamesNobody() throws Exception {
+		mockMvc.perform(post("/api/realtime/token")
+				.with(user("proxy"))
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{}"))
+				.andExpect(status().isBadRequest());
+	}
 }

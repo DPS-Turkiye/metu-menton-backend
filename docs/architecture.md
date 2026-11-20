@@ -70,9 +70,18 @@ and NullAway checks it at compile time.
 
 ## Realtime
 
-`/ws` is a STOMP WebSocket endpoint for meeting rooms (live notes, to-dos). The browser connects with a short-lived
-token signed with `REALTIME_TOKEN_SECRET`; `RealtimeHandshakeInterceptor` and `MeetingRoomAccessInterceptor` check
-it and the room it subscribes to.
+`/ws` is a STOMP WebSocket endpoint for meeting rooms (live notes, to-dos) and, on the ODTÜ edition, the İŞKUR
+channels. The browser connects with a short-lived token signed with `REALTIME_TOKEN_SECRET`;
+`RealtimeHandshakeInterceptor` checks it, and `RealtimeAccessRouter` hands each subscribe or send to the feature that
+owns its destination:
+
+- `/topic/meetings/{id}`, `/app/meetings/{id}/…`: `MeetingRoomAccessInterceptor`. It also refuses every destination
+  nobody owns, so a new one is closed until an interceptor claims it.
+- `/topic/iskur/channels/{id}`: `IskurChannelAccessInterceptor`. A subscribe is checked with the same rules as the
+  REST reads (`IskurChannelService.canReach`), on every subscribe; clients can never send there. The same check runs
+  again on the way out once a subscription is a minute old, so someone who lost the channel stops hearing about it.
+  The events (`IskurChannelEvent`) carry ids only: the screens read what changed through the REST API, which
+  renders it for that reader. A token without a team (ODTÜ's accounts) opens these topics and no meeting room.
 
 ## Background work
 

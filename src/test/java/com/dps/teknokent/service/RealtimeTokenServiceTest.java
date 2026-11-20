@@ -53,6 +53,19 @@ class RealtimeTokenServiceTest {
 		assertThat(service.verify(service.issue(userId, organizationId, null).token()).signedInAt()).isNull();
 	}
 
+	// ODTÜ's students and coordinators belong to no team; their token names only the account.
+	@Test
+	void issuesATokenForAnAccountWithoutATeam() {
+		RealtimeTokenService service = service(60);
+		Instant signedInAt = Instant.parse("2026-11-08T08:15:30.123Z");
+
+		RealtimeIdentity identity = service.verify(service.issue(userId, null, signedInAt).token());
+
+		assertThat(identity).isEqualTo(new RealtimeIdentity(userId, null, signedInAt));
+		assertThat(service.verify(service.issue(userId, null, null).token()))
+				.isEqualTo(new RealtimeIdentity(userId, null, null));
+	}
+
 	@Test
 	void rejectsTokensWithATamperedPayloadOrSignature() {
 		RealtimeTokenService service = service(60);

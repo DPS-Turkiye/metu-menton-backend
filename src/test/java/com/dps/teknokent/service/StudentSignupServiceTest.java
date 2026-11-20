@@ -69,7 +69,7 @@ class StudentSignupServiceTest {
 	}
 
 	private StudentSignupService studentSignup(List<String> allowedDomains) {
-		return new StudentSignupService(users, programs, people,
+		return new StudentSignupService(users, new StudentProgramLookup(programs), people,
 				new EmailDomainPolicy(new RegistrationProperties(allowedDomains)));
 	}
 

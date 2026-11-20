@@ -145,6 +145,8 @@ class StaffBootstrapTest {
 				.hasMessageContaining("entry 2 repeats the e-mail address or uid of an earlier entry");
 		assertThatThrownBy(() -> new StaffBootstrap(users, "COORDINATOR:a@metu.edu.tr:otg_1234"))
 				.hasMessageContaining("entry 1 has an ODTÜ-login uid");
+		assertThatThrownBy(() -> new StaffBootstrap(users, "COORDINATOR:a@metu.edu.tr:odtu-cas_e123456"))
+				.hasMessageContaining("entry 1 has an ODTÜ-login uid");
 	}
 
 	@Test

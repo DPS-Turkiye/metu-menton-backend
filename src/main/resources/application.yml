@@ -127,6 +127,23 @@ app:
     client-id: ${OTG_CLIENT_ID:}
     client-secret: ${OTG_CLIENT_SECRET:}
     redirect-uri: ${OTG_REDIRECT_URI:}
+  cas-login:
+    # "ODTÜ ile giriş yap" (ODTÜ's CAS). Off unless CAS_LOGIN_ENABLED=true; then a missing or non-https address
+    # stops the start-up. The attribute names are ODTÜ's to tell us (docs/odtu-cas-login.md).
+    enabled: ${CAS_LOGIN_ENABLED:false}
+    base-url: ${CAS_BASE_URL:}
+    service-url: ${CAS_SERVICE_URL:}
+    version: ${CAS_VERSION:3.0}
+    email-domains: ${CAS_EMAIL_DOMAINS:metu.edu.tr}
+    id-attribute: ${CAS_ATTR_ID:}
+    email-attribute: ${CAS_ATTR_EMAIL:mail}
+    name-attribute: ${CAS_ATTR_NAME:cn}
+    kind-attribute: ${CAS_ATTR_KIND:eduPersonAffiliation}
+    student-values: ${CAS_KIND_STUDENT:student}
+    academic-values: ${CAS_KIND_ACADEMIC:faculty}
+    staff-values: ${CAS_KIND_STAFF:staff,employee}
+    department-attribute: ${CAS_ATTR_DEPARTMENT:}
+    faculty-attribute: ${CAS_ATTR_FACULTY:}
   notifications:
     reminders:
       enabled: ${NOTIFICATION_REMINDERS_ENABLED:true}

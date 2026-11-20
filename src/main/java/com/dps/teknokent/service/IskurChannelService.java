@@ -27,6 +27,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import com.dps.teknokent.config.RateLimitingConfig;
+import com.dps.teknokent.domain.IskurChannelEventType;
 import com.dps.teknokent.domain.IskurChannelKind;
 import com.dps.teknokent.domain.ProgramType;
 import com.dps.teknokent.domain.UserAccountStatus;
@@ -189,6 +190,8 @@ public class IskurChannelService {
 		channel.setLastMessageAt(now);
 		channels.save(channel);
 		events.publishEvent(new IskurMessagePostedEvent(message.getId()));
+		events.publishEvent(new IskurChannelChangedEvent(IskurChannelEventType.MESSAGE_POSTED, channelId,
+				message.getId()));
 		return render(actor, new Reached(channel, reached.reach()), List.of(message)).getFirst();
 	}
 
@@ -223,6 +226,8 @@ public class IskurChannelService {
 		}
 		if (receipts.findByMessageIdAndUserId(messageId, actor.getId()).isEmpty()) {
 			receipts.save(new IskurMessageReceipt(messageId, actor.getId(), Instant.now()));
+			events.publishEvent(new IskurChannelChangedEvent(IskurChannelEventType.MESSAGE_ACKNOWLEDGED,
+					message.getChannelId(), messageId));
 		}
 		return render(actor, reached, List.of(message)).getFirst();
 	}
@@ -310,9 +315,33 @@ public class IskurChannelService {
 		return actor;
 	}
 
+	/**
+	 * Whether the REST reads would show this channel to the user right now: an approved account that is one of its
+	 * current members, or a coordinator or admin whose program role reaches it. The live topic asks this, so a
+	 * subscription never opens what a read would refuse.
+	 */
+	@Transactional(readOnly = true)
+	public boolean canReach(UUID userId, UUID channelId) {
+		return users.findById(userId)
+				.filter(user -> user.getStatus() == UserAccountStatus.APPROVED)
+				.map(user -> findReach(user, channelId) != null)
+				.orElse(false);
+	}
+
 	/** The channel and how the caller reaches it, or 404 when they cannot. */
 	private Reached requireReach(AppUser actor, UUID channelId) {
-		IskurChannel channel = channels.findById(channelId).orElseThrow(IskurChannelService::channelNotFound);
+		Reached reached = findReach(actor, channelId);
+		if (reached == null) {
+			throw channelNotFound();
+		}
+		return reached;
+	}
+
+	private @Nullable Reached findReach(AppUser actor, UUID channelId) {
+		IskurChannel channel = channels.findById(channelId).orElse(null);
+		if (channel == null) {
+			return null;
+		}
 		Reach reach = members.findByChannelIdAndUserIdAndLeftAtIsNull(channelId, actor.getId())
 				.map(membership -> new Reach(membership.isCanWrite(), false))
 				.orElse(null);
@@ -322,10 +351,7 @@ public class IskurChannelService {
 				reach = reach == null ? staff : reach.widest(staff);
 			}
 		}
-		if (reach == null) {
-			throw channelNotFound();
-		}
-		return new Reached(channel, reach);
+		return reach == null ? null : new Reached(channel, reach);
 	}
 
 	private static ResourceNotFoundException channelNotFound() {

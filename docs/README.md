@@ -7,6 +7,7 @@
 | [Security](security.md) | understand who a caller is, how access is checked, and the limits on abuse |
 | [AI features](ai.md) | see what goes to the AI provider, how each feature can be switched off, and the fallbacks |
 | [Configuration](configuration.md) | look up an environment variable |
+| [ODTÜ CAS login](odtu-cas-login.md) | switch on "ODTÜ ile giriş yap", and see what to ask ODTÜ for first |
 | [Deployment](deployment.md) | follow CI, a release and what runs in production |
 
 The rules every change follows (layers, errors, time zones, texts, null safety) are in [AGENTS.md](../AGENTS.md);
