@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.RestController;
 import com.dps.teknokent.domain.IdentityKind;
 import com.dps.teknokent.dto.responses.InstitutionCustomTokenResponse;
 import com.dps.teknokent.dto.responses.InstitutionLoginCodeResponse;
+import com.dps.teknokent.dto.responses.InstitutionLoginProvidersResponse;
 import com.dps.teknokent.dto.responses.InstitutionLoginStartResponse;
 import com.dps.teknokent.exception.ResourceNotFoundException;
 import com.dps.teknokent.security.institution.DevInstitutionLoginProvider;
@@ -53,6 +54,12 @@ public class InstitutionLoginController {
 	@PostMapping("/exchange")
 	public InstitutionCustomTokenResponse exchange(@Valid @RequestBody ExchangeRequest request) {
 		return new InstitutionCustomTokenResponse(institutionLoginService.exchange(request.code()));
+	}
+
+	/** Which institution logins are on here, so the login page shows a button only for one that works. */
+	@GetMapping("/providers")
+	public InstitutionLoginProvidersResponse providers() {
+		return new InstitutionLoginProvidersResponse(institutionLoginService.enabledProviders());
 	}
 
 	/** The personas the dev login page offers; a 404 whenever the stub is off. */

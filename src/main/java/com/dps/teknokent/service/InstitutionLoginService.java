@@ -4,6 +4,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -27,6 +28,7 @@ import com.dps.teknokent.dto.responses.InstitutionLoginStartResponse;
 import com.dps.teknokent.entity.AppUser;
 import com.dps.teknokent.entity.AppUserIdentity;
 import com.dps.teknokent.entity.InstitutionPerson;
+import com.dps.teknokent.entity.Program;
 import com.dps.teknokent.exception.ConflictException;
 import com.dps.teknokent.exception.InvalidRequestException;
 import com.dps.teknokent.exception.ResourceNotFoundException;
@@ -36,22 +38,25 @@ import com.dps.teknokent.repository.InstitutionPersonRepository;
 import com.dps.teknokent.security.LoginProvisioner;
 import com.dps.teknokent.security.institution.InstitutionIdentity;
 import com.dps.teknokent.security.institution.InstitutionLoginProvider;
+import com.dps.teknokent.security.institution.InstitutionLoginUids;
 import com.dps.teknokent.security.institution.InstitutionRecords;
 import com.dps.teknokent.util.EmailDomains;
 import com.dps.teknokent.util.RandomTokens;
 import com.dps.teknokent.util.TextUtils;
 import com.dps.teknokent.util.Texts;
 
+import lombok.extern.slf4j.Slf4j;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
  * Turns an institution's sign-in into an ordinary Firebase session: links or creates the account, gives it what the
  * institution's record backs (student → MENTEE, academic → ACADEMICIAN), then hands the browser a one-time code it
  * trades for a Firebase custom token. Everything after that (bearer filter, /me, the session cookie) is unchanged.
- * A login that only proves who someone is ({@link InstitutionLoginProvider#grantsAccess()} false, e.g. OTG) finds
- * the account but never creates one: a newcomer's code yields a Firebase login without an account, which the
- * frontend sends to the ordinary sign-up.
+ * A login that only proves who someone is ({@link InstitutionLoginProvider#grantsAccess()} false: OTG, or a CAS
+ * person who is neither a student nor an academic) finds the account but never creates one: a newcomer's code yields
+ * a Firebase login without an account, which the frontend sends to the ordinary sign-up.
  */
+@Slf4j
 @Service
 public class InstitutionLoginService {
 
@@ -70,18 +75,21 @@ public class InstitutionLoginService {
 	private final AppUserIdentityRepository identities;
 	private final InstitutionPersonRepository people;
 	private final LoginProvisioner loginProvisioner;
+	private final StudentProgramLookup studentPrograms;
 	private final TransactionTemplate transactions;
 	private final JsonMapper jsonMapper;
 
 	public InstitutionLoginService(ObjectProvider<InstitutionLoginProvider> providers, StringRedisTemplate redis,
 			AppUserRepository users, AppUserIdentityRepository identities, InstitutionPersonRepository people,
-			LoginProvisioner loginProvisioner, PlatformTransactionManager transactionManager, JsonMapper jsonMapper) {
+			LoginProvisioner loginProvisioner, StudentProgramLookup studentPrograms,
+			PlatformTransactionManager transactionManager, JsonMapper jsonMapper) {
 		this.providers = providers;
 		this.redis = redis;
 		this.users = users;
 		this.identities = identities;
 		this.people = people;
 		this.loginProvisioner = loginProvisioner;
+		this.studentPrograms = studentPrograms;
 		this.transactions = new TransactionTemplate(transactionManager);
 		this.jsonMapper = jsonMapper;
 	}
@@ -104,7 +112,7 @@ public class InstitutionLoginService {
 			throw new InvalidRequestException(Texts.forRequest("error.institutionLoginExpired"));
 		}
 		InstitutionIdentity identity = provider.completeLogin(state, callback == null ? Map.of() : callback);
-		Optional<AppUser> account = transactions.execute(status -> provider.grantsAccess()
+		Optional<AppUser> account = transactions.execute(status -> provider.grantsAccess(identity)
 				? Optional.of(signIn(provider, identity))
 				: findAccount(provider, identity));
 		String code = RandomTokens.urlSafe(32);
@@ -151,7 +159,7 @@ public class InstitutionLoginService {
 			known.get().setLastLoginAt(now);
 			user = known.get().getUser();
 		} else {
-			user = users.save(linkByEmail(provider, identity).orElseGet(() -> newUser(identity, backed)));
+			user = users.save(linkByEmail(provider, identity).orElseGet(() -> newUser(provider, identity, backed)));
 			identities.save(new AppUserIdentity(user, provider.id(), persistentId, now));
 		}
 		if (user.getStatus() == UserAccountStatus.REJECTED || user.getStatus() == UserAccountStatus.DELETED) {
@@ -176,7 +184,15 @@ public class InstitutionLoginService {
 				.orElseGet(() -> new InstitutionPerson(provider.id(), persistentId));
 		person.setInstitution(provider.id());
 		person.setPersistentId(persistentId);
-		InstitutionRecords.apply(identity, person, now);
+		if (provider.sendsWholeRecord()) {
+			InstitutionRecords.apply(identity, person, now);
+		} else {
+			InstitutionRecords.applyKnown(identity, person, now);
+		}
+		// The column takes no null, and a login may name nobody (CAS without a name attribute).
+		if (person.getFullName() == null || person.getFullName().isBlank()) {
+			person.setFullName(user.getFullName());
+		}
 		person.setSource(InstitutionDataSource.LOGIN);
 		person.setUser(user);
 		people.save(person);
@@ -262,7 +278,7 @@ public class InstitutionLoginService {
 	}
 
 	/** Institution accounts are never approved by hand (board 08): what the institution says is the approval. */
-	private static AppUser newUser(InstitutionIdentity identity, Set<UserRole> backed) {
+	private AppUser newUser(InstitutionLoginProvider provider, InstitutionIdentity identity, Set<UserRole> backed) {
 		AppUser user = new AppUser();
 		user.setEmail(requireEmail(identity));
 		user.setFullName(identity.fullName() == null || identity.fullName().isBlank()
@@ -270,7 +286,21 @@ public class InstitutionLoginService {
 				: identity.fullName().trim());
 		user.setStatus(UserAccountStatus.APPROVED);
 		user.setPrimaryRole(backed.contains(UserRole.ACADEMICIAN) ? UserRole.ACADEMICIAN : UserRole.MENTEE);
+		if (provider.newStudentsJoinTheProgram() && !backed.contains(UserRole.ACADEMICIAN)) {
+			joinTheStudentProgram(user);
+		}
 		return user;
+	}
+
+	/** The same program an e-mail sign-up joins. With none or several the student still gets in, without one. */
+	private void joinTheStudentProgram(AppUser student) {
+		List<Program> running = studentPrograms.running();
+		if (running.size() == 1) {
+			student.setProgramId(running.getFirst().getId());
+		} else {
+			log.warn("Institution login: a new student joined no program; {} active peer-mentoring programs, "
+					+ "exactly one is needed", running.size());
+		}
 	}
 
 	static Set<UserRole> backedPermissions(Set<IdentityKind> kinds) {
@@ -285,7 +315,7 @@ public class InstitutionLoginService {
 	}
 
 	private static String firebaseUid(InstitutionLoginProvider provider, String persistentId) {
-		return provider.id() + "_" + persistentId;
+		return InstitutionLoginUids.of(provider, persistentId);
 	}
 
 	private static String requirePersistentId(InstitutionIdentity identity) {
@@ -301,6 +331,11 @@ public class InstitutionLoginService {
 			throw new InvalidRequestException("The institution sent no e-mail address for this person.");
 		}
 		return EmailDomains.normalizeEmail(identity.email());
+	}
+
+	/** The institution logins this deployment has switched on, so the login page offers only those. */
+	public List<String> enabledProviders() {
+		return providers.orderedStream().map(InstitutionLoginProvider::id).toList();
 	}
 
 	private InstitutionLoginProvider provider(String providerId) {

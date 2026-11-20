@@ -5,9 +5,11 @@ import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.util.List;
 import java.util.Map;
 
 import org.junit.jupiter.api.Test;
@@ -17,6 +19,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.json.JsonCompareMode;
 import org.springframework.test.web.servlet.MockMvc;
 
 import com.dps.teknokent.config.SecurityConfig;
@@ -69,6 +72,27 @@ class InstitutionLoginControllerTest {
 		mockMvc.perform(post("/api/auth/institution/odtu/callback").with(user("service"))
 				.contentType(MediaType.APPLICATION_JSON)
 				.content("{\"state\":\"s1\",\"params\":{\"persona\":\"dev-ogrenci-1\"}}"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.code").value("c1"));
+	}
+
+	// The login page asks this before it shows "ODTÜ ile giriş yap"; ids only, and only on the service credentials.
+	@Test
+	void namesTheLoginsThatAreOnAndNothingElseAboutThem() throws Exception {
+		when(institutionLoginService.enabledProviders()).thenReturn(List.of("odtu-cas"));
+
+		mockMvc.perform(get("/api/auth/institution/providers")).andExpect(status().isUnauthorized());
+		mockMvc.perform(get("/api/auth/institution/providers").with(user("service")))
+				.andExpect(status().isOk())
+				.andExpect(content().json("{\"providers\":[\"odtu-cas\"]}", JsonCompareMode.STRICT));
+	}
+
+	@Test
+	void theCasCallbackHandsItsTicketToTheService() throws Exception {
+		when(institutionLoginService.complete("odtu-cas", "s1", Map.of("ticket", "ST-1"))).thenReturn("c1");
+
+		mockMvc.perform(post("/api/auth/institution/odtu-cas/callback").with(user("service"))
+				.contentType(MediaType.APPLICATION_JSON).content("{\"state\":\"s1\",\"params\":{\"ticket\":\"ST-1\"}}"))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.code").value("c1"));
 	}
