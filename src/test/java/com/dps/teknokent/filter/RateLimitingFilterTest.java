@@ -223,6 +223,25 @@ class RateLimitingFilterTest {
 		SecurityContextHolder.clearContext();
 	}
 
+	// The web proxy starts every institution login under one login and address, so all starts share one budget.
+	@Test
+	void institutionLoginStartsShareTwelveHundredAMinuteWhicheverProviderOrAddress() throws Exception {
+		for (int i = 0; i < 1_200; i++) {
+			String provider = i % 2 == 0 ? "odtu-cas" : "otg";
+			assertThat(call(from("POST", "/api/auth/institution/" + provider + "/start", "198.51.100." + i % 250))
+					.getStatus()).isEqualTo(200);
+		}
+
+		MockHttpServletResponse refused = call(from("POST", "/api/auth/institution/odtu/start", "203.0.113.1"));
+
+		assertThat(refused.getStatus()).isEqualTo(429);
+		assertThat(Long.parseLong(refused.getHeader(RateLimitingFilter.RETRY_AFTER_HEADER))).isBetween(1L, 60L);
+		// The callback and the exchange spend nothing from it.
+		assertThat(call(from("POST", "/api/auth/institution/odtu-cas/callback", "203.0.113.1")).getStatus())
+				.isEqualTo(200);
+		assertThat(call(from("POST", "/api/auth/institution/exchange", "203.0.113.1")).getStatus()).isEqualTo(200);
+	}
+
 	private MockHttpServletResponse call(MockHttpServletRequest request) throws Exception {
 		MockHttpServletResponse response = new MockHttpServletResponse();
 		filter.doFilter(request, response, new MockFilterChain());
