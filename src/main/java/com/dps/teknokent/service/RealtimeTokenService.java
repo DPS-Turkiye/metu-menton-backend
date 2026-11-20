@@ -23,8 +23,12 @@ public class RealtimeTokenService {
 	private static final Base64.Encoder ENCODER = Base64.getUrlEncoder().withoutPadding();
 	private static final Base64.Decoder DECODER = Base64.getUrlDecoder();
 
-	/** {@code signedInAt} is null for a token issued without one (a frontend from before it was sent). */
-	public record RealtimeIdentity(UUID userId, UUID organizationId, @Nullable Instant signedInAt) {
+	/**
+	 * {@code organizationId} is null for an account without a team (ODTÜ's students and coordinators): such a token
+	 * opens no meeting room. {@code signedInAt} is null for a token issued without one (a frontend from before it was
+	 * sent).
+	 */
+	public record RealtimeIdentity(UUID userId, @Nullable UUID organizationId, @Nullable Instant signedInAt) {
 	}
 
 	@Value("${app.realtime.token-secret:}")
@@ -32,9 +36,10 @@ public class RealtimeTokenService {
 	@Value("${app.realtime.token-ttl-seconds:60}")
 	private long tokenTtlSeconds;
 
-	public RealtimeTokenResponse issue(UUID userId, UUID organizationId, @Nullable Instant signedInAt) {
+	public RealtimeTokenResponse issue(UUID userId, @Nullable UUID organizationId, @Nullable Instant signedInAt) {
 		Instant expiresAt = Instant.now().plusSeconds(tokenTtlSeconds);
-		String payload = userId + ":" + organizationId + ":" + expiresAt.getEpochSecond()
+		String payload = userId + ":" + (organizationId == null ? "" : organizationId.toString()) + ":"
+				+ expiresAt.getEpochSecond()
 				+ (signedInAt == null ? "" : ":" + signedInAt.toEpochMilli());
 		String token = ENCODER.encodeToString(payload.getBytes(StandardCharsets.UTF_8)) + "." + sign(payload);
 		return new RealtimeTokenResponse(token, expiresAt);
@@ -72,7 +77,8 @@ public class RealtimeTokenService {
 				return null;
 			}
 			Instant signedInAt = parts.length == 4 ? Instant.ofEpochMilli(Long.parseLong(parts[3])) : null;
-			return new RealtimeIdentity(UUID.fromString(parts[0]), UUID.fromString(parts[1]), signedInAt);
+			UUID organizationId = parts[1].isEmpty() ? null : UUID.fromString(parts[1]);
+			return new RealtimeIdentity(UUID.fromString(parts[0]), organizationId, signedInAt);
 		} catch (IllegalArgumentException error) {
 			return null;
 		}
