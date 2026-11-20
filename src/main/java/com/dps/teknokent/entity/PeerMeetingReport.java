@@ -65,6 +65,14 @@ public class PeerMeetingReport extends PeerReportReview {
 	@Column(name = "actual_duration_minutes")
 	private Integer actualDurationMinutes;
 
+	/** Time spent getting ready for the meeting; with the follow-up time, it counts as mentoring work (Figma 7.1). */
+	@Column(name = "preparation_minutes")
+	private Integer preparationMinutes;
+
+	/** Time spent on the report and the follow-up after the meeting. */
+	@Column(name = "follow_up_minutes")
+	private Integer followUpMinutes;
+
 	@ElementCollection(fetch = FetchType.LAZY)
 	@BatchSize(size = 50)
 	@CollectionTable(name = "peer_meeting_report_topic", joinColumns = @JoinColumn(name = "report_id"))
