@@ -101,19 +101,23 @@ public class PrismTrainingService {
 
 	/**
 	 * Where a student of the peer program stands with its Prism training, once the badge states are ruled out: a
-	 * student who cannot become a mentor there sees why, and before the link is set there is nothing to do.
+	 * student who cannot become a mentor there sees why. The student's own review wins over a missing link: someone
+	 * asked to retake, or waiting for a decision, sees that even before a coordinator sets the link (or after it is
+	 * cleared), with no link to open. Only with neither a review state nor a link is there nothing to do yet.
 	 */
 	StudentPrism forStudent(AppUser student, Program program) {
 		if (!badgeService.internRule(program).test(student.getId())) {
 			return new StudentPrism(TrainingState.INTERNS_ONLY, null, null);
 		}
-		Optional<PrismTrainingLink> link = links.findById(program.getId());
-		if (link.isEmpty()) {
-			return new StudentPrism(TrainingState.NOT_AVAILABLE, null, null);
-		}
 		@Nullable
 		PrismTrainingReview review = reviews.findByProgramIdAndUserId(program.getId(), student.getId()).orElse(null);
-		return new StudentPrism(stateOf(review), link.get().getUrl(), review == null ? null : review.getCompletedAt());
+		TrainingState state = stateOf(review);
+		@Nullable
+		String url = links.findById(program.getId()).map(PrismTrainingLink::getUrl).orElse(null);
+		if (url == null && state == TrainingState.PRISM_TODO) {
+			return new StudentPrism(TrainingState.NOT_AVAILABLE, null, null);
+		}
+		return new StudentPrism(state, url, review == null ? null : review.getCompletedAt());
 	}
 
 	/** "Prism eğitimini tamamladım": the coordinator sees the student waiting for a decision. */
