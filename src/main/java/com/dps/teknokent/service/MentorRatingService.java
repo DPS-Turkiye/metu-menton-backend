@@ -1,5 +1,6 @@
 package com.dps.teknokent.service;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -26,13 +27,14 @@ public class MentorRatingService {
 		Double average = feedback == 0
 				? null
 				: rows.stream().mapToDouble(row -> row.getAverage() * row.getFeedbackCount()).sum() / feedback;
-		return new MentorRatingResponse(
-				average,
-				feedback,
-				rows.stream()
-						.filter(row -> row.getRequestId() != null)
-						.map(row -> new MentorRatingResponse.Mentorship(
-								row.getRequestId(), row.getAverage(), row.getFeedbackCount()))
-						.toList());
+		List<MentorRatingResponse.Mentorship> mentorships = new ArrayList<>();
+		for (MentorshipRating row : rows) {
+			UUID requestId = row.getRequestId();
+			if (requestId != null) {
+				mentorships
+						.add(new MentorRatingResponse.Mentorship(requestId, row.getAverage(), row.getFeedbackCount()));
+			}
+		}
+		return new MentorRatingResponse(average, feedback, mentorships);
 	}
 }
