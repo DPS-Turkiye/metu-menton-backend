@@ -213,6 +213,22 @@ class IskurChannelRealtimeIntegrationTest {
 				.isInstanceOf(MessagingException.class);
 	}
 
+	// The token of an ODTÜ account names no team: through the application's own interceptors it reaches the
+	// channels its holder is in, and no meeting room by any frame.
+	@Test
+	void aTokenWithoutATeamOpensItsHoldersChannelsAndNoMeetingRoom() {
+		assertThatCode(() -> subscribe(burak, teamChannel)).doesNotThrowAnyException();
+
+		UUID meetingId = UUID.randomUUID();
+		for (String destination : List.of("/topic/meetings/" + meetingId, "/app/meetings/" + meetingId + "/document",
+				"/app/meetings/" + meetingId + "/presence")) {
+			for (StompCommand command : List.of(StompCommand.SUBSCRIBE, StompCommand.SEND)) {
+				assertThatThrownBy(() -> through(inbound, message(command, identityOf(burak), destination)))
+						.isInstanceOf(MessagingException.class);
+			}
+		}
+	}
+
 	// The outbound channel carries the delivery check, so a subscription the application never opened hears nothing.
 	@Test
 	void anEventIsOnlyDeliveredToASubscriptionTheApplicationOpened() {
@@ -310,17 +326,26 @@ class IskurChannelRealtimeIntegrationTest {
 	}
 
 	private String frame(StompCommand command, AppUser user, IskurChannel channel) {
-		Map<String, Object> attributes = new HashMap<>();
-		attributes.put(RealtimeHandshakeInterceptor.IDENTITY_ATTRIBUTE, new RealtimeIdentity(user.getId(), null, null));
-		attributes.put(RealtimeHandshakeInterceptor.CONNECTED_AT_ATTRIBUTE, Instant.now());
-		Message<?> message = message(command, attributes, channel);
+		Message<?> message = message(command, identityOf(user), channel);
 		through(inbound, message);
 		return SimpMessageHeaderAccessor.getSessionId(message.getHeaders());
 	}
 
+	/** What the handshake leaves on the socket of an ODTÜ account: its user, and no team. */
+	private static Map<String, Object> identityOf(AppUser user) {
+		Map<String, Object> attributes = new HashMap<>();
+		attributes.put(RealtimeHandshakeInterceptor.IDENTITY_ATTRIBUTE, new RealtimeIdentity(user.getId(), null, null));
+		attributes.put(RealtimeHandshakeInterceptor.CONNECTED_AT_ATTRIBUTE, Instant.now());
+		return attributes;
+	}
+
 	private static Message<?> message(StompCommand command, Map<String, Object> attributes, IskurChannel channel) {
+		return message(command, attributes, "/topic/iskur/channels/" + channel.getId());
+	}
+
+	private static Message<?> message(StompCommand command, Map<String, Object> attributes, String destination) {
 		StompHeaderAccessor accessor = StompHeaderAccessor.create(command);
-		accessor.setDestination("/topic/iskur/channels/" + channel.getId());
+		accessor.setDestination(destination);
 		accessor.setSubscriptionId("sub-0");
 		accessor.setSessionId(UUID.randomUUID().toString());
 		accessor.setSessionAttributes(attributes);
