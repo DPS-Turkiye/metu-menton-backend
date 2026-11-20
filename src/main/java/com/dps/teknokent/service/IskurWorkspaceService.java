@@ -86,6 +86,7 @@ public class IskurWorkspaceService {
 	private final ApplicationEventPublisher events;
 	private final IskurSkillService skillService;
 	private final IskurInternService interns;
+	private final IskurTaskOutputFiles taskOutputs;
 
 	/** The program's coordinators and the admin may read it. */
 	@Transactional(readOnly = true)
@@ -150,6 +151,7 @@ public class IskurWorkspaceService {
 		if (!unitTeams.isEmpty() && placements.existsByTeamIdIn(unitTeams.stream().map(IskurTeam::getId).toList())) {
 			throw new ConflictException(Texts.forRequest("error.iskurUnitNotEmpty"));
 		}
+		taskOutputs.removeAllOfTeams(unitTeams.stream().map(IskurTeam::getId).toList());
 		teams.deleteAll(unitTeams);
 		units.delete(unit);
 		return build(program);
@@ -185,6 +187,7 @@ public class IskurWorkspaceService {
 		if (!placements.findByTeamId(team.getId()).isEmpty()) {
 			throw new ConflictException(Texts.forRequest("error.iskurTeamNotEmpty"));
 		}
+		taskOutputs.removeAllOfTeams(List.of(team.getId()));
 		teams.delete(team);
 		return build(program);
 	}

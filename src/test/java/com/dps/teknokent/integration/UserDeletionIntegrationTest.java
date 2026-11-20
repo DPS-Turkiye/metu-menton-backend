@@ -71,6 +71,7 @@ import com.dps.teknokent.entity.DataProcessingConsent;
 import com.dps.teknokent.entity.InstitutionPerson;
 import com.dps.teknokent.entity.IskurOnboarding;
 import com.dps.teknokent.entity.IskurScheduleRange;
+import com.dps.teknokent.entity.IskurTaskOutput;
 import com.dps.teknokent.entity.Meeting;
 import com.dps.teknokent.entity.MeetingProposal;
 import com.dps.teknokent.entity.MentorProfile;
@@ -775,6 +776,22 @@ class UserDeletionIntegrationTest {
 				.getDecidedBy()).isNull();
 		assertThat(entityManager.find(com.dps.teknokent.entity.PrismTrainingLink.class, program).getUpdatedBy())
 				.isNull();
+	}
+
+	@Test
+	void theFilesAnInternHandedInWithTheirTasksGoWithThem() throws Exception {
+		AppUser target = user(UserRole.MENTEE, "Mert Demir", null);
+		StoredDocument handedIn = document(target.getId(), null, DocumentKind.ISKUR_TASK_OUTPUT, null);
+		entityManager.persist(new IskurTaskOutput(UUID.randomUUID(), handedIn.getId(), target.getId(),
+				Instant.now()));
+		flushAndClear();
+
+		delete(admin, target.getId(), target.getEmail()).andExpect(status().isOk());
+
+		assertThat(count("select count(o) from IskurTaskOutput o where o.uploadedBy = :id", target.getId()))
+				.isZero();
+		assertThat(entityManager.find(StoredDocument.class, handedIn.getId())).isNull();
+		verify(objectStorage).delete(handedIn.getS3Key());
 	}
 
 	@Test
