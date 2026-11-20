@@ -31,6 +31,8 @@ public record PeerMeetingReportResponse(
 		PeerMeetingType meetingType,
 		PeerMeetingFormat meetingFormat,
 		Integer actualDurationMinutes,
+		@Nullable Integer preparationMinutes,
+		@Nullable Integer followUpMinutes,
 		Set<PeerMeetingTopic> topics,
 		String menteeNeed,
 		String discussion,

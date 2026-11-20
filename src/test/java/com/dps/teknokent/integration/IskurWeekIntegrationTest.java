@@ -407,9 +407,26 @@ class IskurWeekIntegrationTest {
 				.andExpect(jsonPath("$.status").value("SUBMITTED"))
 				.andExpect(jsonPath("$.decision").doesNotExist())
 				.andExpect(jsonPath("$.objection").doesNotExist());
+		// A resend cleared the decision and the objection on the week; the history keeps every step, in order.
 		decide(zeynep, weekId, "APPROVE", null).andExpect(status().isOk())
-				.andExpect(jsonPath("$.status").value("APPROVED"));
+				.andExpect(jsonPath("$.status").value("APPROVED"))
+				.andExpect(jsonPath("$.history[*].kind").value(Matchers.contains(
+						"SUBMITTED", "REVISION", "OBJECTION", "SUBMITTED", "APPROVED")))
+				.andExpect(jsonPath("$.history[*].step").value(Matchers.contains(0, 1, 2, 3, 4)))
+				.andExpect(jsonPath("$.history[1].text").value("Çıktı bağlantısı eksik"))
+				.andExpect(jsonPath("$.history[1].by.fullName").value("Zeynep Kaya"))
+				.andExpect(jsonPath("$.history[1].outputsSufficient").value(false))
+				.andExpect(jsonPath("$.history[2].text").value("Bağlantıyı notta paylaştım"))
+				.andExpect(jsonPath("$.history[2].by.fullName").value("Mert Demir"))
+				.andExpect(jsonPath("$.history[4].text").doesNotExist());
 		object(mert, "Onaya itiraz").andExpect(status().isConflict());
+		week(mert, MONDAY)
+				.andExpect(jsonPath("$.history.length()").value(5))
+				.andExpect(jsonPath("$.history[0].by.fullName").value("Mert Demir"))
+				.andExpect(jsonPath("$.history[0].text").doesNotExist())
+				.andExpect(jsonPath("$.history[0].timeMatchesWork").doesNotExist())
+				.andExpect(jsonPath("$.history[4].kind").value("APPROVED"))
+				.andExpect(jsonPath("$.history[4].by.fullName").value("Zeynep Kaya"));
 	}
 
 	@Test
@@ -463,10 +480,13 @@ class IskurWeekIntegrationTest {
 		mockMvc.perform(get(base + "/{weekId}", weekId).param("actorId", coordinator.getId().toString())
 				.with(httpBasic("test", "test")))
 				.andExpect(status().isOk())
-				.andExpect(jsonPath("$.canDecide").value(true));
+				.andExpect(jsonPath("$.canDecide").value(true))
+				.andExpect(jsonPath("$.history[*].kind").value(Matchers.contains("SUBMITTED")));
 		send(post(base + "/{weekId}/decision", weekId), decisionBody(coordinator, "APPROVE", null))
 				.andExpect(status().isOk())
-				.andExpect(jsonPath("$.status").value("APPROVED"));
+				.andExpect(jsonPath("$.status").value("APPROVED"))
+				.andExpect(jsonPath("$.history[*].kind").value(Matchers.contains("SUBMITTED", "APPROVED")))
+				.andExpect(jsonPath("$.history[1].by.userId").value(coordinator.getId().toString()));
 
 		// A week a leader can review is not the coordinators' to decide, and a team leader never sees this one.
 		saveEntries(mert, lines(teamLine("2026-11-17", null, "Afiş", 60, null, null))).andExpect(status().isOk());

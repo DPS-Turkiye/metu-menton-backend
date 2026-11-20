@@ -29,7 +29,8 @@ public record IskurLeaderWeekResponse(
 		IskurWeekResponse.@Nullable Decision decision,
 		IskurWeekResponse.@Nullable Objection objection,
 		boolean canDecide,
-		List<IskurLeaderQueueResponse.Row> queue) {
+		List<IskurLeaderQueueResponse.Row> queue,
+		List<IskurWeekResponse.HistoryEvent> history) {
 
 	public record Person(UUID userId, String fullName, @Nullable Integer weeklyDays) {
 	}
