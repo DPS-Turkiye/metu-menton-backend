@@ -158,6 +158,37 @@ class PeerReportIntegrationTest {
 				Instant.parse("2026-11-12T07:00:00Z"), MeetingStatus.COMPLETED);
 	}
 
+	// Figma 7.1 "Süre kaydı": preparation and follow-up time are saved with the report and count as mentoring work.
+	@Test
+	void preparationAndFollowUpTimeAreSavedAndCountedWithTheMeeting() throws Exception {
+		String timed = FULL_REPORT.replace("\"actualDurationMinutes\":35",
+				"\"actualDurationMinutes\":45,\"preparationMinutes\":20,\"followUpMinutes\":15");
+
+		saveReport(mentor, held, timed)
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.actualDurationMinutes").value(45))
+				.andExpect(jsonPath("$.preparationMinutes").value(20))
+				.andExpect(jsonPath("$.followUpMinutes").value(15));
+
+		mockMvc.perform(get(DAY, TODAY).with(as(mentor)))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.recordedMinutes").value(80));
+	}
+
+	@Test
+	void aReportWithoutTheBreakdownCountsOnlyTheMeetingAndANegativeTimeIsRefused() throws Exception {
+		saveReport(mentor, held, FULL_REPORT)
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.preparationMinutes").doesNotExist())
+				.andExpect(jsonPath("$.followUpMinutes").doesNotExist());
+		mockMvc.perform(get(DAY, TODAY).with(as(mentor))).andExpect(jsonPath("$.recordedMinutes").value(35));
+
+		saveReport(mentor, held, FULL_REPORT.replace("\"actualDurationMinutes\":35",
+				"\"actualDurationMinutes\":35,\"preparationMinutes\":-1")).andExpect(status().isBadRequest());
+		saveReport(mentor, held, FULL_REPORT.replace("\"actualDurationMinutes\":35",
+				"\"actualDurationMinutes\":35,\"followUpMinutes\":601")).andExpect(status().isBadRequest());
+	}
+
 	@Test
 	void theCalendarFillsANewReportWithoutSavingIt() throws Exception {
 		mockMvc.perform(get(MEETING, held.getId()).with(as(mentor)))

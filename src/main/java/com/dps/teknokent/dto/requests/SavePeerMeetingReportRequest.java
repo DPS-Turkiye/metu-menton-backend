@@ -28,6 +28,8 @@ public record SavePeerMeetingReportRequest(
 		PeerMeetingType meetingType,
 		PeerMeetingFormat meetingFormat,
 		@Min(1) @Max(600) Integer actualDurationMinutes,
+		@Min(0) @Max(600) Integer preparationMinutes,
+		@Min(0) @Max(600) Integer followUpMinutes,
 		@Size(max = 8) Set<@NotNull PeerMeetingTopic> topics,
 		@Size(max = 4000) String menteeNeed,
 		@Size(max = 4000) String discussion,

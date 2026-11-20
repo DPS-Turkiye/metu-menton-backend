@@ -178,10 +178,21 @@ public class PeerMeetingReportService {
 				.collect(Collectors.toMap(PeerMeetingReport::getMeetingId, Function.identity()));
 	}
 
-	/** The minutes a meeting counts for: the reported duration once there is one, the planned one before. */
+	/**
+	 * The minutes a meeting counts for as mentoring work: the reported duration once there is one, the planned one
+	 * before, plus the preparation and follow-up time the report records (Figma 7.1, "Süre kaydı").
+	 */
 	static int durationOf(Meeting meeting, @Nullable PeerMeetingReport report) {
-		return report != null && report.getActualDurationMinutes() != null ? report.getActualDurationMinutes()
+		if (report == null) {
+			return meeting.getDurationMinutes();
+		}
+		int held = report.getActualDurationMinutes() != null ? report.getActualDurationMinutes()
 				: meeting.getDurationMinutes();
+		return held + orZero(report.getPreparationMinutes()) + orZero(report.getFollowUpMinutes());
+	}
+
+	private static int orZero(@Nullable Integer minutes) {
+		return minutes == null ? 0 : minutes;
 	}
 
 	/** Whether the report counts as sent for the day and week gates. */
@@ -252,6 +263,8 @@ public class PeerMeetingReportService {
 		report.setMeetingType(request.meetingType());
 		report.setMeetingFormat(request.meetingFormat());
 		report.setActualDurationMinutes(request.actualDurationMinutes());
+		report.setPreparationMinutes(request.preparationMinutes());
+		report.setFollowUpMinutes(request.followUpMinutes());
 		replace(report.getTopics(), request.topics());
 		report.setMenteeNeed(trimmed(request.menteeNeed()));
 		report.setDiscussion(trimmed(request.discussion()));
@@ -346,6 +359,8 @@ public class PeerMeetingReportService {
 				report.getMeetingType(),
 				report.getMeetingFormat(),
 				report.getActualDurationMinutes(),
+				report.getPreparationMinutes(),
+				report.getFollowUpMinutes(),
 				ordered(report.getTopics(), PeerMeetingTopic.class),
 				report.getMenteeNeed(),
 				report.getDiscussion(),
