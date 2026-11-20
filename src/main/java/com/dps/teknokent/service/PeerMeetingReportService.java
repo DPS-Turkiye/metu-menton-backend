@@ -151,6 +151,9 @@ public class PeerMeetingReportService {
 					mentee.getFullName(),
 					meeting.getScheduledAt(),
 					durationOf(meeting, report),
+					heldMinutesOf(meeting, report),
+					report == null ? 0 : orZero(report.getPreparationMinutes()),
+					report == null ? 0 : orZero(report.getFollowUpMinutes()),
 					types.get(meeting.getId()),
 					report != null && report.getMeetingFormat() != null ? report.getMeetingFormat()
 							: defaultFormat(meeting),
@@ -186,9 +189,14 @@ public class PeerMeetingReportService {
 		if (report == null) {
 			return meeting.getDurationMinutes();
 		}
-		int held = report.getActualDurationMinutes() != null ? report.getActualDurationMinutes()
+		return heldMinutesOf(meeting, report) + orZero(report.getPreparationMinutes())
+				+ orZero(report.getFollowUpMinutes());
+	}
+
+	/** The meeting's own length: the reported one once there is one, the planned one before. */
+	private static int heldMinutesOf(Meeting meeting, @Nullable PeerMeetingReport report) {
+		return report != null && report.getActualDurationMinutes() != null ? report.getActualDurationMinutes()
 				: meeting.getDurationMinutes();
-		return held + orZero(report.getPreparationMinutes()) + orZero(report.getFollowUpMinutes());
 	}
 
 	private static int orZero(@Nullable Integer minutes) {
