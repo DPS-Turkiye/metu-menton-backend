@@ -57,30 +57,34 @@ public class MeetingRoomAccessInterceptor implements ChannelInterceptor {
 		UUID meetingId = meetingIdOf(destination);
 		Map<String, Object> sessionAttributes = accessor.getSessionAttributes();
 		RealtimeIdentity identity = identityOf(sessionAttributes);
+		// A token without a team (an ODTÜ account) opens no meeting room.
+		UUID organizationId = identity == null ? null : identity.organizationId();
 		if (meetingId == null
 				|| sessionAttributes == null
 				|| identity == null
-				|| !isAccountStillAllowed(identity, sessionAttributes)
-				|| !isAllowed(meetingId, identity, sessionAttributes)) {
+				|| organizationId == null
+				|| !isAccountStillAllowed(identity, organizationId, sessionAttributes)
+				|| !isAllowed(meetingId, organizationId, sessionAttributes)) {
 			throw new MessagingException("Access to " + destination + " is not allowed.");
 		}
 
 		return message;
 	}
 
-	private boolean isAllowed(UUID meetingId, RealtimeIdentity identity, Map<String, Object> sessionAttributes) {
+	private boolean isAllowed(UUID meetingId, UUID organizationId, Map<String, Object> sessionAttributes) {
 		AllowedMeetings allowedMeetings = allowedMeetings(sessionAttributes);
 		if (allowedMeetings.contains(meetingId)) {
 			return true;
 		}
-		if (!meetingRoomAccessService.isMeetingVisibleTo(meetingId, identity.organizationId())) {
+		if (!meetingRoomAccessService.isMeetingVisibleTo(meetingId, organizationId)) {
 			return false;
 		}
 		allowedMeetings.allow(meetingId);
 		return true;
 	}
 
-	private boolean isAccountStillAllowed(RealtimeIdentity identity, Map<String, Object> sessionAttributes) {
+	private boolean isAccountStillAllowed(RealtimeIdentity identity, UUID organizationId,
+			Map<String, Object> sessionAttributes) {
 		Instant now = clock.instant();
 		AccountCheck accountCheck = sessionValue(sessionAttributes, ACCOUNT_CHECK_ATTRIBUTE, AccountCheck.class,
 				AccountCheck::new);
@@ -89,8 +93,7 @@ public class MeetingRoomAccessInterceptor implements ChannelInterceptor {
 		}
 		Instant signedInAt = signedInAt(identity, sessionAttributes);
 		if (signedInAt == null
-				|| !meetingRoomAccessService.isStillMemberOf(identity.userId(), identity.organizationId(),
-						signedInAt)) {
+				|| !meetingRoomAccessService.isStillMemberOf(identity.userId(), organizationId, signedInAt)) {
 			return false;
 		}
 		accountCheck.passed(now);

@@ -23,10 +23,11 @@ import software.amazon.awssdk.services.sesv2.model.SesV2Exception;
 class MailServiceTest {
 
 	private final SesV2Client sesClient = mock(SesV2Client.class);
+	private final MailTransport transport = new SesMailTransport(sesClient);
 
 	@Test
 	void sendsFromTheConfiguredAddress() {
-		MailService mailService = new MailService(sesClient, "noreply@menton.com.tr", "https://menton.com.tr",
+		MailService mailService = new MailService(transport, "noreply@menton.com.tr", "https://menton.com.tr",
 				Runnable::run);
 
 		mailService.sendAfterCommit("mentor@tekno.com", "Yeni mentorluk talebi", "Merhaba");
@@ -43,7 +44,7 @@ class MailServiceTest {
 	@Test
 	void sendsAfterTheCommitOnAnotherThreadSoTheConnectionIsReleasedFirst() {
 		List<Runnable> queued = new ArrayList<>();
-		MailService mailService = new MailService(sesClient, "noreply@menton.com.tr", "https://menton.com.tr",
+		MailService mailService = new MailService(transport, "noreply@menton.com.tr", "https://menton.com.tr",
 				queued::add);
 		TransactionSynchronizationManager.initSynchronization();
 		try {
@@ -61,7 +62,7 @@ class MailServiceTest {
 
 	@Test
 	void stillSendsAfterTheCommitWhenTheExecutorIsShuttingDown() {
-		MailService mailService = new MailService(sesClient, "noreply@menton.com.tr", "https://menton.com.tr",
+		MailService mailService = new MailService(transport, "noreply@menton.com.tr", "https://menton.com.tr",
 				task -> {
 					throw new java.util.concurrent.RejectedExecutionException("closed");
 				});
@@ -78,7 +79,7 @@ class MailServiceTest {
 
 	@Test
 	void sendsNothingWithoutASenderAddress() {
-		MailService mailService = new MailService(sesClient, "", "https://menton.com.tr", Runnable::run);
+		MailService mailService = new MailService(transport, "", "https://menton.com.tr", Runnable::run);
 
 		mailService.sendAfterCommit("mentor@tekno.com", "Konu", "Metin");
 
@@ -87,7 +88,7 @@ class MailServiceTest {
 
 	@Test
 	void sendsNothingWithoutARecipient() {
-		MailService mailService = new MailService(sesClient, "noreply@menton.com.tr", "https://menton.com.tr",
+		MailService mailService = new MailService(transport, "noreply@menton.com.tr", "https://menton.com.tr",
 				Runnable::run);
 
 		mailService.sendAfterCommit(" ", "Konu", "Metin");
@@ -97,7 +98,7 @@ class MailServiceTest {
 
 	@Test
 	void keepsGoingWhenSesRejectsTheEmail() {
-		MailService mailService = new MailService(sesClient, "noreply@menton.com.tr", "https://menton.com.tr",
+		MailService mailService = new MailService(transport, "noreply@menton.com.tr", "https://menton.com.tr",
 				Runnable::run);
 		when(sesClient.sendEmail(any(SendEmailRequest.class)))
 				.thenThrow(SesV2Exception.builder().message("Email address is not verified.").build());
@@ -108,22 +109,42 @@ class MailServiceTest {
 
 	@Test
 	void sendNowSaysWhetherSesAcceptedTheEmail() {
-		MailService mailService = new MailService(sesClient, "noreply@menton.com.tr", "https://menton.com.tr",
+		MailService mailService = new MailService(transport, "noreply@menton.com.tr", "https://menton.com.tr",
 				Runnable::run);
 		assertThat(mailService.sendNow("lead@team.co", "Konu", "Metin")).isTrue();
 
 		when(sesClient.sendEmail(any(SendEmailRequest.class)))
 				.thenThrow(SesV2Exception.builder().message("Email address is not verified.").build());
 		assertThat(mailService.sendNow("lead@team.co", "Konu", "Metin")).isFalse();
-		assertThat(new MailService(sesClient, "", "https://menton.com.tr", Runnable::run).sendNow("lead@team.co",
+		assertThat(new MailService(transport, "", "https://menton.com.tr", Runnable::run).sendNow("lead@team.co",
 				"Konu", "Metin"))
 				.isFalse();
 	}
 
 	@Test
 	void buildsLinksWithoutADoubleSlash() {
-		MailService mailService = new MailService(sesClient, "", "https://menton.com.tr/", Runnable::run);
+		MailService mailService = new MailService(transport, "", "https://menton.com.tr/", Runnable::run);
 
 		assertThat(mailService.link("/mentor-dashboard")).isEqualTo("https://menton.com.tr/mentor-dashboard");
+	}
+
+	@Test
+	void sendsNothingWhenMailIsSwitchedOff() {
+		MailService mailService = new MailService(new DisabledMailTransport(), "noreply@example.test",
+				"https://menton.example.test", Runnable::run);
+
+		assertThat(mailService.isConfigured()).isFalse();
+		assertThat(mailService.sendNow("student@example.test", "Konu", "Metin")).isFalse();
+		assertThatCode(() -> mailService.sendAfterCommit("student@example.test", "Konu", "Metin"))
+				.doesNotThrowAnyException();
+	}
+
+	@Test
+	void theLogTransportWorksWithoutASenderAddress() {
+		MailService mailService = new MailService(new LogMailTransport(), "", "https://menton.example.test",
+				Runnable::run);
+
+		assertThat(mailService.isConfigured()).isTrue();
+		assertThat(mailService.sendNow("student@example.test", "Konu", "Metin")).isTrue();
 	}
 }
