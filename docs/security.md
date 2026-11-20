@@ -52,6 +52,9 @@ on those calls, the parameter can become required.
 - **Rate limits** (`RateLimitingFilter`, `RateLimitingConfig`): a general budget per caller and smaller ones for the
   AI-heavy paths (CV parse, syllabus and weekly-program reads). Decisions are atomic in Redis (one Lua script), with
   a bounded in-memory fallback when Redis is down.
+- **Institution sign-in starts** (CAS, OTG) share one budget of 1,200 a minute for the whole deployment, because the
+  web proxy sends them all under its one login; the web keeps 120 a minute per address in front of it. The binding
+  cookie that ties a sign-in to the browser that started it is sealed and, over https, a `__Host-` cookie.
 - **CV preview** before an account exists needs a verified e-mail and also spends a per-IP budget.
 - **Basic sign-in**: after 20 failed attempts from one address in 15 minutes, that address gets 429 for Basic
   (`BasicLoginThrottleFilter`).

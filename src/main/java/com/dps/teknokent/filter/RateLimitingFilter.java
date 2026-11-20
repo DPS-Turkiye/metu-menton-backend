@@ -72,6 +72,15 @@ public class RateLimitingFilter extends OncePerRequestFilter {
 	private static final long STUDENT_SIGNUP_WINDOW_MS = 10 * 60_000;
 
 	/**
+	 * Starting an institution login (ODTÜ's CAS, OTG, the dev stub) leaves a state in Redis for ten minutes, and the
+	 * web proxy sends every start under its one service login, so there is no caller to tell apart: one budget for all
+	 * of them bounds that state. The web keeps a per-address budget in front of it; this is wide enough for a whole
+	 * campus signing in on a Monday morning.
+	 */
+	private static final Pattern INSTITUTION_LOGIN_START_PATH = Pattern.compile("/api/auth/institution/[^/]+/start");
+	private static final long INSTITUTION_LOGIN_STARTS_PER_MINUTE = 1_200;
+
+	/**
 	 * A calendar feed is fetched by the subscriber's calendar server, not by a person, and the frontend's server
 	 * passes every fetch on from one address, so the budget is per link. A course link may have a subscription per
 	 * student, each refreshed every hour or so: 120 in ten minutes covers a large class and stops a loop. Guessing
@@ -132,6 +141,10 @@ public class RateLimitingFilter extends OncePerRequestFilter {
 			return List.of(rateLimitingConfig.resolveBucket(
 					"student_signup:" + getCallerIdentifier(request), STUDENT_SIGNUP_CAPACITY,
 					STUDENT_SIGNUP_WINDOW_MS));
+		}
+		if (post && INSTITUTION_LOGIN_START_PATH.matcher(path).matches()) {
+			return List.of(rateLimitingConfig.resolveBucket("institution_login_start_all",
+					INSTITUTION_LOGIN_STARTS_PER_MINUTE, 60_000));
 		}
 		if ("GET".equalsIgnoreCase(request.getMethod()) && path.startsWith(CALENDAR_FEED_PATH)) {
 			return List.of(
