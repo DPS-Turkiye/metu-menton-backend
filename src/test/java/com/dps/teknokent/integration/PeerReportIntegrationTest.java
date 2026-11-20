@@ -172,7 +172,11 @@ class PeerReportIntegrationTest {
 
 		mockMvc.perform(get(DAY, TODAY).with(as(mentor)))
 				.andExpect(status().isOk())
-				.andExpect(jsonPath("$.recordedMinutes").value(80));
+				.andExpect(jsonPath("$.recordedMinutes").value(80))
+				.andExpect(jsonPath("$.meetings[0].durationMinutes").value(80))
+				.andExpect(jsonPath("$.meetings[0].meetingMinutes").value(45))
+				.andExpect(jsonPath("$.meetings[0].preparationMinutes").value(20))
+				.andExpect(jsonPath("$.meetings[0].followUpMinutes").value(15));
 	}
 
 	@Test
