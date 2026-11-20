@@ -1,6 +1,9 @@
 package com.dps.teknokent.security.institution;
 
 import java.time.Instant;
+import java.util.function.Consumer;
+
+import org.jspecify.annotations.Nullable;
 
 import com.dps.teknokent.entity.InstitutionPerson;
 
@@ -23,5 +26,30 @@ public final class InstitutionRecords {
 		person.setIskurParticipant(identity.iskurParticipant());
 		person.setActive(true);
 		person.setSyncedAt(now);
+	}
+
+	/**
+	 * For a login that carries only part of the record ({@link InstitutionLoginProvider#sendsWholeRecord()} false):
+	 * what it says is written, what it leaves out stays as the row has it. The kinds and the address are always
+	 * written: they are what the login vouches for, and a kind the institution no longer names must lapse.
+	 */
+	public static void applyKnown(InstitutionIdentity identity, InstitutionPerson person, Instant now) {
+		person.setKinds(identity.kinds());
+		person.setEmail(identity.email());
+		keep(identity.fullName(), person::setFullName);
+		keep(identity.faculty(), person::setFaculty);
+		keep(identity.departmentCode(), person::setDepartmentCode);
+		keep(identity.departmentName(), person::setDepartmentName);
+		keep(identity.classYear(), person::setClassYear);
+		keep(identity.programLevel(), person::setProgramLevel);
+		keep(identity.academicTitle(), person::setAcademicTitle);
+		person.setActive(true);
+		person.setSyncedAt(now);
+	}
+
+	private static <T> void keep(@Nullable T said, Consumer<T> write) {
+		if (said != null) {
+			write.accept(said);
+		}
 	}
 }

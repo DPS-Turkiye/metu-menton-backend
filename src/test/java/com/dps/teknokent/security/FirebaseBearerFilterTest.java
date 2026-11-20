@@ -191,6 +191,23 @@ class FirebaseBearerFilterTest {
 		verify(appUserRepository, never()).findByEmailIgnoreCase(any());
 	}
 
+	// The same for ODTÜ's CAS: its logins reach a row through InstitutionLoginService and nowhere else.
+	@Test
+	void neverHandsARowToACasLoginThatOnlyMatchesByEmail() throws Exception {
+		when(firebaseTokenVerifier.enabled()).thenReturn(true);
+		when(firebaseTokenVerifier.verify("good"))
+				.thenReturn(Optional.of(new FirebaseIdentity("odtu-cas_idari1", "idari1@metu.edu.tr", true)));
+		when(appUserRepository.findByFirebaseUid("odtu-cas_idari1")).thenReturn(Optional.empty());
+
+		MockHttpServletResponse response = new MockHttpServletResponse();
+		MockFilterChain chain = new MockFilterChain();
+		filter.doFilter(request("/api/auth/me", "Bearer good"), response, chain);
+
+		assertThat(response.getStatus()).isEqualTo(401);
+		assertThat(chain.getRequest()).isNull();
+		verify(appUserRepository, never()).findByEmailIgnoreCase(any());
+	}
+
 	// Seeded coordinators are created unverified and bound by uid; the check only guards the email fallback.
 	@Test
 	void anUnverifiedLoginAlreadyBoundByUidStillSignsIn() throws Exception {

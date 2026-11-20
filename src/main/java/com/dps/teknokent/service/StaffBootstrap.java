@@ -20,7 +20,7 @@ import com.dps.teknokent.domain.UserAccountStatus;
 import com.dps.teknokent.domain.UserRole;
 import com.dps.teknokent.entity.AppUser;
 import com.dps.teknokent.repository.AppUserRepository;
-import com.dps.teknokent.security.institution.OtgLoginProvider;
+import com.dps.teknokent.security.institution.InstitutionLoginUids;
 import com.dps.teknokent.util.EmailDomains;
 import com.dps.teknokent.util.Texts;
 
@@ -102,7 +102,7 @@ public class StaffBootstrap implements ApplicationRunner {
 				throw invalid(position, "needs a Firebase uid of 1 to 128 letters, digits, '-' or '_'");
 			}
 			// Those uids belong to ODTÜ logins, which reach their row only through InstitutionLoginService.
-			if (uid.startsWith(OtgLoginProvider.ID + "_")) {
+			if (InstitutionLoginUids.boundByLoginOnly(uid)) {
 				throw invalid(position, "has an ODTÜ-login uid; use the person's Firebase e-mail login");
 			}
 			if (!emails.add(email) || !uids.add(uid)) {

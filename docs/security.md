@@ -22,6 +22,9 @@ Other sign-ins:
   requires a verified address; admin and coordinator rows are never claimed that way.
 - **LTI 1.3** from Moodle (ODTÜClass) for office hours: signed launch, single-use nonce, platform keys from its JWKS.
 - **OTG** (ODTÜ Teknokent Girişimcilik) over OpenID Connect with PKCE.
+- **ODTÜ CAS** (`CAS_LOGIN_ENABLED=true`, ODTÜ edition): the ticket is checked server-side under a service URL that
+  carries the single-use state, the answer is parsed with document types off, and the address must be under
+  `CAS_EMAIL_DOMAINS`. See [ODTÜ CAS login](odtu-cas-login.md).
 - **Dev persona picker** (`INSTITUTION_LOGIN_DEV_STUB=true`): local only, never on a shared server.
 
 ## What a caller may do
