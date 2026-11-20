@@ -399,6 +399,33 @@ class TrainingServiceTest {
 		verify(attempts, never()).save(any());
 	}
 
+	// An approved mentor stays approved when the program has no Prism link (set late, or cleared).
+	@Test
+	void anApprovedMentorSeesTheBadgeEvenWithoutAPrismLink() {
+		AppUser approved = onPrism(TrainingState.NOT_AVAILABLE);
+		when(awards.findByUserIdOrderByAwardedAtDesc(approved.getId()))
+				.thenReturn(List.of(gate(approved, iskur, BadgeStatus.ACTIVE)));
+
+		var view = service.forStudent(approved.getId());
+
+		assertThat(view.state()).isEqualTo(TrainingState.BADGE_ACTIVE);
+		assertThat(view.prismUrl()).isNull();
+	}
+
+	@Test
+	void aRetakeWithoutALinkReachesTheStudentWithNoLinkToOpen() {
+		when(peerTraining.inAppQuiz()).thenReturn(false);
+		when(programs.findById(iskur.getId())).thenReturn(Optional.of(iskur));
+		AppUser student = signedIn(true);
+		when(prismTraining.forStudent(student, iskur))
+				.thenReturn(new PrismTrainingService.StudentPrism(TrainingState.PRISM_RETAKE, null, null));
+
+		var view = service.forStudent(student.getId());
+
+		assertThat(view.state()).isEqualTo(TrainingState.PRISM_RETAKE);
+		assertThat(view.prismUrl()).isNull();
+	}
+
 	@Test
 	void theBadgeStatesComeBeforePrism() {
 		AppUser holder = onPrism(TrainingState.PRISM_TODO);
