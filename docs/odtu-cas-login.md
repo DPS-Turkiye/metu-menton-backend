@@ -30,8 +30,14 @@ default**. Once ODTÜ answers the questions below, switching it on is configurat
    out of Menton leaves the CAS session alone.)
 7. **A sample answer** of the validation call for a test account, with the values blanked. It settles 2 and 4 at
    once.
+8. **Who else can set cookies next to us.** If Menton runs on a `metu.edu.tr` subdomain, can other hosts under that
+   domain (student or staff pages, anything users host) set cookies for the parent domain? If they can, the sign-in
+   binding cookie must first move to a `__Host-` name (a separate change, shared with the OTG login) before CAS is
+   switched on in production.
 
 ## Switching it on
+
+Before production: answer 4 decides `CAS_ATTR_ID`, and answer 8 decides whether the cookie change must land first.
 
 Set these on the backend (see `.env.example`), then restart:
 
