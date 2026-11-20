@@ -10,6 +10,7 @@ import org.jspecify.annotations.Nullable;
 import com.dps.teknokent.domain.IskurTaskKind;
 import com.dps.teknokent.domain.IskurTaskStatus;
 import com.dps.teknokent.domain.IskurWeekDecision;
+import com.dps.teknokent.domain.IskurWeekEventKind;
 import com.dps.teknokent.domain.IskurWeekStatus;
 import com.dps.teknokent.domain.IskurWorkEntryKind;
 
@@ -34,7 +35,8 @@ public record IskurWeekResponse(
 		boolean needsSupportActivity,
 		List<Entry> entries,
 		List<Task> tasks,
-		List<SupportOption> supportActivities) {
+		List<SupportOption> supportActivities,
+		List<HistoryEvent> history) {
 
 	public record Person(UUID userId, String fullName) {
 	}
@@ -68,5 +70,14 @@ public record IskurWeekResponse(
 	}
 
 	public record Objection(String text, Instant at) {
+	}
+
+	/**
+	 * One step of the week's history, oldest first: a send, a decision (with the reviewer's reason and checks) or
+	 * the intern's objection. {@code by} is null when that account is gone.
+	 */
+	public record HistoryEvent(int step, IskurWeekEventKind kind, Instant at, @Nullable Person by,
+			@Nullable String text, @Nullable Boolean timeMatchesWork, @Nullable Boolean effortDocumented,
+			@Nullable Boolean outputsSufficient) {
 	}
 }
