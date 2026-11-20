@@ -6,7 +6,7 @@ talks to a handful of outside services.
 ```
 Browser ──► Next.js frontend (Amplify) ──► this backend ──► PostgreSQL 17 + pgvector
    │            proxy on service credentials       │  ├──► Redis (rate limits, live notes, login state)
-   │                                                │  ├──► S3 (documents, transcripts), SES (e-mail)
+   │                                                │  ├──► S3 (documents, transcripts), SES or SMTP (e-mail)
    └──── bearer token / WebSocket ─────────────────►│  ├──► Firebase Auth + Cloud Messaging
                                                     │  ├──► OpenAI or OpenRouter (AI features)
                                                     │  └──► meeting bot provider, Moodle (LTI), OTG
