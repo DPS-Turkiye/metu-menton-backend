@@ -160,6 +160,15 @@ class CasLoginProviderTest {
 		assertBadGateway(() -> provider.completeLogin("state-1", Map.of("ticket", "ST-1-x")));
 	}
 
+	// Just under the cap is still read; the cap is on bytes, not on what the parser later makes of them.
+	@Test
+	void anAnswerJustUnderTheCapIsStillRead() {
+		String ticket = cas.signIn(provider.startLogin("state-1"), "e123456", Map.of(
+				"mail", List.of("e123456@metu.edu.tr"), "cn", List.of("a".repeat(60_000))));
+
+		assertThat(provider.completeLogin("state-1", Map.of("ticket", ticket)).fullName()).hasSize(60_000);
+	}
+
 	@Test
 	void casBeingDownIsABadGateway() {
 		cas.goDown();

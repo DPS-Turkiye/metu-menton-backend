@@ -1,7 +1,10 @@
 package com.dps.teknokent.security.institution;
 
+import java.io.IOException;
+import java.io.InputStream;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.EnumSet;
 import java.util.List;
@@ -17,6 +20,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.http.client.ClientHttpResponse;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
@@ -52,7 +56,7 @@ public class CasLoginProvider implements InstitutionLoginProvider {
 	/** CAS's failure codes are upper-case words; anything else is not written to the log. */
 	private static final Pattern FAILURE_CODE = Pattern.compile("[A-Z_]{1,40}");
 	private static final Pattern LOOPBACK_SERVICE = Pattern.compile("http://(localhost|127\\.0\\.0\\.1)(:\\d+)?(/.*)?");
-	/** Far above any real answer, which is a few hundred bytes. */
+	/** Far above any real answer, which is a few hundred bytes; read no further than this. */
 	private static final int MAX_ANSWER_LENGTH = 64 * 1024;
 
 	private final RestClient http;
@@ -96,6 +100,10 @@ public class CasLoginProvider implements InstitutionLoginProvider {
 				IdentityKind.ACADEMIC, values(properties.academicValues()),
 				IdentityKind.STAFF, values(properties.staffValues()));
 		log.info("ODTÜ CAS login is ON ({}).", validateUrl);
+		if (serviceUrl.startsWith("http://")) {
+			log.warn("CAS_SERVICE_URL is plain http, which is for trying the login on this machine only. "
+					+ "A shared or production server must use its https address.");
+		}
 	}
 
 	@Override
@@ -167,18 +175,31 @@ public class CasLoginProvider implements InstitutionLoginProvider {
 			answer = http.get()
 					.uri(uri)
 					.accept(MediaType.APPLICATION_XML, MediaType.TEXT_XML)
-					.retrieve()
-					.body(String.class);
+					.exchangeForRequiredValue((request, response) -> readCapped(response));
 		} catch (RestClientException exception) {
 			throw unavailable("validation failed: " + exception.getClass().getSimpleName(), exception);
 		}
-		if (answer == null || answer.isBlank() || answer.length() > MAX_ANSWER_LENGTH) {
-			throw unavailable("validation answered with an empty or oversized body", null);
+		if (answer.isBlank()) {
+			throw unavailable("validation answered with an empty body", null);
 		}
 		try {
 			return CasServiceResponse.parse(answer);
 		} catch (IllegalArgumentException exception) {
 			throw unavailable(exception.getMessage(), exception);
+		}
+	}
+
+	/** Reads at most one byte past the cap, so a CAS (or a proxy) streaming a huge answer cannot fill the heap. */
+	private static String readCapped(ClientHttpResponse response) throws IOException {
+		if (!response.getStatusCode().is2xxSuccessful()) {
+			throw unavailable("validation answered " + response.getStatusCode().value(), null);
+		}
+		try (InputStream body = response.getBody()) {
+			byte[] bytes = body.readNBytes(MAX_ANSWER_LENGTH + 1);
+			if (bytes.length > MAX_ANSWER_LENGTH) {
+				throw unavailable("validation answered with an oversized body", null);
+			}
+			return new String(bytes, StandardCharsets.UTF_8);
 		}
 	}
 

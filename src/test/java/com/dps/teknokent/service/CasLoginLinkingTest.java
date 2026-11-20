@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.startsWith;
 import static org.mockito.Mockito.atLeastOnce;
@@ -111,7 +110,9 @@ class CasLoginLinkingTest {
 		// The code is for the account that already existed; no second one was made.
 		verify(values).set(eq(InstitutionLoginService.CODE_KEY + code), eq(signedUp.getId().toString()),
 				eq(InstitutionLoginService.CODE_TTL));
-		verify(users, never()).save(argThatIsNot(signedUp));
+		ArgumentCaptor<AppUser> saved = ArgumentCaptor.forClass(AppUser.class);
+		verify(users, atLeastOnce()).save(saved.capture());
+		assertThat(saved.getAllValues()).allSatisfy(user -> assertThat(user).isSameAs(signedUp));
 		assertThat(signedUp.getFirebaseUid()).isEqualTo("firebase-email-login");
 		assertThat(signedUp.getProgramId()).isEqualTo(program);
 		assertThat(signedUp.getStatus()).isEqualTo(UserAccountStatus.APPROVED);
@@ -246,9 +247,5 @@ class CasLoginLinkingTest {
 		ArgumentCaptor<AppUser> saved = ArgumentCaptor.forClass(AppUser.class);
 		verify(users, atLeastOnce()).save(saved.capture());
 		return saved.getValue();
-	}
-
-	private static AppUser argThatIsNot(AppUser known) {
-		return argThat(user -> user != known);
 	}
 }

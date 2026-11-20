@@ -15,7 +15,10 @@ default**. Once ODTÜ answers the questions below, switching it on is configurat
      every login.
    - The service must be allowed to **receive attributes** (the "attribute release" setting on their side).
 4. **Which attributes come back, and under which names.** We need:
-   - **an id that never changes** for the person (is the CAS user name stable, or is there a separate attribute?);
+   - **an id that never changes** for the person, and is never given to someone else later. Is the CAS user name
+     ever reused (after a graduate leaves, say)? If it can be, we need a separate attribute (a student or staff number)
+     for `CAS_ATTR_ID`: the id is what an account is bound to, so a reused user name would hand the old person's
+     account to the new one;
    - **the e-mail address**, and whether it is always the person's own `@metu.edu.tr` address;
    - **the full name** (one attribute, or given name and surname apart?);
    - **the kind of person**: student, academic staff, administrative staff. Which attribute, and which exact
@@ -39,7 +42,7 @@ Set these on the backend (see `.env.example`), then restart:
 | `CAS_SERVICE_URL` | `https://<menton address>/login/odtu/callback`, with no query. Plain http is taken for `localhost` only. |
 | `CAS_VERSION` | `3.0` or `2.0` (answer 2) |
 | `CAS_EMAIL_DOMAINS` | `metu.edu.tr` (subdomains count) |
-| `CAS_ATTR_ID` | the id attribute; empty means the CAS user name |
+| `CAS_ATTR_ID` | the id attribute; empty means the CAS user name. Set it whenever the user name can be reused (answer 4). |
 | `CAS_ATTR_EMAIL`, `CAS_ATTR_NAME` | the e-mail and name attributes (defaults `mail`, `cn`) |
 | `CAS_ATTR_KIND` | the attribute that says what the person is (default `eduPersonAffiliation`) |
 | `CAS_KIND_STUDENT`, `CAS_KIND_ACADEMIC`, `CAS_KIND_STAFF` | the values of that attribute, comma-separated (defaults `student`, `faculty`, `staff,employee`) |
