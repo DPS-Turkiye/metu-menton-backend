@@ -19,6 +19,13 @@ public interface IskurTaskOutputRepository extends JpaRepository<IskurTaskOutput
 
 	long countByTaskId(UUID taskId);
 
+	/** Every output of the teams' tasks. */
+	@Query("""
+			select o from IskurTaskOutput o
+			where o.taskId in (select t.id from IskurTask t where t.teamId in :teamIds)
+			""")
+	List<IskurTaskOutput> findByTeamIds(@Param("teamIds") Collection<UUID> teamIds);
+
 	/** Every output of a program's tasks, newest first. */
 	@Query("""
 			select o from IskurTaskOutput o

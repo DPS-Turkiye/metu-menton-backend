@@ -2,14 +2,20 @@ package com.dps.teknokent.service;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.regex.Pattern;
 import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
 import java.util.zip.ZipInputStream;
 
 import org.jspecify.annotations.Nullable;
@@ -75,6 +81,11 @@ public class DocumentService {
 	private static final int MAX_DOCX_COMPRESSION_RATIO = 200;
 	// A plain ZIP is only ever stored and handed back, never unpacked here; the limit keeps the check itself bounded.
 	private static final long MAX_ZIP_UNCOMPRESSED_BYTES = 100L * 1024L * 1024L;
+	/** The width of stored_document.original_filename. */
+	private static final int MAX_FILENAME_LENGTH = 255;
+	private static final Pattern PATH_SEPARATOR = Pattern.compile("/");
+	// Windows drops these from the end of a name when it extracts, so "x.exe." and "x.exe " land as "x.exe".
+	private static final Pattern TRAILING_DOTS_AND_SPACES = Pattern.compile("[.\\s]+$");
 	private static final int ZIP_READ_BUFFER = 8 * 1024;
 
 	private final AppUserRepository appUserRepository;
@@ -409,14 +420,22 @@ public class DocumentService {
 			throw rejectUpload(userId, organizationId, kindValue, filename, (long) bytes.length,
 					"extension-not-allowed", Texts.forRequest("error.workFileType"));
 		}
+		if (filename.length() > MAX_FILENAME_LENGTH) {
+			throw rejectUpload(userId, organizationId, kindValue, filename, (long) bytes.length,
+					"filename-too-long", Texts.forRequest("error.workFileName", MAX_FILENAME_LENGTH));
+		}
 		String officeMainPart = OFFICE_MAIN_PARTS.get(extension);
+		List<String> entries = new ArrayList<>();
 		boolean genuine = switch (extension) {
 		case "pdf" -> PdfBytes.looksComplete(bytes);
 		case "png" -> startsWith(bytes, PNG_SIGNATURE);
 		case "jpg", "jpeg" -> startsWith(bytes, JPEG_SIGNATURE);
 		case "zip" -> isSafeArchive(bytes, null, SELF_RUNNING_SUFFIXES, MAX_ZIP_UNCOMPRESSED_BYTES,
-				MAX_ZIP_UNCOMPRESSED_BYTES);
-		default -> officeMainPart != null && isSafeOfficeFile(bytes, officeMainPart);
+				MAX_ZIP_UNCOMPRESSED_BYTES, entries) && centralDirectoryAgrees(bytes, entries);
+		default -> officeMainPart != null
+				&& isSafeArchive(bytes, officeMainPart, DANGEROUS_ARCHIVE_SUFFIXES,
+						MAX_DOCX_ENTRY_UNCOMPRESSED_BYTES, MAX_DOCX_TOTAL_UNCOMPRESSED_BYTES, entries)
+				&& centralDirectoryAgrees(bytes, entries);
 		};
 		if (!genuine) {
 			throw rejectUpload(userId, organizationId, kindValue, filename, (long) bytes.length,
@@ -428,16 +447,59 @@ public class DocumentService {
 
 	private static boolean isSafeOfficeFile(byte[] bytes, String mainPart) {
 		return isSafeArchive(bytes, mainPart, DANGEROUS_ARCHIVE_SUFFIXES, MAX_DOCX_ENTRY_UNCOMPRESSED_BYTES,
-				MAX_DOCX_TOTAL_UNCOMPRESSED_BYTES);
+				MAX_DOCX_TOTAL_UNCOMPRESSED_BYTES, null);
+	}
+
+	/**
+	 * The entries the ZIP's central directory lists are exactly the ones its local headers hold, and none has a name
+	 * that could mean something else on extraction. The stream check above reads local headers only and stops at the
+	 * first bytes that are not one, while Explorer and 7-Zip extract what the central directory says: a file hidden
+	 * after junk bytes would pass one and be extracted by the other.
+	 */
+	private static boolean centralDirectoryAgrees(byte[] bytes, List<String> streamEntries) {
+		Path copy = null;
+		try {
+			copy = Files.createTempFile("work-file-", ".zip");
+			Files.write(copy, bytes);
+			List<String> listed = new ArrayList<>();
+			try (ZipFile archive = new ZipFile(copy.toFile(), StandardCharsets.UTF_8)) {
+				archive.stream()
+						.filter(entry -> !entry.isDirectory())
+						.forEach(entry -> listed.add(entry.getName()));
+			}
+			List<String> local = new ArrayList<>(streamEntries);
+			local.sort(null);
+			listed.sort(null);
+			return local.equals(listed) && listed.stream().noneMatch(DocumentService::hasUnsafeCharacter);
+		} catch (IOException | IllegalArgumentException unreadable) {
+			return false;
+		} finally {
+			deleteQuietly(copy);
+		}
+	}
+
+	private static boolean hasUnsafeCharacter(String entryName) {
+		return entryName.chars().anyMatch(c -> c < 0x20 || c == 0x7F || c == ':');
+	}
+
+	private static void deleteQuietly(@Nullable Path file) {
+		if (file == null) {
+			return;
+		}
+		try {
+			Files.deleteIfExists(file);
+		} catch (IOException error) {
+			log.warn("Could not remove the temporary copy {} of an uploaded archive: {}", file, error.getMessage());
+		}
 	}
 
 	/**
 	 * A readable ZIP with nothing that escapes it, ends in a {@code blockedSuffixes} name or expands like a bomb. With
 	 * a {@code mainPart} it must also be the Office format that part belongs to; without one, any ZIP with a file in
-	 * it passes.
+	 * it passes. The names of its files go into {@code names} when one is given.
 	 */
 	private static boolean isSafeArchive(byte[] bytes, @Nullable String mainPart, Set<String> blockedSuffixes,
-			long maxEntryBytes, long maxTotalBytes) {
+			long maxEntryBytes, long maxTotalBytes, @Nullable List<String> names) {
 		boolean hasContentTypes = false;
 		boolean hasMainDocument = false;
 		int files = 0;
@@ -455,6 +517,9 @@ public class DocumentService {
 				}
 				files++;
 				String name = entry.getName();
+				if (names != null) {
+					names.add(name);
+				}
 				if (name.contains("..") || name.startsWith("/") || name.startsWith("\\")) {
 					return false;
 				}
@@ -495,11 +560,26 @@ public class DocumentService {
 		return mainPart == null ? files > 0 : hasContentTypes && hasMainDocument;
 	}
 
-	// A folder on the way counts too: a macOS application is a folder named *.app with its program inside.
+	/**
+	 * The file's name ends in a blocked suffix, once the trailing dots and spaces Windows drops are gone. A folder on
+	 * the way counts only as a macOS application, a folder named *.app with its program inside.
+	 */
 	private static boolean hasBlockedSuffix(String entryName, Set<String> blockedSuffixes) {
-		String path = entryName.replace('\\', '/');
-		for (String suffix : blockedSuffixes) {
-			if (path.endsWith(suffix) || path.contains(suffix + "/")) {
+		String[] segments = PATH_SEPARATOR.split(entryName.replace('\\', '/'));
+		for (int index = 0; index < segments.length; index++) {
+			String segment = TRAILING_DOTS_AND_SPACES.matcher(segments[index]).replaceAll("");
+			boolean file = index == segments.length - 1;
+			if (file ? endsWithAny(segment, blockedSuffixes)
+					: blockedSuffixes.contains(".app") && segment.endsWith(".app")) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private static boolean endsWithAny(String name, Set<String> suffixes) {
+		for (String suffix : suffixes) {
+			if (name.endsWith(suffix)) {
 				return true;
 			}
 		}

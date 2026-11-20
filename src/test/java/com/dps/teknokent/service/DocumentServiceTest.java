@@ -1010,7 +1010,9 @@ class DocumentServiceTest {
 						"application/vnd.openxmlformats-officedocument.presentationml.presentation"),
 				// Source code inside a ZIP is inert here: it is stored and handed back, never run.
 				Arguments.of("site.zip", docx("site/index.html", "<html></html>", "site/app.js", "let a = 1;",
-						"site/build.py", "print(1)"), "application/zip"));
+						"site/build.py", "print(1)"), "application/zip"),
+				// A folder named like a domain is a saved web page, not a program.
+				Arguments.of("kayit.zip", docx("google.com/index.html", "<html></html>"), "application/zip"));
 	}
 
 	@ParameterizedTest
@@ -1051,7 +1053,8 @@ class DocumentServiceTest {
 	@ParameterizedTest
 	@ValueSource(strings = { "kur.exe", "kur.msi", "calistir.bat", "calistir.cmd", "eski.com", "ekran.scr",
 			"betik.ps1", "betik.vbs", "uygulama.jar", "Uygulama.app/Contents/MacOS/calistir", "kurulum.dmg",
-			"araclar/kur.SH", "kisayol.lnk", "ayar.reg", "../kacak.txt", "/etc/passwd" })
+			"araclar/kur.SH", "kisayol.lnk", "ayar.reg", "../kacak.txt", "/etc/passwd", "kur.exe.", "kur.exe ",
+			"kur.exe. . ", "Uygulama.app./Contents/MacOS/calistir", "rapor.txt:gizli", "rapor\t.txt" })
 	void refusesAZipHoldingSomethingThatRunsOrEscapes(String entryName) throws Exception {
 		byte[] archive = docx("rapor.txt", "merhaba", entryName, "x");
 
@@ -1059,6 +1062,33 @@ class DocumentServiceTest {
 				"teslim.zip", "application/zip", archive))
 				.isInstanceOf(InvalidRequestException.class)
 				.hasMessage("ZIP dosyası açılamadı, çok büyük ya da içinde çalıştırılabilir bir dosya var.");
+		verifyNoInteractions(objectStorage);
+	}
+
+	@ParameterizedTest
+	@ValueSource(strings = { "teslim.zip", "rapor.docx" })
+	void refusesAnArchiveHidingAnEntryItsLocalHeadersDoNotShow(String filename) throws Exception {
+		// Junk before the second entry stops a reader of local headers there, while the central directory, which
+		// Explorer and 7-Zip extract from, still lists the program behind it.
+		byte[] archive = withJunkBeforeSecondEntry(docx(
+				"[Content_Types].xml", "<Types></Types>",
+				"word/document.xml", "<w:document></w:document>",
+				"kur.exe", "MZ"));
+
+		assertThatThrownBy(() -> documentService.store(UUID.randomUUID(), null, DocumentKind.ISKUR_TASK_OUTPUT,
+				filename, "application/zip", archive))
+				.isInstanceOf(InvalidRequestException.class);
+		verifyNoInteractions(objectStorage);
+	}
+
+	@Test
+	void refusesAWorkFileWithANameLongerThanItsColumn() {
+		String name = "a".repeat(252) + ".pdf";
+
+		assertThatThrownBy(() -> documentService.store(UUID.randomUUID(), null, DocumentKind.ISKUR_TASK_OUTPUT,
+				name, "application/pdf", pdfBytes()))
+				.isInstanceOf(InvalidRequestException.class)
+				.hasMessage("Dosya adı en fazla 255 karakter olabilir.");
 		verifyNoInteractions(objectStorage);
 	}
 
@@ -1119,6 +1149,25 @@ class DocumentServiceTest {
 		assertThatThrownBy(() -> documentService.storeForUser(userId, "iskur-task-output", pdfFile(), null))
 				.isInstanceOf(InvalidRequestException.class);
 		verifyNoInteractions(objectStorage);
+	}
+
+	/** The archive with junk bytes inserted where its second local header starts. */
+	private static byte[] withJunkBeforeSecondEntry(byte[] archive) {
+		byte[] header = { 'P', 'K', 3, 4 };
+		// The first header is at 0; the next one found is the second entry's.
+		int second = -1;
+		for (int index = 1; second < 0 && index <= archive.length - header.length; index++) {
+			if (Arrays.equals(archive, index, index + header.length, header, 0, header.length)) {
+				second = index;
+			}
+		}
+		assertThat(second).isPositive();
+		byte[] junk = "not a header".getBytes(UTF_8);
+		byte[] result = new byte[archive.length + junk.length];
+		System.arraycopy(archive, 0, result, 0, second);
+		System.arraycopy(junk, 0, result, second, junk.length);
+		System.arraycopy(archive, second, result, second + junk.length, archive.length - second);
+		return result;
 	}
 
 	private static Organization startup() {

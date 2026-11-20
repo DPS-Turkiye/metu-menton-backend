@@ -220,12 +220,12 @@ public class IskurTaskService {
 
 	/**
 	 * The assignee hands in a file with their task, up to {@link IskurTaskOutputFiles#MAX_FILES_PER_TASK}. A done task
-	 * takes none until it is reopened. Every change bumps the task's version, so two uploads at once cannot both slip
-	 * under the limit, and an upload cannot land on a task being completed: the loser answers 409.
+	 * takes none until it is reopened. The task row is locked while its files are counted and changed, so two uploads
+	 * at once cannot both slip under the limit; the version bump still makes an upload racing a completion a 409.
 	 */
 	@Transactional
 	public IskurTaskResponse attachOutput(UUID actorId, UUID taskId, @Nullable MultipartFile file) {
-		IskurTask task = requireTask(taskId);
+		IskurTask task = requireTaskForUpdate(taskId);
 		Access access = requireWorkable(actorId, task);
 		Instant now = clock.instant();
 		outputFiles.add(task.getId(), actorId, file, now);
@@ -236,8 +236,10 @@ public class IskurTaskService {
 	/** The uploader takes their own file back, while the task is not done. */
 	@Transactional
 	public IskurTaskResponse removeOutput(UUID actorId, UUID taskId, UUID outputId) {
-		IskurTask task = requireTask(taskId);
+		IskurTask task = requireTaskForUpdate(taskId);
 		Access access = requireWorkable(actorId, task);
+		// With no bucket the stored object could not go, and would stay behind without its row.
+		outputFiles.requireEnabled();
 		IskurTaskOutputFiles.Entry entry = outputFiles.require(task.getId(), outputId);
 		if (!entry.output().getUploadedBy().equals(actorId)) {
 			throw forbidden("error.iskurTaskOutputUploaderOnly");
@@ -418,6 +420,11 @@ public class IskurTaskService {
 			throw new ResourceNotFoundException(Texts.forRequest("error.iskurTaskNotFound"));
 		}
 		return new Access(mine, works, manages);
+	}
+
+	private IskurTask requireTaskForUpdate(UUID taskId) {
+		return tasks.findForUpdate(taskId)
+				.orElseThrow(() -> new ResourceNotFoundException(Texts.forRequest("error.iskurTaskNotFound")));
 	}
 
 	private IskurTask requireTask(UUID taskId) {

@@ -107,6 +107,7 @@ class IskurTaskOutputIntegrationTest {
 
 	private AppUser coordinator;
 	private Program program;
+	private IskurUnit unit;
 	private IskurTeam team;
 	private AppUser zeynep;
 	private AppUser kaan;
@@ -119,7 +120,7 @@ class IskurTaskOutputIntegrationTest {
 	void setUp() {
 		coordinator = user("Selin Er", UserRole.COORDINATOR, null);
 		program = program("İŞKUR Güz 2026", coordinator);
-		IskurUnit unit = unitRepository.saveAndFlush(new IskurUnit(program.getId(), "Kreatif ve Dijital Üretim", 0,
+		unit = unitRepository.saveAndFlush(new IskurUnit(program.getId(), "Kreatif ve Dijital Üretim", 0,
 				coordinator.getId(), Instant.now()));
 		team = teamRepository.saveAndFlush(new IskurTeam(unit, "Medya ve Kreatif Üretim", 0, Instant.now()));
 		IskurTeam otherTeam = teamRepository.saveAndFlush(new IskurTeam(unit, "Dijital Dönüşüm", 1, Instant.now()));
@@ -376,6 +377,8 @@ class IskurTaskOutputIntegrationTest {
 				.andExpect(status().isServiceUnavailable())
 				.andExpect(jsonPath("$.message").value("Dosya yükleme şu an kapalı."));
 		download(zeynep, taskId, output.getId()).andExpect(status().isServiceUnavailable());
+		// Taking a file back would leave its stored copy behind.
+		remove(mert, taskId, output.getId()).andExpect(status().isServiceUnavailable());
 		coordinatorDownload(coordinator, program, taskId, output.getId())
 				.andExpect(status().isServiceUnavailable());
 		// The screens read this to hide the upload control; what is already there stays listed.
@@ -429,6 +432,22 @@ class IskurTaskOutputIntegrationTest {
 		assertThat(taskRepository.findById(taskId)).isEmpty();
 		assertThat(outputRepository.count()).isZero();
 		assertThat(storedDocumentRepository.findById(documentId)).isEmpty();
+	}
+
+	@Test
+	void deletingAnEmptyTeamRemovesTheFilesOfItsTasks() throws Exception {
+		IskurTeam empty = teamRepository.saveAndFlush(new IskurTeam(unit, "Etkinlik Ekibi", 2, Instant.now()));
+		IskurTask left = task(program, empty, mert, zeynep, "Eski görev");
+		StoredDocument file = storedFile(mert);
+		outputRepository.saveAndFlush(new IskurTaskOutput(left.getId(), file.getId(), mert.getId(), Instant.now()));
+
+		mockMvc.perform(delete("/api/coordinator/programs/{programId}/iskur/teams/{teamId}", program.getId(),
+				empty.getId()).param("actorId", coordinator.getId().toString()).with(httpBasic("test", "test")))
+				.andExpect(status().isOk());
+
+		assertThat(outputRepository.count()).isZero();
+		assertThat(storedDocumentRepository.findById(file.getId())).isEmpty();
+		assertThat(teamRepository.findById(empty.getId())).isEmpty();
 	}
 
 	@Test

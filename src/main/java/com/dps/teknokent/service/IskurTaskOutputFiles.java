@@ -138,11 +138,22 @@ public class IskurTaskOutputFiles {
 		ofTask(taskId).forEach(this::remove);
 	}
 
+	/**
+	 * Everything handed in with the tasks of teams that are being deleted: the database takes the tasks with their
+	 * team, but the stored files would stay behind.
+	 */
+	public void removeAllOfTeams(Collection<UUID> teamIds) {
+		if (!teamIds.isEmpty()) {
+			entries(outputs.findByTeamIds(teamIds)).forEach(this::remove);
+		}
+	}
+
 	static ResourceNotFoundException notFound() {
 		return new ResourceNotFoundException(Texts.forRequest("error.iskurTaskOutputNotFound"));
 	}
 
-	private void requireEnabled() {
+	/** 503 while no bucket is set. */
+	public void requireEnabled() {
 		if (!enabled()) {
 			throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,
 					Texts.forRequest("error.iskurTaskOutputsOff"));
