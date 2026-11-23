@@ -14,14 +14,21 @@
 
 ## Releasing
 
-Pushing a tag `v*` runs `.github/workflows/deploy.yml`:
+Pushing a tag `v*` runs `.github/workflows/deploy.yml`, which deploys to ODTÜ's temporary AWS server (eu-north-1):
 
-1. The same gate as CI (`./mvnw clean verify`).
-2. `docker build --build-arg APP_VERSION=<tag>`: a multi-stage build (JDK 25 to build, JRE 25 with Tesseract to run,
-   as a non-root user), pushed to ECR as `<tag>` and `latest`.
-3. Over SSM, `/opt/batch2/deploy.sh <image>` on the EC2 instance tagged `teknokent-app` pulls and restarts it. The
-   script lives on the server, not in this repository.
-4. A GitHub release with generated notes.
+1. `./mvnw -B clean test` (the tagged commit already passed CI's full `verify` on `main`).
+2. GitHub OIDC assumes the deploy role named by the repository variable `ODTU_DEPLOY_ROLE_ARN`; no AWS keys are
+   stored in GitHub.
+3. Over SSM, the document `odtu-menton-deploy` runs `ops/deploy-component.sh backend <tag>` on the instance tagged
+   `MentonDeployTarget=odtu`. The server builds the image itself (no registry), keeps the running web, migrates, waits
+   for `/api/health` to report the tag and smoke-tests the site. It deploys only commits on `main`.
+4. The job waits for the result (up to 75 minutes) and prints the step and smoke-test lines; the full log stays on
+   the server.
+
+A manual run (**Actions → Deploy → Run workflow**) on `main` or a `v*` tag does the same; `main` deploys its commit.
+While the server's pause file exists (a demo), a run deploys nothing and says `DEPLOY PAUSED`. The server-side
+scripts and the IAM policies live in the ODTÜ deploy bundle (`deploy/odtu`). The web deploys the same way on every
+push to its `main`.
 
 ## In production
 
