@@ -13,6 +13,8 @@ import com.dps.teknokent.entity.InstitutionPerson;
 /**
  * What the institution says about the signed-in person, shown read-only ("Kurumsal Bilgiler"). {@code advisor} is
  * null when the record names none; its {@code userId} is null until that academician has signed in to Menton.
+ * {@code iskurParticipant} is also true for someone on a program's İŞKUR intern list: a student who signed up by e-mail
+ * has no ODTÜ record to say so.
  */
 public record InstitutionRecordResponse(
 		List<IdentityKind> kinds,
@@ -30,10 +32,11 @@ public record InstitutionRecordResponse(
 	public record Advisor(@Nullable UUID userId, String fullName, String academicTitle) {
 	}
 
-	public static InstitutionRecordResponse of(InstitutionPerson person, @Nullable InstitutionPerson advisor) {
+	public static InstitutionRecordResponse of(InstitutionPerson person, boolean iskurParticipant,
+			@Nullable InstitutionPerson advisor) {
 		return new InstitutionRecordResponse(List.copyOf(person.kinds()), person.getFullName(), person.getEmail(),
 				person.getFaculty(), person.getDepartmentName(), person.getClassYear(), person.getProgramLevel(),
-				person.getAcademicTitle(), person.isIskurParticipant(),
+				person.getAcademicTitle(), iskurParticipant,
 				advisor == null ? null
 						: new Advisor(
 								advisor.getUser() == null ? null : advisor.getUser().getId(),

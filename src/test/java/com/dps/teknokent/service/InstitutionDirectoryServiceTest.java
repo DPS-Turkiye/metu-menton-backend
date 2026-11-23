@@ -19,6 +19,7 @@ import com.dps.teknokent.domain.IdentityKind;
 import com.dps.teknokent.entity.AppUser;
 import com.dps.teknokent.entity.InstitutionAdvising;
 import com.dps.teknokent.entity.InstitutionPerson;
+import com.dps.teknokent.entity.Program;
 import com.dps.teknokent.exception.ResourceNotFoundException;
 import com.dps.teknokent.repository.InstitutionAdvisingRepository;
 import com.dps.teknokent.repository.InstitutionPersonRepository;
@@ -27,7 +28,8 @@ class InstitutionDirectoryServiceTest {
 
 	private final InstitutionPersonRepository people = mock(InstitutionPersonRepository.class);
 	private final InstitutionAdvisingRepository advising = mock(InstitutionAdvisingRepository.class);
-	private final InstitutionDirectoryService service = new InstitutionDirectoryService(people, advising);
+	private final IskurInternService interns = mock(IskurInternService.class);
+	private final InstitutionDirectoryService service = new InstitutionDirectoryService(people, advising, interns);
 
 	@Test
 	void theRecordNamesTheAdvisorEvenBeforeTheyHaveSignedIn() {
@@ -47,6 +49,28 @@ class InstitutionDirectoryServiceTest {
 		assertThat(record.advisor().fullName()).isEqualTo("Ahmet");
 		assertThat(record.advisor().academicTitle()).isEqualTo("Prof. Dr.");
 		assertThat(record.advisor().userId()).isNull();
+	}
+
+	// ODTÜ's record says who works in İŞKUR; an e-mail sign-up has no such record, so the intern list says it.
+	@Test
+	void theRecordOrTheInternListMakesSomeoneAnIskurParticipant() {
+		UUID listedId = UUID.randomUUID();
+		UUID plainId = UUID.randomUUID();
+		UUID recordedId = UUID.randomUUID();
+		InstitutionPerson recorded = person("s3", "Ece", Set.of(IdentityKind.STUDENT), recordedId);
+		recorded.setIskurParticipant(true);
+		when(people.findFirstByUserIdOrderBySyncedAtDesc(listedId))
+				.thenReturn(Optional.of(person("s1", "Ayşe", Set.of(IdentityKind.STUDENT), listedId)));
+		when(people.findFirstByUserIdOrderBySyncedAtDesc(plainId))
+				.thenReturn(Optional.of(person("s2", "Can", Set.of(IdentityKind.STUDENT), plainId)));
+		when(people.findFirstByUserIdOrderBySyncedAtDesc(recordedId)).thenReturn(Optional.of(recorded));
+		when(interns.currentProgram(listedId)).thenReturn(Optional.of(new Program()));
+		when(interns.currentProgram(plainId)).thenReturn(Optional.empty());
+		when(interns.currentProgram(recordedId)).thenReturn(Optional.empty());
+
+		assertThat(service.recordOf(listedId).iskurParticipant()).isTrue();
+		assertThat(service.recordOf(plainId).iskurParticipant()).isFalse();
+		assertThat(service.recordOf(recordedId).iskurParticipant()).isTrue();
 	}
 
 	@Test
