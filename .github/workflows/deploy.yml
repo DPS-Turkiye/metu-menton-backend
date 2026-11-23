@@ -1,30 +1,47 @@
 name: Deploy
 
-# Disabled in METUMenton: the steps below still target Teknokent's AWS (ECR, EC2, SSM).
-# Manual-only with a hard stop until it is rewritten for ODTÜ's own servers.
+# A v* tag runs the tests and then deploys that tag's backend to ODTÜ's server; a manual run does the same for the
+# branch or tag it is started on (only main and v* tags can deploy). The server builds the image itself:
+#   GitHub OIDC → the deploy role in ODTÜ's AWS account (vars.ODTU_DEPLOY_ROLE_ARN, the only setting)
+#   → SSM Run Command, document odtu-menton-deploy, on the instance tagged MentonDeployTarget=odtu
+#   → ops/deploy-component.sh backend <ref> there, which keeps the running web and skips while deploys are paused.
+# No registry and no AWS keys in GitHub. The paired web workflow deploys the web side the same way.
 on:
+  push:
+    tags:
+      - "v*"
   workflow_dispatch:
 
 permissions:
-  id-token: write
-  contents: write
+  contents: read
+
+# One backend deploy at a time; a newer one waits instead of cancelling a deploy that is building on the server.
+concurrency:
+  group: odtu-deploy-backend
+  cancel-in-progress: false
 
 env:
-  AWS_REGION: eu-central-1
-  ECR_REPOSITORY: teknokent-backend
-  EC2_NAME_TAG: teknokent-app
+  AWS_REGION: eu-north-1
+  DEPLOY_DOCUMENT: odtu-menton-deploy
+  TARGET_TAG_KEY: MentonDeployTarget
+  TARGET_TAG_VALUE: odtu
 
 jobs:
-  deploy:
+  test:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      MVNW_M2_HOST_DIR: .ci/m2
     steps:
-      - name: Hard stop
-        run: |
-          echo "::error::No ODTÜ deploy target yet; this workflow must not deploy to Teknokent AWS"
-          exit 1
+      - name: Harden Runner
+        uses: step-security/harden-runner@v2.22.4
+        with:
+          egress-policy: audit
 
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Cache Maven dependencies
         uses: actions/cache@v6
@@ -34,103 +51,123 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-maven-
 
-      # The same gate as CI: zero-warning build, tests, format, lint and the coverage floor.
-      - name: Verify
-        run: ./mvnw -B clean verify
-        env:
-          MVNW_M2_HOST_DIR: .ci/m2
+      - name: Run tests
+        run: ./mvnw -B clean test
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v6
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    # The server build takes 10–15 minutes and may first wait for a web deploy to finish.
+    timeout-minutes: 90
+    # Only this job can mint the OIDC token, and it checks out no code.
+    permissions:
+      id-token: write
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
-          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
+          egress-policy: audit
 
-      - name: Login to Amazon ECR
-        id: ecr
-        uses: aws-actions/amazon-ecr-login@v2
-
-      - name: Build and push image
+      - name: What to deploy
+        id: ref
         env:
-          IMAGE_TAG: ${{ github.ref_name }}
-          ECR_REGISTRY: ${{ steps.ecr.outputs.registry }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+          ROLE_ARN: ${{ vars.ODTU_DEPLOY_ROLE_ARN }}
         run: |
-          IMAGE_URI="${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}"
-          docker build --build-arg APP_VERSION="${IMAGE_TAG}" -t "${IMAGE_URI}" -t "${ECR_REGISTRY}/${ECR_REPOSITORY}:latest" .
-          docker push "${IMAGE_URI}"
-          docker push "${ECR_REGISTRY}/${ECR_REPOSITORY}:latest"
-
-      - name: Deploy to EC2 (SSM)
-        env:
-          IMAGE_TAG: ${{ github.ref_name }}
-          ECR_REGISTRY: ${{ steps.ecr.outputs.registry }}
-        run: |
-          IMAGE_URI="${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}"
-          INSTANCE_ID=$(aws ec2 describe-instances \
-            --filters "Name=tag:Name,Values=${EC2_NAME_TAG}" "Name=instance-state-name,Values=running" \
-            --query 'Reservations[0].Instances[0].InstanceId' \
-            --output text)
-
-          if [ "${INSTANCE_ID}" = "None" ] || [ -z "${INSTANCE_ID}" ]; then
-            echo "No running EC2 instance with tag Name=${EC2_NAME_TAG}"
+          if [ -z "$ROLE_ARN" ]; then
+            echo "::error::The repository variable ODTU_DEPLOY_ROLE_ARN is not set"
             exit 1
           fi
+          # A tag deploys under its own name, so /api/health reports it as the version; main deploys its commit.
+          if [ "$REF_TYPE" = tag ] && [[ "$REF_NAME" =~ ^v[A-Za-z0-9._-]{1,99}$ ]]; then
+            ref="$REF_NAME"
+          elif [ "$REF_TYPE" = branch ] && [ "$REF_NAME" = main ]; then
+            ref="$SHA"
+          else
+            echo "::error::Only main or a v* tag (letters, digits, . _ -) can deploy; this run is on a $REF_TYPE"
+            exit 1
+          fi
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+          echo "Deploying backend $ref"
 
-          echo "Waiting for EC2 bootstrap (/opt/batch2/deploy.sh + docker)..."
-          for attempt in $(seq 1 36); do
-            WAIT_ID=$(aws ssm send-command \
-              --document-name "AWS-RunShellScript" \
-              --instance-ids "${INSTANCE_ID}" \
-              --parameters 'commands=["test -x /opt/batch2/deploy.sh && systemctl is-active --quiet docker"]' \
-              --query 'Command.CommandId' \
-              --output text)
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.ODTU_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: metu-backend-deploy-${{ github.run_id }}
+          role-duration-seconds: 5400
+          mask-aws-account-id: true
 
-            aws ssm wait command-executed \
-              --command-id "${WAIT_ID}" \
-              --instance-id "${INSTANCE_ID}" || true
+      - name: Deploy on the server (SSM)
+        env:
+          COMPONENT: backend
+          REF: ${{ steps.ref.outputs.ref }}
+        run: |
+          set -euo pipefail
+          ids="$(aws ec2 describe-instances \
+            --filters "Name=tag:${TARGET_TAG_KEY},Values=${TARGET_TAG_VALUE}" "Name=instance-state-name,Values=running" \
+            --query 'Reservations[].Instances[].InstanceId' --output text)"
+          count="$(wc -w <<<"$ids" | tr -d ' ')"
+          if [ "$count" != 1 ]; then
+            echo "::error::Expected one running instance tagged ${TARGET_TAG_KEY}=${TARGET_TAG_VALUE}, found $count"
+            exit 1
+          fi
+          instance="$ids"
+          echo "::add-mask::$instance"
 
-            WAIT_STATUS=$(aws ssm get-command-invocation \
-              --command-id "${WAIT_ID}" \
-              --instance-id "${INSTANCE_ID}" \
-              --query 'Status' \
-              --output text)
+          command_id="$(aws ssm send-command \
+            --document-name "$DEPLOY_DOCUMENT" \
+            --instance-ids "$instance" \
+            --parameters "$(jq -nc --arg c "$COMPONENT" --arg r "$REF" '{component: [$c], ref: [$r]}')" \
+            --timeout-seconds 600 \
+            --comment "metu-menton-$COMPONENT $REF (run $GITHUB_RUN_ID)" \
+            --query 'Command.CommandId' --output text)"
+          echo "SSM command $command_id: $COMPONENT $REF"
 
-            if [ "${WAIT_STATUS}" = "Success" ]; then
-              echo "EC2 bootstrap ready."
-              break
+          # Longer than the document's 4200 s run limit, so the server's own verdict always arrives first.
+          deadline=$((SECONDS + 4500)) errors=0 status=Pending
+          while :; do
+            sleep 20
+            if status="$(aws ssm get-command-invocation --command-id "$command_id" --instance-id "$instance" \
+                --query Status --output text 2>/dev/null)"; then
+              errors=0
+            else
+              # Right after send-command the invocation may not exist yet.
+              errors=$((errors + 1)); status=Pending
+              if [ "$errors" -ge 15 ]; then
+                echo "::error::Cannot read the SSM command's status"
+                exit 1
+              fi
             fi
-
-            if [ "${attempt}" -eq 36 ]; then
-              echo "Timed out waiting for EC2 bootstrap."
+            case "$status" in
+              Pending | InProgress | Delayed | Cancelling) ;;
+              *) break ;;
+            esac
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "::error::No result after 4500 s; the server may still be deploying (command $command_id)"
               exit 1
             fi
-
-            echo "Bootstrap not ready yet (${attempt}/36), retrying in 10s..."
-            sleep 10
           done
 
-          COMMAND_ID=$(aws ssm send-command \
-            --document-name "AWS-RunShellScript" \
-            --instance-ids "${INSTANCE_ID}" \
-            --parameters "commands=/opt/batch2/deploy.sh ${IMAGE_URI}" \
-            --query 'Command.CommandId' \
-            --output text)
+          # deploy-component.sh prints only step, smoke and result lines; the full log stays on the server.
+          out="$(aws ssm get-command-invocation --command-id "$command_id" --instance-id "$instance" \
+            --query StandardOutputContent --output text)"
+          err="$(aws ssm get-command-invocation --command-id "$command_id" --instance-id "$instance" \
+            --query StandardErrorContent --output text)"
+          printf '%s\n' "$out"
+          # stderr is not printed (this log is public); its size hints that the server log is worth a look.
+          if [ -n "$err" ] && [ "$err" != None ]; then
+            echo "The server also wrote $(wc -l <<<"$err" | tr -d ' ') line(s) to stderr; see the deploy logs in /srv/menton/state."
+          fi
+          { echo "### $COMPONENT $REF: $status"; echo '```'; printf '%s\n' "$out"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
 
-          aws ssm wait command-executed \
-            --command-id "${COMMAND_ID}" \
-            --instance-id "${INSTANCE_ID}"
-
-          aws ssm get-command-invocation \
-            --command-id "${COMMAND_ID}" \
-            --instance-id "${INSTANCE_ID}" \
-            --query '[Status,StandardOutputContent,StandardErrorContent]'
-
-      - name: GitHub Release
-        uses: softprops/action-gh-release@v3
-        with:
-          generate_release_notes: true
-          append_body: true
-          body: |
-            ### Deploy
-
-            **ECR image:** `${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.ref_name }}`
+          if grep -q '^DEPLOY PAUSED' <<<"$out"; then
+            echo "::warning::Deploys are paused on the server; $COMPONENT $REF was not deployed. Re-run this workflow after the pause."
+          fi
+          if [ "$status" != Success ]; then
+            echo "::error::Deploy $status (SSM command $command_id)"
+            exit 1
+          fi
