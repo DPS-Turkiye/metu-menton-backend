@@ -206,8 +206,14 @@ class IskurInternListIntegrationTest {
 				.with(SecurityMockMvcRequestPostProcessors.user("frontend").roles("SERVICE")))
 				.andExpect(status().isOk());
 
+		asStudent(get("/api/institution/me"), plain).andExpect(status().isOk())
+				.andExpect(jsonPath("$.iskurParticipant").value(false));
+
 		add(coordinator, "\"duz@example.test\"").andExpect(status().isOk());
 		asStudent(get("/api/iskur/onboarding"), plain).andExpect(status().isOk());
+		// The web's İŞKUR home and "Mentorluk Ver" open on this flag.
+		asStudent(get("/api/institution/me"), plain).andExpect(status().isOk())
+				.andExpect(jsonPath("$.iskurParticipant").value(true));
 		asStudent(get("/api/peer-mentoring/mentors"), plain).andExpect(status().isOk());
 	}
 

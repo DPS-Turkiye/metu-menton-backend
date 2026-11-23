@@ -27,6 +27,7 @@ public class InstitutionDirectoryService {
 
 	private final InstitutionPersonRepository people;
 	private final InstitutionAdvisingRepository advising;
+	private final IskurInternService interns;
 
 	/** Empty for accounts no institution vouches for (e-mail sign-ups, startups, staff). */
 	public List<IdentityKind> kindsOf(UUID userId) {
@@ -38,7 +39,8 @@ public class InstitutionDirectoryService {
 	public InstitutionRecordResponse recordOf(UUID userId) {
 		InstitutionPerson person = people.findFirstByUserIdOrderBySyncedAtDesc(userId)
 				.orElseThrow(() -> new ResourceNotFoundException("No institution record for user " + userId));
-		return InstitutionRecordResponse.of(person, advisorOf(person).orElse(null));
+		boolean iskurParticipant = person.isIskurParticipant() || interns.currentProgram(userId).isPresent();
+		return InstitutionRecordResponse.of(person, iskurParticipant, advisorOf(person).orElse(null));
 	}
 
 	/** The academician's advisees from the institution's records, whether or not they have signed in yet. */
