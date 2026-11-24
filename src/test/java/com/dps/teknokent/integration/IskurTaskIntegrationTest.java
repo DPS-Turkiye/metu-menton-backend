@@ -410,6 +410,24 @@ class IskurTaskIntegrationTest {
 	}
 
 	@Test
+	void aHandedOverProjectIsEditedWhileAnotherIsOpenAndALateTaskNeedsANewDateForSomeoneElse() throws Exception {
+		contribution(zeynep, mert, "Staj rehberi").andExpect(status().isOk());
+		UUID first = taskRepository.findAll().getFirst().getId();
+		update(mert, first, "{\"status\":\"HANDED_OVER\",\"handoverReason\":\"Devam ediyor\"}")
+				.andExpect(status().isOk());
+		contribution(zeynep, mert, "Staj rehberi 2").andExpect(status().isOk());
+		send(put("/api/iskur/tasks/" + first), taskBody(zeynep, mert, "Staj rehberi 1", 120, today, false)
+				.replace("EVENT", "CONTRIBUTION_PROJECT")).andExpect(status().isOk());
+
+		IskurTask late = taskRepository.findById(first).orElseThrow();
+		late.setDueDate(today.minusDays(3));
+		taskRepository.saveAndFlush(late);
+		edit(zeynep, first, mert, "Geciken görev", 120, today.minusDays(3), false).andExpect(status().isOk());
+		edit(zeynep, first, ayse, "Geciken görev", 120, today.minusDays(3), false).andExpect(status().isBadRequest());
+		edit(zeynep, first, ayse, "Geciken görev", 120, today, false).andExpect(status().isOk());
+	}
+
+	@Test
 	void aCancelledTasksAssigneeIsTold() throws Exception {
 		UUID id = createTask(mert, false);
 		deleteTask(zeynep, id).andExpect(status().isOk());

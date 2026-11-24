@@ -135,10 +135,9 @@ public class IskurTaskService {
 		requireEstimateStep(request);
 		requireDueDate(request.dueDate());
 		requireWorkDay(me.getProgramId(), assignee.getUserId(), request.dueDate());
-		requireOnlyContributionProject(me.getProgramId(), assignee.getUserId(), request.kind(), null);
-
 		IskurTask task = new IskurTask(me.getProgramId(), me.getTeamId(), assignee.getUserId(), actorId,
 				clock.instant());
+		requireOnlyContributionProject(me.getProgramId(), assignee.getUserId(), request.kind(), task);
 		apply(task, request);
 		tasks.save(task);
 		if (!assignee.getUserId().equals(actorId)) {
@@ -150,8 +149,9 @@ public class IskurTaskService {
 	/**
 	 * "Düzenle" and "Başka üyeye ata": a leader of the team changes the task, or gives it to someone they may assign
 	 * to.
-	 * A done task is locked until it is reopened. A due date that does not change is not checked again, so a late task
-	 * can still be edited. A task that goes to someone else starts afresh: what its first assignee logged stays in
+	 * A done task is locked until it is reopened. A due date that does not change is not checked again, so its
+	 * assignee's late task can still be edited; someone new gets a date ahead. A task that goes to someone else starts
+	 * afresh: what its first assignee logged stays in
 	 * their own work log, and files they handed in keep it with them.
 	 */
 	@Transactional
@@ -175,13 +175,13 @@ public class IskurTaskService {
 			}
 		}
 		requireEstimateStep(request);
-		if (dueMoved) {
-			requireDueDate(request.dueDate());
-		}
 		if (dueMoved || reassigned) {
+			requireDueDate(request.dueDate());
 			requireWorkDay(task.getProgramId(), request.assigneeId(), request.dueDate());
 		}
-		requireOnlyContributionProject(task.getProgramId(), request.assigneeId(), request.kind(), task.getId());
+		if (reassigned || task.getStatus() == IskurTaskStatus.OPEN) {
+			requireOnlyContributionProject(task.getProgramId(), request.assigneeId(), request.kind(), task);
+		}
 
 		Instant now = clock.instant();
 		if (reassigned) {
@@ -243,16 +243,20 @@ public class IskurTaskService {
 
 	/** "Öğrenci başına tek katkı projesi": one open at a time; a done or handed-over one does not count. */
 	private void requireOnlyContributionProject(UUID programId, UUID assigneeId, IskurTaskKind kind,
-			@Nullable UUID editedTaskId) {
+			IskurTask task) {
 		if (kind != IskurTaskKind.CONTRIBUTION_PROJECT) {
 			return;
 		}
+		// Two leaders at once must not each open one.
+		placements.findForUpdate(programId, assigneeId);
 		tasks.findByProgramIdAndAssigneeIdAndKindAndStatus(programId, assigneeId, kind, IskurTaskStatus.OPEN).stream()
-				.filter(other -> !other.getId().equals(editedTaskId))
+				.filter(other -> !other.getId().equals(task.getId()))
 				.findFirst()
 				.ifPresent(other -> {
-					throw new InvalidRequestException(
-							Texts.forRequest("error.iskurTaskContributionProject", other.getTitle()));
+					// A task of another team is not named to this one's leader.
+					throw new InvalidRequestException(other.getTeamId().equals(task.getTeamId())
+							? Texts.forRequest("error.iskurTaskContributionProject", other.getTitle())
+							: Texts.forRequest("error.iskurTaskContributionProjectElsewhere"));
 				});
 	}
 
