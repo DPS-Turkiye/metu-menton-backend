@@ -72,8 +72,9 @@ import lombok.RequiredArgsConstructor;
  * coordinator or an admin (or with the program's mentor approval, see {@link #awardAfterMentorApproval}); it
  * grants MENTOR through the account's permissions and makes the person one of the program's mentors.
  * <p>
- * On ODTÜ a coordinator approves each student after their Prism training ({@link PrismTrainingService}); only the
- * program's İŞKUR interns qualify while {@link PeerTrainingProperties#internsOnly()} is on. Not here yet, by decision:
+ * On ODTÜ a coordinator approves each student after their Prism training ({@link PrismTrainingService}); any approved
+ * student of the program qualifies, or only its İŞKUR interns while {@link PeerTrainingProperties#internsOnly()} is on.
+ * Not here yet, by decision:
  * expiry (D3; {@link BadgeStatus#EXPIRED} is reserved), and what a revoke does to running mentorships (D4). A revoke
  * today ends the badge and the MENTOR permission it gave, and leaves requests, mentorships and the program membership
  * as they are.
@@ -450,7 +451,7 @@ public class BadgeService {
 	}
 
 	/**
-	 * Who may hold the program's gate badge under the interns-only rule (Arya, 19 Nov): its İŞKUR interns, as
+	 * Who may hold the program's gate badge under the optional interns-only rule: its İŞKUR interns, as
 	 * {@link IskurInternService#internIds} counts them. The one place the rule lives; with it off, everyone passes.
 	 */
 	Predicate<UUID> internRule(Program program) {

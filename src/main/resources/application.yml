@@ -165,8 +165,8 @@ app:
     # ODTÜ: the Akran Mentoru training and test run on Prism and a coordinator approves each mentor, so Menton's own
     # quiz stays off and never awards the badge. true brings the in-app quiz (and its automatic badge) back.
     in-app-quiz: ${PEER_TRAINING_IN_APP_QUIZ:false}
-    # Only the program's İŞKUR interns can be approved as Akran mentors (default, not yet confirmed by Arya).
-    interns-only: ${PEER_TRAINING_INTERNS_ONLY:true}
+    # Every active student of the program may become an Akran mentor. true lets only its İŞKUR interns.
+    interns-only: ${PEER_TRAINING_INTERNS_ONLY:false}
   registration:
     allowed-email-domains: ${REGISTRATION_ALLOWED_EMAIL_DOMAINS:}
   bootstrap:
