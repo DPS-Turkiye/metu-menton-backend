@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -62,6 +63,12 @@ public class IskurTaskController {
 	@PatchMapping("/tasks/{taskId}")
 	public IskurTaskResponse update(@PathVariable UUID taskId, @Valid @RequestBody IskurTaskUpdateRequest request) {
 		return iskurTaskService.update(CurrentActor.resolve(request.actorId()), taskId, request);
+	}
+
+	/** A leader's "Düzenle" and "Başka üyeye ata". */
+	@PutMapping("/tasks/{taskId}")
+	public IskurTeamTasksResponse edit(@PathVariable UUID taskId, @Valid @RequestBody IskurTaskRequest request) {
+		return iskurTaskService.edit(CurrentActor.resolve(request.actorId()), taskId, request);
 	}
 
 	@PostMapping(value = "/tasks/{taskId}/outputs", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
