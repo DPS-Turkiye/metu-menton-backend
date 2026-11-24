@@ -407,6 +407,8 @@ class PeerMentoringServiceTest {
 		assertThat(saved.menteeCapacity()).isEqualTo(4);
 		assertThat(saved.acceptingRequests()).isFalse();
 		assertThat(published.getMenteeCapacity()).isEqualTo(4);
+
+		assertThat(service.saveIntake(peerMentor.getId(), null, true).menteeCapacity()).isEqualTo(4);
 	}
 
 	@Test

@@ -117,7 +117,7 @@ class PeerMentoringControllerTest {
 	}
 
 	@Test
-	void theCapacityAndTheRequestSwitchAreSavedTogetherAndBothAreRequired() throws Exception {
+	void theCapacityAndTheRequestSwitchAreSavedTogetherAndTheSwitchIsRequired() throws Exception {
 		mockMvc.perform(put("/api/peer-mentoring/profile/intake").with(user("proxy"))
 				.contentType(MediaType.APPLICATION_JSON)
 				.content("{\"actorId\":\"%s\",\"menteeCapacity\":4,\"acceptingRequests\":false}".formatted(ACTOR)))
@@ -125,8 +125,7 @@ class PeerMentoringControllerTest {
 		verify(peerMentoringService).saveIntake(ACTOR, 4, false);
 
 		for (String body : List.of("{\"menteeCapacity\":0,\"acceptingRequests\":true}",
-				"{\"menteeCapacity\":51,\"acceptingRequests\":true}", "{\"menteeCapacity\":3}",
-				"{\"acceptingRequests\":true}")) {
+				"{\"menteeCapacity\":51,\"acceptingRequests\":true}", "{\"menteeCapacity\":3}")) {
 			mockMvc.perform(put("/api/peer-mentoring/profile/intake").with(user("proxy"))
 					.contentType(MediaType.APPLICATION_JSON).content(body))
 					.andExpect(status().isBadRequest());

@@ -301,10 +301,13 @@ public class PeerMentoringService {
 
 	/** "Kapasitem" on Mentor profilim: saved at once, apart from the wizard's answers and the weekly hours. */
 	@Transactional
-	public PeerMentorProfileResponse saveIntake(UUID actorId, int menteeCapacity, boolean acceptingRequests) {
+	public PeerMentorProfileResponse saveIntake(UUID actorId, @Nullable Integer menteeCapacity,
+			boolean acceptingRequests) {
 		AppUser mentor = requirePeerMentor(actorId);
 		MentorProfile profile = requireProfile(mentor);
-		profile.setMenteeCapacity(menteeCapacity);
+		if (menteeCapacity != null) {
+			profile.setMenteeCapacity(menteeCapacity);
+		}
 		profile.setAcceptingRequests(acceptingRequests);
 		return toProfileResponse(mentor, mentorProfileRepository.save(profile));
 	}
