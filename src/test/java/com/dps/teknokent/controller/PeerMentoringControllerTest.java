@@ -96,7 +96,7 @@ class PeerMentoringControllerTest {
 	void oneMentorsProfileCarriesTheWizardAnswersAndHoursButNoEmail() throws Exception {
 		when(peerMentoringService.mentor(ACTOR, MENTOR)).thenReturn(new PeerMentorDetailResponse(MENTOR,
 				"Zeynep Demir", "Bilgisayar Mühendisliği", 4, List.of(PeerTopicCategory.CAREER_INTERNSHIP),
-				"CV ve staj", List.of(), false, List.of(), true, List.of("cv"), List.of("CENG 315"), List.of(),
+				"CV ve staj", List.of(), false, true, List.of(), true, List.of("cv"), List.of("CENG 315"), List.of(),
 				null, null, List.of(new MentorAvailabilityRuleResponse(UUID.randomUUID(), DayOfWeek.TUESDAY,
 						LocalTime.of(18, 0), LocalTime.of(20, 0), 60)),
 				Map.of(PeerTopicCategory.CAREER_INTERNSHIP, PeerTopicLevel.ADVANCED),
@@ -114,6 +114,26 @@ class PeerMentoringControllerTest {
 				.andExpect(jsonPath("$.experiences[0].startedOn").value("2025-06"))
 				.andExpect(jsonPath("$.experiences[0].endedOn").doesNotExist())
 				.andExpect(jsonPath("$.email").doesNotExist());
+	}
+
+	@Test
+	void theCapacityAndTheRequestSwitchAreSavedTogetherAndBothAreRequired() throws Exception {
+		mockMvc.perform(put("/api/peer-mentoring/profile/intake").with(user("proxy"))
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("{\"actorId\":\"%s\",\"menteeCapacity\":4,\"acceptingRequests\":false}".formatted(ACTOR)))
+				.andExpect(status().isOk());
+		verify(peerMentoringService).saveIntake(ACTOR, 4, false);
+
+		for (String body : List.of("{\"menteeCapacity\":0,\"acceptingRequests\":true}",
+				"{\"menteeCapacity\":51,\"acceptingRequests\":true}", "{\"menteeCapacity\":3}",
+				"{\"acceptingRequests\":true}")) {
+			mockMvc.perform(put("/api/peer-mentoring/profile/intake").with(user("proxy"))
+					.contentType(MediaType.APPLICATION_JSON).content(body))
+					.andExpect(status().isBadRequest());
+		}
+		mockMvc.perform(put("/api/peer-mentoring/profile/intake").contentType(MediaType.APPLICATION_JSON)
+				.content("{\"menteeCapacity\":4,\"acceptingRequests\":false}"))
+				.andExpect(status().isUnauthorized());
 	}
 
 	@Test

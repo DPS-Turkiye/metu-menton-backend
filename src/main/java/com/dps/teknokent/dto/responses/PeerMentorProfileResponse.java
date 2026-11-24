@@ -18,6 +18,7 @@ public record PeerMentorProfileResponse(
 		String department,
 		Integer classYear,
 		Integer menteeCapacity,
+		boolean acceptingRequests,
 		Map<PeerTopicCategory, PeerTopicLevel> levels,
 		List<PeerExperienceCardResponse> experiences) {
 }

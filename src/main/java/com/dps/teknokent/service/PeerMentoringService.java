@@ -124,8 +124,10 @@ public class PeerMentoringService {
 				.filter(profile -> wantedSubTopic == null || offers(profile, wantedSubTopic))
 				.toList();
 		Set<UUID> free = freeThisWeek(mentors);
+		Set<UUID> paused = notAccepting(mentors);
 		return mentors.stream()
-				.map(profile -> toCard(profile, department, active, free.contains(profile.id())))
+				.map(profile -> toCard(profile, department, active, free.contains(profile.id()),
+						!paused.contains(profile.id())))
 				.filter(card -> !card.categories().isEmpty())
 				.filter(card -> category == null || card.categories().contains(category))
 				.filter(card -> !availableThisWeek || card.availableThisWeek())
@@ -145,7 +147,7 @@ public class PeerMentoringService {
 				.findFirst()
 				.orElseThrow(() -> mentorNotFound(mentorId));
 		PeerMentorCardResponse card = toCard(profile, departmentOf(student.getId(), null), active,
-				!freeThisWeek(List.of(profile)).isEmpty());
+				!freeThisWeek(List.of(profile)).isEmpty(), notAccepting(List.of(profile)).isEmpty());
 		if (card.categories().isEmpty()) {
 			throw mentorNotFound(mentorId);
 		}
@@ -217,6 +219,9 @@ public class PeerMentoringService {
 		if (!offeredCategories(mentorProfile.specialties(), activeForStudent(student)).contains(request.category())) {
 			throw new InvalidRequestException(Texts.forRequest("error.peerMentorCategoryNotOffered"));
 		}
+		if (!notAccepting(List.of(mentorProfile)).isEmpty()) {
+			throw new ConflictException(Texts.forRequest("error.peerMentorNotAccepting"));
+		}
 		boolean alreadyOpen = mentorshipRequestRepository.findByRequesterIdOrderByCreatedAtDesc(student.getId())
 				.stream()
 				.anyMatch(existing -> existing.getMentor().getId().equals(request.mentorId())
@@ -246,9 +251,7 @@ public class PeerMentoringService {
 	@Transactional(readOnly = true)
 	public PeerMentorProfileResponse profile(UUID actorId) {
 		AppUser mentor = requirePeerMentor(actorId);
-		MentorProfile profile = mentorProfileRepository.findById(mentor.getId())
-				.orElseThrow(() -> new ResourceNotFoundException("No peer-mentor profile yet: " + mentor.getId()));
-		return toProfileResponse(mentor, profile);
+		return toProfileResponse(mentor, requireProfile(mentor));
 	}
 
 	/**
@@ -296,6 +299,21 @@ public class PeerMentoringService {
 		return toProfileResponse(mentor, mentorProfileRepository.save(profile));
 	}
 
+	/** "Kapasitem" on Mentor profilim: saved at once, apart from the wizard's answers and the weekly hours. */
+	@Transactional
+	public PeerMentorProfileResponse saveIntake(UUID actorId, int menteeCapacity, boolean acceptingRequests) {
+		AppUser mentor = requirePeerMentor(actorId);
+		MentorProfile profile = requireProfile(mentor);
+		profile.setMenteeCapacity(menteeCapacity);
+		profile.setAcceptingRequests(acceptingRequests);
+		return toProfileResponse(mentor, mentorProfileRepository.save(profile));
+	}
+
+	private MentorProfile requireProfile(AppUser mentor) {
+		return mentorProfileRepository.findById(mentor.getId())
+				.orElseThrow(() -> new ResourceNotFoundException("No peer-mentor profile yet: " + mentor.getId()));
+	}
+
 	private PeerMentorProfileResponse toProfileResponse(AppUser mentor, MentorProfile profile) {
 		Optional<InstitutionPerson> person = institutionPersonRepository.findFirstByUserIdOrderBySyncedAtDesc(
 				mentor.getId());
@@ -311,6 +329,7 @@ public class PeerMentoringService {
 				person.map(InstitutionPerson::getDepartmentName).orElse(profile.getDepartment()),
 				person.map(InstitutionPerson::getClassYear).orElseGet(() -> parseYear(profile.getStudyYear())),
 				profile.getMenteeCapacity(),
+				profile.isAcceptingRequests(),
 				levelsFor(profile, offered),
 				cardsOf(profile));
 	}
@@ -386,6 +405,12 @@ public class PeerMentoringService {
 		return Set.copyOf(mentorAvailabilitySlotRepository.findMentorIdsWithFreeSlotBetween(
 				mentors.stream().map(MentorProfileResponse::id).toList(), now.plus(MeetingSlotTimes.MIN_BOOKING_LEAD),
 				now.plus(THIS_WEEK), MeetingStatus.SCHEDULED));
+	}
+
+	private Set<UUID> notAccepting(Collection<MentorProfileResponse> mentors) {
+		return mentors.isEmpty() ? Set.of()
+				: mentorProfileRepository.findIdsNotAcceptingRequests(
+						mentors.stream().map(MentorProfileResponse::id).toList());
 	}
 
 	/**
@@ -471,7 +496,7 @@ public class PeerMentoringService {
 
 	/** Only the categories active in the student's program show on the card. */
 	private PeerMentorCardResponse toCard(MentorProfileResponse profile, @Nullable String studentDepartment,
-			Set<PeerTopicCategory> active, boolean availableThisWeek) {
+			Set<PeerTopicCategory> active, boolean availableThisWeek, boolean acceptingRequests) {
 		Optional<InstitutionPerson> person = institutionPersonRepository
 				.findFirstByUserIdOrderBySyncedAtDesc(profile.id());
 		String fallbackDepartment = profile.studentProfile() == null ? null : profile.studentProfile().department();
@@ -488,7 +513,7 @@ public class PeerMentoringService {
 				: List.of();
 		boolean full = profile.menteeCapacity() != null && profile.activeMenteeCount() >= profile.menteeCapacity();
 		return new PeerMentorCardResponse(profile.id(), profile.fullName(), department, classYear, categories, helpWith,
-				reasons, full, badgeService.publicOf(profile.id()), availableThisWeek);
+				reasons, full, acceptingRequests, badgeService.publicOf(profile.id()), availableThisWeek);
 	}
 
 	private PeerMentoringRequestResponse toResponse(MentorshipRequest request) {
