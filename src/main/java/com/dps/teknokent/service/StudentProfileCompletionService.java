@@ -14,6 +14,8 @@ import com.dps.teknokent.domain.PeerTopicCategory;
 import com.dps.teknokent.domain.UserRole;
 import com.dps.teknokent.dto.requests.SaveStudentProfileCompletionRequest;
 import com.dps.teknokent.dto.responses.AdviseeProfileResponse;
+import com.dps.teknokent.dto.responses.PeerMenteeProfileResponse;
+import com.dps.teknokent.dto.responses.PeerMentoringRequestResponse;
 import com.dps.teknokent.dto.responses.StudentProfileCompletionResponse;
 import com.dps.teknokent.entity.StudentInterest;
 import com.dps.teknokent.exception.InvalidRequestException;
@@ -69,6 +71,18 @@ public class StudentProfileCompletionService {
 		if (!institutionDirectoryService.advises(academicianId, studentId)) {
 			throw new ResourceNotFoundException("Advisee not found.");
 		}
+		return sharedProfile(studentId);
+	}
+
+	/** What the mentor a student asked may see of them (Profilim's "Bilgilerin nerede görünür?"). */
+	@Transactional(readOnly = true)
+	public PeerMenteeProfileResponse forPeerMentor(UUID mentorId, UUID menteeId) {
+		PeerMentoringRequestResponse.Person mentee = peerMentoringService.requireMentee(mentorId, menteeId);
+		AdviseeProfileResponse shared = sharedProfile(menteeId);
+		return new PeerMenteeProfileResponse(mentee, shared.interests(), shared.goal());
+	}
+
+	private AdviseeProfileResponse sharedProfile(UUID studentId) {
 		Set<PeerTopicCategory> active = peerMentoringService.activeForStudent(studentId);
 		return studentInterestRepository.findById(studentId)
 				.map(saved -> new AdviseeProfileResponse(
@@ -94,7 +108,10 @@ public class StudentProfileCompletionService {
 				interest.isSkipped());
 	}
 
-	/** What Profilim shows, to the student and their advisor alike: only topics still active in their program. */
+	/**
+	 * What Profilim shows, to the student, their advisor and their mentors alike: only topics still active in their
+	 * program.
+	 */
 	private static List<PeerTopicCategory> visibleTopics(StudentInterest interest, Set<PeerTopicCategory> active) {
 		return interest.getTopics().stream().filter(active::contains).toList();
 	}

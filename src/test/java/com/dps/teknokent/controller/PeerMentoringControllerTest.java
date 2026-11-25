@@ -34,15 +34,19 @@ import com.dps.teknokent.domain.PeerTopicCategory;
 import com.dps.teknokent.domain.PeerTopicLevel;
 import com.dps.teknokent.dto.requests.PeerMentorProfileDraft;
 import com.dps.teknokent.dto.requests.SavePeerMentorProfileRequest;
+import com.dps.teknokent.dto.responses.AdviseeProfileResponse;
 import com.dps.teknokent.dto.responses.MentorAvailabilityRuleResponse;
 import com.dps.teknokent.dto.responses.PeerCategoryCountResponse;
 import com.dps.teknokent.dto.responses.PeerExperienceCardResponse;
+import com.dps.teknokent.dto.responses.PeerMenteeProfileResponse;
 import com.dps.teknokent.dto.responses.PeerMentorDetailResponse;
 import com.dps.teknokent.dto.responses.PeerMentorProfileDraftResponse;
+import com.dps.teknokent.dto.responses.PeerMentoringRequestResponse;
 import com.dps.teknokent.exception.ResourceNotFoundException;
 import com.dps.teknokent.service.PeerAppointmentService;
 import com.dps.teknokent.service.PeerMentorDraftService;
 import com.dps.teknokent.service.PeerMentoringService;
+import com.dps.teknokent.service.StudentProfileCompletionService;
 
 @WebMvcTest(PeerMentoringController.class)
 @Import(SecurityConfig.class)
@@ -64,11 +68,31 @@ class PeerMentoringControllerTest {
 	@MockitoBean
 	private PeerMentorDraftService peerMentorDraftService;
 
+	@MockitoBean
+	private StudentProfileCompletionService studentProfileCompletionService;
+
 	@Test
 	void theNewReadsNeedTheServiceCredential() throws Exception {
 		mockMvc.perform(get("/api/peer-mentoring/mentors/" + MENTOR)).andExpect(status().isUnauthorized());
 		mockMvc.perform(get("/api/peer-mentoring/mentor-counts")).andExpect(status().isUnauthorized());
 		verifyNoInteractions(peerMentoringService);
+	}
+
+	@Test
+	void aMenteeIsSharedWithTheirMentorWithoutAnEmail() throws Exception {
+		when(studentProfileCompletionService.forPeerMentor(ACTOR, MENTOR)).thenReturn(new PeerMenteeProfileResponse(
+				new PeerMentoringRequestResponse.Person(MENTOR, "Zeynep Koç", "Psikoloji"),
+				new AdviseeProfileResponse.Interests(List.of(PeerTopicCategory.CAREER_INTERNSHIP), List.of("cv")),
+				"Yaz stajı bulmak"));
+
+		mockMvc.perform(get("/api/peer-mentoring/mentees/" + MENTOR)).andExpect(status().isUnauthorized());
+		mockMvc.perform(get("/api/peer-mentoring/mentees/" + MENTOR).param("actorId", ACTOR.toString())
+				.with(user("proxy")))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.mentee.fullName").value("Zeynep Koç"))
+				.andExpect(jsonPath("$.interests.topics[0]").value("CAREER_INTERNSHIP"))
+				.andExpect(jsonPath("$.goal").value("Yaz stajı bulmak"))
+				.andExpect(jsonPath("$.mentee.email").doesNotExist());
 	}
 
 	@Test

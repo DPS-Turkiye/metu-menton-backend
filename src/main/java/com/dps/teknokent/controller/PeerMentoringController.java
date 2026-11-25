@@ -23,6 +23,7 @@ import com.dps.teknokent.dto.requests.SavePeerMentorProfileDraftRequest;
 import com.dps.teknokent.dto.requests.SavePeerMentorProfileRequest;
 import com.dps.teknokent.dto.responses.AppointmentResponse;
 import com.dps.teknokent.dto.responses.PeerCategoryCountResponse;
+import com.dps.teknokent.dto.responses.PeerMenteeProfileResponse;
 import com.dps.teknokent.dto.responses.PeerMentorCardResponse;
 import com.dps.teknokent.dto.responses.PeerMentorDetailResponse;
 import com.dps.teknokent.dto.responses.PeerMentorProfileDraftResponse;
@@ -32,6 +33,7 @@ import com.dps.teknokent.security.CurrentActor;
 import com.dps.teknokent.service.PeerAppointmentService;
 import com.dps.teknokent.service.PeerMentorDraftService;
 import com.dps.teknokent.service.PeerMentoringService;
+import com.dps.teknokent.service.StudentProfileCompletionService;
 
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -47,6 +49,7 @@ public class PeerMentoringController {
 	private final PeerMentoringService peerMentoringService;
 	private final PeerAppointmentService peerAppointmentService;
 	private final PeerMentorDraftService peerMentorDraftService;
+	private final StudentProfileCompletionService studentProfileCompletionService;
 
 	/** {@code subTopic} keeps the mentors offering it; {@code availableThisWeek} those with a free slot this week. */
 	@GetMapping("/mentors")
@@ -87,6 +90,12 @@ public class PeerMentoringController {
 			@RequestParam(name = "as", required = false) UserRole side) {
 		return peerMentoringService.requests(CurrentActor.resolve(actorId),
 				side == UserRole.MENTOR ? UserRole.MENTOR : UserRole.MENTEE);
+	}
+
+	/** One student who asked the signed-in peer mentor, as Profilim says they are shared; 404 for anyone else. */
+	@GetMapping("/mentees/{menteeId}")
+	public PeerMenteeProfileResponse mentee(@PathVariable UUID menteeId, @RequestParam(required = false) UUID actorId) {
+		return studentProfileCompletionService.forPeerMentor(CurrentActor.resolve(actorId), menteeId);
 	}
 
 	/** The meetings booked on the student's peer requests, as mentee and as mentor, soonest first. */

@@ -677,6 +677,34 @@ class PeerMentoringServiceTest {
 				.containsExactly(began, null);
 	}
 
+	@Test
+	void aPeerMentorReadsOnlyAStudentWhoseRequestToThemIsOpenOrAccepted() {
+		MentorshipRequest mine = request(UUID.randomUUID(), peerMentor, "CAREER_INTERNSHIP");
+		when(requests.findByMentorIdOrderByCreatedAtDesc(peerMentor.getId())).thenReturn(List.of(mine));
+		for (MentorshipRequestStatus shown : List.of(MentorshipRequestStatus.PENDING,
+				MentorshipRequestStatus.MORE_INFO_REQUESTED, MentorshipRequestStatus.COUNTER_PROPOSED,
+				MentorshipRequestStatus.ACCEPTED)) {
+			mine.setStatus(shown);
+			assertThat(service.requireMentee(peerMentor.getId(), student.getId()).fullName())
+					.isEqualTo(student.getFullName());
+		}
+		for (MentorshipRequestStatus hidden : List.of(MentorshipRequestStatus.DECLINED,
+				MentorshipRequestStatus.WITHDRAWN)) {
+			mine.setStatus(hidden);
+			assertThatThrownBy(() -> service.requireMentee(peerMentor.getId(), student.getId()))
+					.isInstanceOf(ResourceNotFoundException.class);
+		}
+		mine.setStatus(MentorshipRequestStatus.ACCEPTED);
+		mine.setSupportArea("Yatırım");
+		assertThatThrownBy(() -> service.requireMentee(peerMentor.getId(), student.getId()))
+				.isInstanceOf(ResourceNotFoundException.class);
+		assertThatThrownBy(() -> service.requireMentee(peerMentor.getId(), UUID.randomUUID()))
+				.isInstanceOf(ResourceNotFoundException.class);
+		assertThatThrownBy(() -> service.requireMentee(student.getId(), peerMentor.getId()))
+				.isInstanceOfSatisfying(ResponseStatusException.class,
+						error -> assertThat(error.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN));
+	}
+
 	private AppUser user(String name, Set<IdentityKind> kinds, UserRole... roles) {
 		AppUser user = new AppUser();
 		user.setId(UUID.randomUUID());

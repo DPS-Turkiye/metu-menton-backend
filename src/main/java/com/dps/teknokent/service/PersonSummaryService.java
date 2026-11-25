@@ -2,6 +2,7 @@ package com.dps.teknokent.service;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -48,6 +49,10 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class PersonSummaryService {
 
+	/** The programs with mentors and mentees; office hours have neither. */
+	private static final Set<ProgramType> MENTORING = EnumSet.of(ProgramType.STARTUP_MENTORING,
+			ProgramType.PEER_MENTORING);
+
 	private final DomainLookupService domainLookupService;
 	private final MentorProfileService mentorProfileService;
 	private final MentorProfileRepository mentorProfileRepository;
@@ -85,7 +90,7 @@ public class PersonSummaryService {
 		Set<UUID> ids = new LinkedHashSet<>(pools.keySet());
 		ids.addAll(menteeAccess);
 		List<Program> programs = programRepository.findAllById(ids).stream()
-				.filter(program -> program.getProgramType() == ProgramType.STARTUP_MENTORING)
+				.filter(program -> MENTORING.contains(program.getProgramType()))
 				.filter(program -> admin
 						|| ProgramCoordination.coordinates(program, actorId, programCoordinatorRepository))
 				.toList();

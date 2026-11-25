@@ -204,6 +204,19 @@ public class PeerMentoringService {
 				.toList();
 	}
 
+	/** A student whose request to this peer mentor is waiting or accepted; anyone else is not found. */
+	PeerMentoringRequestResponse.Person requireMentee(UUID mentorId, UUID menteeId) {
+		AppUser mentor = requirePeerMentor(mentorId);
+		return mentorshipRequestRepository.findByMentorIdOrderByCreatedAtDesc(mentor.getId()).stream()
+				.filter(request -> request.getRequester().getId().equals(menteeId))
+				.filter(request -> PeerTopicCategory.fromText(request.getSupportArea()) != null)
+				.filter(request -> request.getStatus().isOpen()
+						|| request.getStatus() == MentorshipRequestStatus.ACCEPTED)
+				.findFirst()
+				.map(request -> toResponse(request).mentee())
+				.orElseThrow(() -> new ResourceNotFoundException("Mentee not found: " + menteeId));
+	}
+
 	@Transactional
 	public PeerMentoringRequestResponse create(UUID actorId, CreatePeerMentoringRequest request) {
 		AppUser student = requireStudent(actorId);
@@ -461,7 +474,7 @@ public class PeerMentoringService {
 		return institutionDirectoryService.kindsOf(user.getId()).contains(IdentityKind.STUDENT);
 	}
 
-	/** The categories open in a student's program, read for their advisor: no check on who asks. */
+	/** The categories open in a student's program, read for their advisor or mentor: no check on who asks. */
 	Set<PeerTopicCategory> activeForStudent(UUID studentId) {
 		return activeForStudent(domainLookupService.requireUser(studentId));
 	}
