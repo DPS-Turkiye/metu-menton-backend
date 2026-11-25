@@ -68,6 +68,7 @@ class PersonSummaryServiceTest {
 	private static final UUID OWN_PROGRAM = UUID.fromString("00000000-0000-0000-0000-0000000000a1");
 	private static final UUID OTHER_PROGRAM = UUID.fromString("00000000-0000-0000-0000-0000000000a2");
 	private static final UUID PEER_PROGRAM = UUID.fromString("00000000-0000-0000-0000-0000000000a3");
+	private static final UUID OFFICE_HOURS_PROGRAM = UUID.fromString("00000000-0000-0000-0000-0000000000a5");
 	private static final UUID PAST_PROGRAM = UUID.fromString("00000000-0000-0000-0000-0000000000a4");
 	private static final UUID COORDINATOR_ID = UUID.fromString("00000000-0000-0000-0000-0000000000c1");
 	private static final UUID OTHER_COORDINATOR_ID = UUID.fromString("00000000-0000-0000-0000-0000000000c2");
@@ -108,6 +109,7 @@ class PersonSummaryServiceTest {
 			program(OWN_PROGRAM, "Yeşil Program", ProgramType.STARTUP_MENTORING, COORDINATOR_ID),
 			program(OTHER_PROGRAM, "Mavi Program", ProgramType.STARTUP_MENTORING, OTHER_COORDINATOR_ID),
 			program(PEER_PROGRAM, "Akran Programı", ProgramType.PEER_MENTORING, COORDINATOR_ID),
+			program(OFFICE_HOURS_PROGRAM, "Office Hours", ProgramType.OFFICE_HOURS, COORDINATOR_ID),
 			program(PAST_PROGRAM, "Eski Program", ProgramType.STARTUP_MENTORING, COORDINATOR_ID));
 
 	@BeforeEach
@@ -189,10 +191,11 @@ class PersonSummaryServiceTest {
 	}
 
 	@Test
-	void aMentorIsHiddenFromCoordinatorsOfOtherProgramsOfPeerProgramsAndWhoTurnedThemDown() {
+	void aMentorIsHiddenFromCoordinatorsOfOtherProgramsOfOfficeHoursAndWhoTurnedThemDown() {
 		AppUser mentor = register(user(UUID.randomUUID(), UserRole.MENTOR));
 		pools(mentor, pool(OTHER_PROGRAM, ProgramMentorStatus.ACCEPTED),
-				pool(PEER_PROGRAM, ProgramMentorStatus.ACCEPTED), pool(OWN_PROGRAM, ProgramMentorStatus.REJECTED));
+				pool(OFFICE_HOURS_PROGRAM, ProgramMentorStatus.ACCEPTED),
+				pool(OWN_PROGRAM, ProgramMentorStatus.REJECTED));
 
 		assertThatThrownBy(() -> service.summary(COORDINATOR_ID, mentor.getId()))
 				.isInstanceOf(ResourceNotFoundException.class);
@@ -322,13 +325,26 @@ class PersonSummaryServiceTest {
 	}
 
 	@Test
-	void aPeerProgramDoesNotTieAMenteeToItsCoordinator() {
-		Organization startup = startup("Akran Takımı");
-		AppUser mentee = register(user(UUID.randomUUID(), UserRole.MENTEE));
-		mentee.setOrganization(startup);
-		startupIn(startup, PEER_PROGRAM);
+	void aPeerProgramsCoordinatorSeesItsMentorsAndStudents() {
+		AppUser mentor = register(user(UUID.randomUUID(), UserRole.MENTOR));
+		pools(mentor, pool(PEER_PROGRAM, ProgramMentorStatus.ACCEPTED));
+		AppUser student = register(user(UUID.randomUUID(), UserRole.MENTEE));
+		student.setProgramId(PEER_PROGRAM);
 
-		assertThatThrownBy(() -> service.summary(COORDINATOR_ID, mentee.getId()))
+		assertThat(service.summary(COORDINATOR_ID, mentor.getId()).programs())
+				.extracting(PersonSummaryResponse.Program::name).containsExactly("Akran Programı");
+		assertThat(service.summary(COORDINATOR_ID, student.getId()).programs())
+				.extracting(PersonSummaryResponse.Program::name).containsExactly("Akran Programı");
+		assertThatThrownBy(() -> service.summary(OTHER_COORDINATOR_ID, student.getId()))
+				.isInstanceOf(ResourceNotFoundException.class);
+	}
+
+	@Test
+	void anOfficeHoursProgramDoesNotTieAStudentToItsCoordinator() {
+		AppUser student = register(user(UUID.randomUUID(), UserRole.MENTEE));
+		student.setProgramId(OFFICE_HOURS_PROGRAM);
+
+		assertThatThrownBy(() -> service.summary(COORDINATOR_ID, student.getId()))
 				.isInstanceOf(ResourceNotFoundException.class);
 	}
 

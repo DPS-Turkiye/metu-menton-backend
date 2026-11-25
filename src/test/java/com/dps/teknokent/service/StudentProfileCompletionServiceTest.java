@@ -23,6 +23,8 @@ import com.dps.teknokent.domain.PeerTopicCategory;
 import com.dps.teknokent.domain.UserRole;
 import com.dps.teknokent.dto.requests.SaveStudentProfileCompletionRequest;
 import com.dps.teknokent.dto.responses.AdviseeProfileResponse;
+import com.dps.teknokent.dto.responses.PeerMenteeProfileResponse;
+import com.dps.teknokent.dto.responses.PeerMentoringRequestResponse;
 import com.dps.teknokent.dto.responses.StudentProfileCompletionResponse;
 import com.dps.teknokent.entity.StudentInterest;
 import com.dps.teknokent.exception.InvalidRequestException;
@@ -142,6 +144,35 @@ class StudentProfileCompletionServiceTest {
 				.hasMessage("Advisee not found.");
 		verify(interests, never()).findById(any());
 		verify(peerMentoring, never()).activeForStudent(any());
+	}
+
+	@Test
+	void thePeerMentorAStudentAskedSeesTheirNameDepartmentInterestsAndGoal() {
+		StudentInterest saved = new StudentInterest(STUDENT);
+		saved.setTopics(new ArrayList<>(List.of(PeerTopicCategory.CAREER_INTERNSHIP)));
+		saved.setSubtopics(new ArrayList<>(List.of("fixture-cv")));
+		saved.setGoal("Yaz stajı bulmak");
+		UUID mentor = UUID.randomUUID();
+		PeerMentoringRequestResponse.Person mentee = new PeerMentoringRequestResponse.Person(STUDENT, "Zeynep Koç",
+				"Psikoloji");
+		when(peerMentoring.requireMentee(mentor, STUDENT)).thenReturn(mentee);
+		when(peerMentoring.activeForStudent(STUDENT)).thenReturn(EnumSet.of(PeerTopicCategory.CAREER_INTERNSHIP));
+		when(interests.findById(STUDENT)).thenReturn(Optional.of(saved));
+
+		assertThat(service.forPeerMentor(mentor, STUDENT)).isEqualTo(new PeerMenteeProfileResponse(mentee,
+				new AdviseeProfileResponse.Interests(List.of(PeerTopicCategory.CAREER_INTERNSHIP),
+						List.of("fixture-cv")),
+				"Yaz stajı bulmak"));
+	}
+
+	@Test
+	void aMentorTheStudentDidNotAskReadsNothing() {
+		UUID stranger = UUID.randomUUID();
+		when(peerMentoring.requireMentee(stranger, STUDENT)).thenThrow(new ResourceNotFoundException("no"));
+
+		assertThatThrownBy(() -> service.forPeerMentor(stranger, STUDENT))
+				.isInstanceOf(ResourceNotFoundException.class);
+		verify(interests, never()).findById(any());
 	}
 
 	private static SaveStudentProfileCompletionRequest request(List<PeerTopicCategory> topics, boolean completed,
