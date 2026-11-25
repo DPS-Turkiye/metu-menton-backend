@@ -18,6 +18,9 @@ public interface IskurOnboardingRepository extends JpaRepository<IskurOnboarding
 
 	Optional<IskurOnboarding> findByProgramIdAndUserId(UUID programId, UUID userId);
 
+	/** Someone's latest form, whichever program it is for. */
+	Optional<IskurOnboarding> findFirstByUserIdOrderByUpdatedAtDesc(UUID userId);
+
 	/** The form locked until the transaction ends, so a draft save cannot write over a submit it raced. */
 	@Lock(LockModeType.PESSIMISTIC_WRITE)
 	@Query("select o from IskurOnboarding o where o.programId = :programId and o.userId = :userId")
