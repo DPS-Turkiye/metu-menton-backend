@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -16,6 +17,7 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import org.jspecify.annotations.Nullable;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -28,12 +30,14 @@ import org.springframework.web.server.ResponseStatusException;
 
 import com.dps.teknokent.domain.DocumentKind;
 import com.dps.teknokent.domain.IdentityKind;
+import com.dps.teknokent.domain.IskurDocumentSlot;
 import com.dps.teknokent.domain.PeerDocumentVisibility;
 import com.dps.teknokent.domain.PeerEvidenceType;
 import com.dps.teknokent.domain.ProgramMentorStatus;
 import com.dps.teknokent.domain.ProgramType;
 import com.dps.teknokent.domain.UserRole;
 import com.dps.teknokent.dto.responses.PeerMentorDocumentResponse;
+import com.dps.teknokent.dto.responses.PeerMentorFormDocumentResponse;
 import com.dps.teknokent.dto.responses.StoredDocumentResponse;
 import com.dps.teknokent.entity.AppUser;
 import com.dps.teknokent.entity.PeerMentorDocument;
@@ -42,6 +46,7 @@ import com.dps.teknokent.entity.ProgramMentor;
 import com.dps.teknokent.entity.StoredDocument;
 import com.dps.teknokent.exception.InvalidRequestException;
 import com.dps.teknokent.exception.ResourceNotFoundException;
+import com.dps.teknokent.repository.IskurOnboardingRepository;
 import com.dps.teknokent.repository.PeerMentorDocumentRepository;
 import com.dps.teknokent.repository.ProgramCoordinatorRepository;
 import com.dps.teknokent.repository.ProgramMentorRepository;
@@ -76,6 +81,7 @@ public class PeerMentorDocumentService {
 	private final ObjectStorage objectStorage;
 	private final StoredDocumentRepository storedDocumentRepository;
 	private final PeerMentorDocumentRepository peerMentorDocumentRepository;
+	private final IskurOnboardingRepository iskurOnboardingRepository;
 	private final DomainLookupService domainLookupService;
 	private final InstitutionDirectoryService institutionDirectoryService;
 	private final MenteeProgramService menteeProgramService;
@@ -116,8 +122,46 @@ public class PeerMentorDocumentService {
 		} catch (IOException error) {
 			throw new InvalidRequestException("The uploaded file could not be read.");
 		}
+		return store(mentor, evidenceType, visibility, file.getOriginalFilename(), file.getContentType(), bytes);
+	}
+
+	/** The mentor's own CV and transcript from their İŞKUR form; empty for a mentor without a form. */
+	@Transactional(readOnly = true)
+	public List<PeerMentorFormDocumentResponse> formDocuments(UUID actorId) {
+		AppUser mentor = requirePeerMentor(actorId);
+		return Arrays.stream(IskurDocumentSlot.values())
+				.flatMap(slot -> formFile(mentor.getId(), slot).stream()
+						.map(file -> new PeerMentorFormDocumentResponse(slot, file.getOriginalFilename(),
+								file.getSizeBytes())))
+				.toList();
+	}
+
+	/**
+	 * Copies a file of the mentor's own form to their evidence. A copy, so the form (read only by the coordinators)
+	 * keeps its own file, and the mentor decides who sees this one.
+	 */
+	@Transactional
+	public PeerMentorDocumentResponse useFormDocument(UUID actorId, IskurDocumentSlot slot,
+			PeerDocumentVisibility visibility) {
+		AppUser mentor = requirePeerMentor(actorId);
+		requireRoom(mentor.getId());
+		StoredDocument source = formFile(mentor.getId(), slot)
+				.orElseThrow(() -> new ResourceNotFoundException("No such file on the form."));
+		return store(mentor, slot == IskurDocumentSlot.CV ? PeerEvidenceType.CV : PeerEvidenceType.TRANSCRIPT,
+				visibility, source.getOriginalFilename(), source.getContentType(),
+				objectStorage.require(source.getS3Key()));
+	}
+
+	private Optional<StoredDocument> formFile(UUID userId, IskurDocumentSlot slot) {
+		return iskurOnboardingRepository.findFirstByUserIdOrderByUpdatedAtDesc(userId)
+				.map(form -> IskurOnboardingService.slotOf(form, slot))
+				.flatMap(storedDocumentRepository::findById);
+	}
+
+	private PeerMentorDocumentResponse store(AppUser mentor, PeerEvidenceType evidenceType,
+			PeerDocumentVisibility visibility, @Nullable String filename, @Nullable String contentType, byte[] bytes) {
 		StoredDocumentResponse stored = documentService.store(mentor.getId(), null, DocumentKind.PEER_EVIDENCE,
-				file.getOriginalFilename(), file.getContentType(), bytes);
+				filename, contentType, bytes);
 		PeerMentorDocument row = newRow(mentor.getId(), evidenceType, visibility);
 		row.setDocumentId(stored.id());
 		PeerMentorDocument saved = peerMentorDocumentRepository.save(row);

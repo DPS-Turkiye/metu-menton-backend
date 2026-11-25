@@ -48,20 +48,24 @@ import com.dps.teknokent.domain.ProgramMentorStatus;
 import com.dps.teknokent.domain.ProgramStatus;
 import com.dps.teknokent.domain.ProgramType;
 import com.dps.teknokent.domain.UserRole;
+import com.dps.teknokent.dto.responses.StoredDocumentResponse;
 import com.dps.teknokent.entity.AppUser;
 import com.dps.teknokent.entity.InstitutionPerson;
+import com.dps.teknokent.entity.IskurOnboarding;
 import com.dps.teknokent.entity.PeerMentorDocument;
 import com.dps.teknokent.entity.Program;
 import com.dps.teknokent.entity.ProgramCoordinator;
 import com.dps.teknokent.entity.ProgramMentor;
 import com.dps.teknokent.repository.AppUserRepository;
 import com.dps.teknokent.repository.InstitutionPersonRepository;
+import com.dps.teknokent.repository.IskurOnboardingRepository;
 import com.dps.teknokent.repository.PeerMentorDocumentRepository;
 import com.dps.teknokent.repository.ProgramCoordinatorRepository;
 import com.dps.teknokent.repository.ProgramMentorRepository;
 import com.dps.teknokent.repository.ProgramRepository;
 import com.dps.teknokent.repository.StoredDocumentRepository;
 import com.dps.teknokent.security.AppUserPrincipal;
+import com.dps.teknokent.service.DocumentService;
 import com.dps.teknokent.service.ObjectStorage;
 import com.jayway.jsonpath.JsonPath;
 
@@ -77,6 +81,7 @@ class PeerMentorDocumentIntegrationTest {
 
 	private static final String MINE = "/api/peer-mentoring/profile/documents";
 	private static final String LINKS = "/api/peer-mentoring/profile/links";
+	private static final String FORM = "/api/peer-mentoring/profile/form-documents";
 	private static final String ONE = "/api/peer-mentoring/profile/documents/{id}";
 	private static final String OF_MENTOR = "/api/peer-mentoring/mentors/{mentorId}/documents";
 	private static final String CONTENT = "/api/peer-mentoring/documents/{id}/content";
@@ -98,6 +103,10 @@ class PeerMentorDocumentIntegrationTest {
 	private PeerMentorDocumentRepository peerMentorDocumentRepository;
 	@Autowired
 	private StoredDocumentRepository storedDocumentRepository;
+	@Autowired
+	private IskurOnboardingRepository onboardingRepository;
+	@Autowired
+	private DocumentService documentService;
 	@MockitoBean
 	private ObjectStorage objectStorage;
 
@@ -297,6 +306,56 @@ class PeerMentorDocumentIntegrationTest {
 				.andExpect(status().isNotFound());
 		mockMvc.perform(get(CONTENT, UUID.randomUUID()).with(authentication(signedIn(mentor))))
 				.andExpect(status().isNotFound());
+	}
+
+	@Test
+	void theCvFromTheMentorsOwnFormCanBeUsedWithoutUploadingItAgain() throws Exception {
+		StoredDocumentResponse cv = documentService.store(mentor.getId(), null, DocumentKind.ISKUR_DOCUMENT, "cv.pdf",
+				"application/pdf", PDF);
+		IskurOnboarding form = new IskurOnboarding(mentor.getProgramId(), mentor.getId(), Instant.now());
+		form.setCvDocumentId(cv.id());
+		onboardingRepository.saveAndFlush(form);
+
+		mockMvc.perform(get(FORM).with(authentication(signedIn(mentor))))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.length()").value(1))
+				.andExpect(jsonPath("$[0].slot").value("CV"))
+				.andExpect(jsonPath("$[0].originalFilename").value("cv.pdf"));
+		mockMvc.perform(post(FORM).with(authentication(signedIn(mentor))).contentType(MediaType.APPLICATION_JSON)
+				.content("{\"slot\":\"CV\",\"visibility\":\"VERIFICATION_ONLY\"}"))
+				.andExpect(status().isCreated())
+				.andExpect(jsonPath("$.evidenceType").value("CV"))
+				.andExpect(jsonPath("$.visibility").value("VERIFICATION_ONLY"));
+
+		// A copy: the form keeps its file, and the profile has its own.
+		PeerMentorDocument copy = peerMentorDocumentRepository.findByUserIdOrderByCreatedAtAsc(mentor.getId())
+				.getFirst();
+		assertThat(copy.getDocumentId()).isNotEqualTo(cv.id());
+		assertThat(storedDocumentRepository.findById(cv.id())).isPresent();
+
+		mockMvc.perform(post(FORM).with(authentication(signedIn(mentor))).contentType(MediaType.APPLICATION_JSON)
+				.content("{\"slot\":\"TRANSCRIPT\",\"visibility\":\"PROFILE\"}"))
+				.andExpect(status().isNotFound());
+	}
+
+	@Test
+	void aFormsFilesAreNeverOfferedToAnyoneElse() throws Exception {
+		StoredDocumentResponse cv = documentService.store(mentor.getId(), null, DocumentKind.ISKUR_DOCUMENT, "cv.pdf",
+				"application/pdf", PDF);
+		IskurOnboarding form = new IskurOnboarding(mentor.getProgramId(), mentor.getId(), Instant.now());
+		form.setCvDocumentId(cv.id());
+		onboardingRepository.saveAndFlush(form);
+
+		// A named actor changes nothing for someone signed in as themselves.
+		mockMvc.perform(get(FORM).param("actorId", mentor.getId().toString())
+				.with(authentication(signedIn(otherMentor))))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.length()").value(0));
+		mockMvc.perform(post(FORM).with(authentication(signedIn(otherMentor))).contentType(MediaType.APPLICATION_JSON)
+				.content("{\"actorId\":\"" + mentor.getId() + "\",\"slot\":\"CV\",\"visibility\":\"PROFILE\"}"))
+				.andExpect(status().isNotFound());
+		mockMvc.perform(get(FORM).with(authentication(signedIn(mentee)))).andExpect(status().isForbidden());
+		mockMvc.perform(get(FORM)).andExpect(status().isUnauthorized());
 	}
 
 	private UUID uploaded(AppUser owner, PeerDocumentVisibility visibility) throws Exception {

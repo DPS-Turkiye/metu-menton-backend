@@ -23,7 +23,9 @@ import com.dps.teknokent.domain.PeerDocumentVisibility;
 import com.dps.teknokent.domain.PeerEvidenceType;
 import com.dps.teknokent.dto.requests.CreatePeerMentorLinkRequest;
 import com.dps.teknokent.dto.requests.UpdatePeerMentorDocumentRequest;
+import com.dps.teknokent.dto.requests.UseFormDocumentRequest;
 import com.dps.teknokent.dto.responses.PeerMentorDocumentResponse;
+import com.dps.teknokent.dto.responses.PeerMentorFormDocumentResponse;
 import com.dps.teknokent.security.CurrentActor;
 import com.dps.teknokent.service.PeerMentorDocumentService;
 import com.dps.teknokent.util.Downloads;
@@ -57,6 +59,19 @@ public class PeerMentorDocumentController {
 			@RequestParam(required = false) UUID actorId,
 			@RequestPart("file") MultipartFile file) {
 		return peerMentorDocumentService.upload(CurrentActor.resolve(actorId), evidenceType, visibility, file);
+	}
+
+	/** The CV and transcript the mentor gave with their İŞKUR form, to use here instead of uploading again. */
+	@GetMapping("/profile/form-documents")
+	public List<PeerMentorFormDocumentResponse> formDocuments(@RequestParam(required = false) UUID actorId) {
+		return peerMentorDocumentService.formDocuments(CurrentActor.resolve(actorId));
+	}
+
+	@PostMapping("/profile/form-documents")
+	@ResponseStatus(HttpStatus.CREATED)
+	public PeerMentorDocumentResponse useFormDocument(@Valid @RequestBody UseFormDocumentRequest request) {
+		return peerMentorDocumentService.useFormDocument(CurrentActor.resolve(request.actorId()), request.slot(),
+				request.visibility());
 	}
 
 	/** A portfolio or project link ("Portfolyo ve bağlantılar"); it lists and changes like a file. */
