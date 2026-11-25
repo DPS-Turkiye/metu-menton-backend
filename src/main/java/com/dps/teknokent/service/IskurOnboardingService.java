@@ -51,6 +51,7 @@ import com.dps.teknokent.exception.InvalidRequestException;
 import com.dps.teknokent.exception.ResourceNotFoundException;
 import com.dps.teknokent.repository.InstitutionPersonRepository;
 import com.dps.teknokent.repository.IskurOnboardingRepository;
+import com.dps.teknokent.repository.IskurPlacementRepository;
 import com.dps.teknokent.repository.IskurTeamRepository;
 import com.dps.teknokent.repository.IskurUnitRepository;
 import com.dps.teknokent.repository.StoredDocumentRepository;
@@ -61,8 +62,8 @@ import lombok.extern.slf4j.Slf4j;
 
 /**
  * The intern's onboarding form (Figma 284:2, frames 02–04): work days and hours, unit preferences, skills, team roles,
- * the CV and transcript, and an optional leadership application. It stays a draft the intern may change until they
- * submit it; after that it is read-only for them and the program's coordinators place them from it.
+ * the CV and transcript, and an optional leadership application. It stays a draft until the intern submits it; then the
+ * program's coordinators place them from it, and the intern may still change it, whole, until they are placed.
  *
  * <p>While file storage is not set up (ODTÜ has not decided where files live yet), the documents step is closed and
  * the form goes without a CV; the leadership check then drops the CV too.
@@ -84,6 +85,7 @@ public class IskurOnboardingService {
 
 	private final IskurInternService interns;
 	private final IskurOnboardingRepository onboardings;
+	private final IskurPlacementRepository placements;
 	private final IskurUnitRepository units;
 	private final IskurTeamRepository teams;
 	private final IskurSkillService skillService;
@@ -104,12 +106,19 @@ public class IskurOnboardingService {
 	public IskurOnboardingResponse saveDraft(UUID actorId, IskurOnboardingRequest request) {
 		Program program = requireProgram(actorId);
 		IskurOnboarding form = editableForm(program, actorId);
+		if (form.isSubmitted()) {
+			// A half-changed form never replaces the one the coordinators read; changes are sent, not saved as a draft.
+			throw new ConflictException(Texts.forRequest("error.iskurOnboardingSent"));
+		}
 		apply(form, program, request);
 		onboardings.save(form);
 		return response(program, actorId, form);
 	}
 
-	/** Stores the form and sends it to the coordinators, once everything it asks is answered. */
+	/**
+	 * Stores the form and sends it to the coordinators, once everything it asks is answered. A sent form may be sent
+	 * again with changes until its intern is placed.
+	 */
 	@Transactional
 	public IskurOnboardingResponse submit(UUID actorId, IskurOnboardingRequest request) {
 		Program program = requireProgram(actorId);
@@ -162,6 +171,10 @@ public class IskurOnboardingService {
 	public IskurOnboardingResponse removeDocument(UUID actorId, IskurDocumentSlot slot) {
 		Program program = requireProgram(actorId);
 		IskurOnboarding form = editableForm(program, actorId);
+		if (form.isSubmitted() && slot == IskurDocumentSlot.CV) {
+			// A sent form always has its CV; it can be replaced.
+			throw invalid("error.iskurOnboardingCvMissing");
+		}
 		UUID previous = slotOf(form, slot);
 		if (previous != null) {
 			setSlot(form, slot, null);
@@ -255,16 +268,23 @@ public class IskurOnboardingService {
 
 	/**
 	 * The caller's form, locked: a draft save, an upload and a submit of the same form run one at a time, and each sees
-	 * whether the one before it submitted. A first form is inserted at once; two racing first saves meet the unique key
+	 * whether the one before it submitted. A sent form closes once its intern is placed. A first form is inserted at
+	 * once; two racing first saves meet the unique key
 	 * and the loser answers 409.
 	 */
 	private IskurOnboarding editableForm(Program program, UUID userId) {
 		IskurOnboarding form = onboardings.findForUpdate(program.getId(), userId)
 				.orElseGet(() -> onboardings.saveAndFlush(new IskurOnboarding(program.getId(), userId, Instant.now())));
-		if (form.isSubmitted()) {
+		if (!editable(program, userId, form)) {
 			throw new ConflictException(Texts.forRequest("error.iskurOnboardingSubmitted"));
 		}
 		return form;
+	}
+
+	/** Until it is sent, and after that until the coordinators place the intern. */
+	private boolean editable(Program program, UUID userId, @Nullable IskurOnboarding form) {
+		return form == null || !form.isSubmitted()
+				|| placements.findByProgramIdAndUserId(program.getId(), userId).isEmpty();
 	}
 
 	private void apply(IskurOnboarding form, Program program, IskurOnboardingRequest request) {
@@ -415,7 +435,7 @@ public class IskurOnboardingService {
 				program.getName(), record.map(InstitutionPerson::getDepartmentName).orElse(null),
 				record.map(InstitutionPerson::getClassYear).orElse(null), unitResponses,
 				objectStorage.isConfigured(), MAX_ISKUR_DAYS, termWeeks(program), MIN_LEADER_DAYS, MAX_TEAM_ROLES,
-				ANSWER_MAX_LENGTH);
+				ANSWER_MAX_LENGTH, editable(program, userId, form));
 		return new IskurOnboardingResponse(formOf(form), context);
 	}
 

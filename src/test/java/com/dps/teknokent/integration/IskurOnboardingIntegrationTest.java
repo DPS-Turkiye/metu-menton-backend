@@ -244,7 +244,6 @@ class IskurOnboardingIntegrationTest {
 				.andExpect(jsonPath("$.context.documentsEnabled").value(false));
 
 		save(mert, complete()).andExpect(status().isConflict());
-		submit(mert, complete()).andExpect(status().isConflict());
 		assertThat(onboardingService.workDays(program.getId(), mert.getId()))
 				.containsExactly(DayOfWeek.MONDAY, DayOfWeek.TUESDAY, DayOfWeek.WEDNESDAY, DayOfWeek.THURSDAY);
 	}
@@ -342,7 +341,35 @@ class IskurOnboardingIntegrationTest {
 				.andExpect(jsonPath("$.form.documents.transcript").doesNotExist());
 
 		submit(mert, complete()).andExpect(status().isOk());
+		// A sent form keeps a CV: it can be replaced, not removed.
+		upload(mert, "CV").andExpect(status().isOk());
+		mockMvc.perform(delete(ONBOARDING + "/documents/CV").param("actorId", mert.getId().toString())
+				.with(httpBasic("test", "test")))
+				.andExpect(status().isBadRequest());
+	}
+
+	@Test
+	void aSentFormCanBeSentAgainUntilTheInternIsPlaced() throws Exception {
+		when(objectStorage.isConfigured()).thenReturn(true);
+		upload(mert, "CV").andExpect(status().isOk());
+		submit(mert, complete()).andExpect(status().isOk()).andExpect(jsonPath("$.context.editable").value(true));
+
+		submit(mert, withSchedule(complete(), List.of(range(DayOfWeek.TUESDAY, "09:00", "16:30"),
+				range(DayOfWeek.THURSDAY, "09:00", "16:30"), range(DayOfWeek.FRIDAY, "09:00", "16:30"))))
+				.andExpect(status().isOk());
+		assertThat(onboardingService.workDays(program.getId(), mert.getId()))
+				.containsExactly(DayOfWeek.TUESDAY, DayOfWeek.THURSDAY, DayOfWeek.FRIDAY);
+
+		// An incomplete change is refused.
+		submit(mert, withSchedule(complete(), List.of(range(DayOfWeek.TUESDAY, "09:00", "16:30"))))
+				.andExpect(status().isBadRequest());
+
+		place(mert, teamRepository.findByUnitId(kreatif.getId()).getFirst(), IskurTeamRole.MEMBER, null);
+		submit(mert, complete()).andExpect(status().isConflict());
 		upload(mert, "CV").andExpect(status().isConflict());
+		mockMvc.perform(get(ONBOARDING).param("actorId", mert.getId().toString()).with(httpBasic("test", "test")))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.context.editable").value(false));
 	}
 
 	@Test

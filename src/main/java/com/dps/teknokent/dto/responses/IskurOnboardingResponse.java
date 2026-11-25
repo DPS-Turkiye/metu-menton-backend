@@ -46,6 +46,7 @@ public record IskurOnboardingResponse(Form form, Context context) {
 	/**
 	 * {@code documentsEnabled} is false while file storage is not set up: the documents step says so and the form goes
 	 * without a CV. A term needs about {@code weeklyDays × termWeeks} İŞKUR days of the {@code maxIskurDays}.
+	 * {@code editable} turns false once a sent form's intern is placed.
 	 */
 	public record Context(
 			UUID programId,
@@ -58,7 +59,8 @@ public record IskurOnboardingResponse(Form form, Context context) {
 			int termWeeks,
 			int minimumLeaderDays,
 			int maxTeamRoles,
-			int answerMaxLength) {
+			int answerMaxLength,
+			boolean editable) {
 	}
 
 	public record Unit(UUID id, String name, List<String> teamNames, List<Skill> skills) {
