@@ -306,7 +306,7 @@ class OfficeHoursAvailabilityServiceTest {
 
 		assertThatThrownBy(() -> service.update(INSTRUCTOR, confirming()))
 				.isInstanceOfSatisfying(ConflictException.class, exception -> assertThat(exception.code())
-						.isEqualTo(OfficeHoursAvailabilityService.AFFECTED_CHANGED));
+						.isEqualTo(OfficeHoursAvailabilityService.OFFICE_HOURS_AFFECTED_BOOKINGS_CHANGED));
 		verify(ruleRepository, never()).deleteAll(any());
 		verify(settingsRepository, never()).save(any());
 		InOrder order = inOrder(userRepository, impactService);

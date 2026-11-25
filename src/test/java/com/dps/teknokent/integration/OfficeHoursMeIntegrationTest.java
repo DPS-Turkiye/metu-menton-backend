@@ -265,7 +265,7 @@ class OfficeHoursMeIntegrationTest {
 		mockMvc.perform(put("/api/office-hours/me/availability").param("actorId", as(academician))
 				.with(frontendServer()).contentType(MediaType.APPLICATION_JSON).content(noHours("[]")))
 				.andExpect(status().isConflict())
-				.andExpect(jsonPath("$.code").value("OFFICE_HOURS_AFFECTED_CHANGED"));
+				.andExpect(jsonPath("$.code").value("OFFICE_HOURS_AFFECTED_BOOKINGS_CHANGED"));
 		mockMvc.perform(get("/api/office-hours/me/availability").param("actorId", as(academician))
 				.with(frontendServer()))
 				.andExpect(jsonPath("$.rules.length()").value(7));

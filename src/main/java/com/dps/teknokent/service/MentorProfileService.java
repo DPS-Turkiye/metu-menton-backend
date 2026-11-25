@@ -200,7 +200,7 @@ public class MentorProfileService {
 		rule.setDay(request.dayOfWeek());
 		rule.setStartTime(request.startTime());
 		rule.setEndTime(request.endTime());
-		rule.setSlotMinutes(request.slotMinutes() != null ? request.slotMinutes() : 60);
+		rule.setSlotMinutes(AvailabilityRules.slotMinutes(request));
 		rule.setCreatedAt(Instant.now());
 		MentorAvailabilityRule saved = mentorAvailabilityRuleRepository.saveAndFlush(rule);
 

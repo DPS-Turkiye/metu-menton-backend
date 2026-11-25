@@ -36,7 +36,7 @@ import com.dps.teknokent.repository.OfficeHoursSettingsRepository;
 import com.dps.teknokent.repository.OfficeHoursUserRepository;
 import com.dps.teknokent.service.OfficeHoursAvailabilityImpactService.Impact;
 import com.dps.teknokent.service.OfficeHoursAvailabilityImpactService.Item;
-import com.dps.teknokent.service.OfficeHoursSlotService.DateRange;
+import com.dps.teknokent.service.OfficeHoursSlotService.DaysAway;
 import com.dps.teknokent.service.OfficeHoursSlotService.Hours;
 import com.dps.teknokent.service.OfficeHoursSlotService.Setup;
 import com.dps.teknokent.service.OfficeHoursSlotService.WeeklyRange;
@@ -54,8 +54,7 @@ import com.dps.teknokent.util.Texts;
 public class OfficeHoursAvailabilityService {
 
 	/** The 409's code when the save would touch a meeting or request the academic was not shown. */
-	public static final String AFFECTED_CHANGED = "OFFICE_HOURS_AFFECTED_CHANGED";
-	private static final int DEFAULT_SLOT_MINUTES = 60;
+	public static final String OFFICE_HOURS_AFFECTED_BOOKINGS_CHANGED = "OFFICE_HOURS_AFFECTED_BOOKINGS_CHANGED";
 	private static final Duration SHORTEST_MEETING = Duration.ofMinutes(15);
 
 	private final OfficeHoursEnrollmentRepository enrollmentRepository;
@@ -180,7 +179,8 @@ public class OfficeHoursAvailabilityService {
 				.collect(Collectors.toSet());
 		Set<Item> affected = impactService.affectedBy(instructorId, proposedSetup(instructorId, request)).items();
 		if (!shown.containsAll(affected)) {
-			throw new ConflictException(Texts.forRequest("error.officeHoursAffectedChanged"), AFFECTED_CHANGED);
+			throw new ConflictException(Texts.forRequest("error.officeHoursAffectedBookingsChanged"),
+					OFFICE_HOURS_AFFECTED_BOOKINGS_CHANGED);
 		}
 	}
 
@@ -206,17 +206,9 @@ public class OfficeHoursAvailabilityService {
 		}
 		return new Setup(
 				request.rules().stream().map(rule -> new WeeklyRange(rule.dayOfWeek(), rule.startTime(),
-						rule.endTime(), slotMinutes(rule))).toList(),
-				request.exceptions().stream().map(range -> new DateRange(range.startsOn(), range.endsOn())).toList(),
+						rule.endTime(), AvailabilityRules.slotMinutes(rule))).toList(),
+				request.exceptions().stream().map(range -> new DaysAway(range.startsOn(), range.endsOn())).toList(),
 				oneOffHours, request.defaultMeetingDurationMinutes());
-	}
-
-	private static int slotMinutes(CreateMentorAvailabilityRuleRequest rule) {
-		Integer minutes = rule.slotMinutes();
-		if (minutes == null) {
-			return DEFAULT_SLOT_MINUTES;
-		}
-		return minutes;
 	}
 
 	private void requireInstructor(UUID userId) {
@@ -290,7 +282,7 @@ public class OfficeHoursAvailabilityService {
 		rule.setDay(request.dayOfWeek());
 		rule.setStartTime(request.startTime());
 		rule.setEndTime(request.endTime());
-		rule.setSlotMinutes(slotMinutes(request));
+		rule.setSlotMinutes(AvailabilityRules.slotMinutes(request));
 		rule.setCreatedAt(now);
 		return rule;
 	}

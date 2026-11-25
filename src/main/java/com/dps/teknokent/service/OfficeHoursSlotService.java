@@ -62,9 +62,10 @@ public class OfficeHoursSlotService {
 	public record WeeklyRange(DayOfWeek day, LocalTime startTime, LocalTime endTime, int slotMinutes) {
 	}
 
-	public record DateRange(LocalDate startsOn, LocalDate endsOn) {
+	/** Dates the academic is away, first and last day included. */
+	public record DaysAway(LocalDate startsOn, LocalDate endsOn) {
 
-		boolean contains(LocalDate day) {
+		boolean includes(LocalDate day) {
 			return !day.isBefore(startsOn) && !day.isAfter(endsOn);
 		}
 	}
@@ -74,10 +75,10 @@ public class OfficeHoursSlotService {
 	 * length one-offs are cut into. No booking rule (lead time, horizon, meetings, buffer) is in it, so two setups
 	 * can be compared without those changing the answer.
 	 */
-	public record Setup(List<WeeklyRange> weekly, List<DateRange> away, List<Hours> oneOffs, int oneOffMinutes) {
+	public record Setup(List<WeeklyRange> weekly, List<DaysAway> away, List<Hours> oneOffs, int oneOffMinutes) {
 
 		boolean isAway(LocalDate day) {
-			return away.stream().anyMatch(range -> range.contains(day));
+			return away.stream().anyMatch(range -> range.includes(day));
 		}
 	}
 
@@ -185,7 +186,7 @@ public class OfficeHoursSlotService {
 								rule.getSlotMinutes()))
 						.toList(),
 				exceptionRepository.findByInstructorIdOrderByStartsOnAsc(instructorId).stream()
-						.map(range -> new DateRange(range.getStartsOn(), range.getEndsOn())).toList(),
+						.map(range -> new DaysAway(range.getStartsOn(), range.getEndsOn())).toList(),
 				oneOffRepository.findByInstructorIdOrderByStartsAtAsc(instructorId).stream()
 						.map(oneOff -> new Hours(oneOff.getStartsAt(), oneOff.getEndsAt())).toList(),
 				settings(instructorId).getDefaultMeetingDurationMinutes());
@@ -193,67 +194,52 @@ public class OfficeHoursSlotService {
 
 	/** Each weekly range cut into its slot length, on every date from {@code firstDay} before {@code until}. */
 	static List<Slot> weeklySlots(Setup setup, LocalDate firstDay, ZonedDateTime until) {
-		List<Slot> slots = new ArrayList<>();
-		for (WeeklyRange range : setup.weekly()) {
-			for (ZonedDateTime day : dates(range, firstDay, until)) {
-				if (setup.isAway(day.toLocalDate())) {
-					continue;
-				}
-				ZonedDateTime end = day.with(range.endTime());
-				for (ZonedDateTime at = day.with(range.startTime()); !at.plusMinutes(range.slotMinutes())
-						.isAfter(end); at = at.plusMinutes(range.slotMinutes())) {
-					slots.add(new Slot(at.toInstant(), range.slotMinutes()));
-				}
-			}
-		}
-		return slots;
+		return setup.weekly().stream()
+				.flatMap(range -> datesNotAway(setup, range, firstDay, until)
+						.flatMap(day -> cut(day.with(range.startTime()).toInstant(),
+								day.with(range.endTime()).toInstant(), range.slotMinutes())))
+				.toList();
 	}
 
 	/** One-off hours starting before {@code until}, cut into meetings of the default length; a day off hides them. */
 	static List<Slot> oneOffSlots(Setup setup, Instant until) {
-		Duration length = Duration.ofMinutes(setup.oneOffMinutes());
-		List<Slot> slots = new ArrayList<>();
-		for (Hours oneOff : setup.oneOffs()) {
-			if (!oneOff.startsAt().isBefore(until)
-					|| setup.isAway(oneOff.startsAt().atZone(MeetingSlotTimes.APP_ZONE).toLocalDate())) {
-				continue;
-			}
-			for (Instant at = oneOff.startsAt(); !at.plus(length).isAfter(oneOff.endsAt()); at = at.plus(length)) {
-				slots.add(new Slot(at, setup.oneOffMinutes()));
-			}
-		}
-		return slots;
+		return setup.oneOffs().stream()
+				.filter(oneOff -> oneOff.startsAt().isBefore(until) && !setup.isAway(dayOf(oneOff.startsAt())))
+				.flatMap(oneOff -> cut(oneOff.startsAt(), oneOff.endsAt(), setup.oneOffMinutes()))
+				.toList();
 	}
 
 	/** The setup's hours as dated blocks from the start of {@code firstDay} until {@code until}, without dates away. */
 	static List<Hours> blocks(Setup setup, LocalDate firstDay, ZonedDateTime until) {
-		List<Hours> hours = new ArrayList<>();
-		for (WeeklyRange range : setup.weekly()) {
-			for (ZonedDateTime day : dates(range, firstDay, until)) {
-				if (!setup.isAway(day.toLocalDate())) {
-					hours.add(
-							new Hours(day.with(range.startTime()).toInstant(), day.with(range.endTime()).toInstant()));
-				}
-			}
-		}
 		Instant from = firstDay.atStartOfDay(MeetingSlotTimes.APP_ZONE).toInstant();
-		for (Hours oneOff : setup.oneOffs()) {
-			if (oneOff.endsAt().isAfter(from) && oneOff.startsAt().isBefore(until.toInstant())
-					&& !setup.isAway(oneOff.startsAt().atZone(MeetingSlotTimes.APP_ZONE).toLocalDate())) {
-				hours.add(oneOff);
-			}
-		}
-		hours.sort(Comparator.comparing(Hours::startsAt));
-		return hours;
+		Stream<Hours> weekly = setup.weekly().stream()
+				.flatMap(range -> datesNotAway(setup, range, firstDay, until).map(
+						day -> new Hours(day.with(range.startTime()).toInstant(),
+								day.with(range.endTime()).toInstant())));
+		Stream<Hours> oneOffs = setup.oneOffs().stream()
+				.filter(oneOff -> oneOff.endsAt().isAfter(from) && oneOff.startsAt().isBefore(until.toInstant())
+						&& !setup.isAway(dayOf(oneOff.startsAt())));
+		return Stream.concat(weekly, oneOffs).sorted(Comparator.comparing(Hours::startsAt)).toList();
 	}
 
-	private static List<ZonedDateTime> dates(WeeklyRange range, LocalDate firstDay, ZonedDateTime until) {
-		List<ZonedDateTime> dates = new ArrayList<>();
-		for (ZonedDateTime day = firstDay.atStartOfDay(MeetingSlotTimes.APP_ZONE)
-				.with(TemporalAdjusters.nextOrSame(range.day())); day.isBefore(until); day = day.plusWeeks(1)) {
-			dates.add(day);
-		}
-		return dates;
+	/** The range's weekday on every week from {@code firstDay} before {@code until}, less the dates away. */
+	private static Stream<ZonedDateTime> datesNotAway(Setup setup, WeeklyRange range, LocalDate firstDay,
+			ZonedDateTime until) {
+		ZonedDateTime first = firstDay.atStartOfDay(MeetingSlotTimes.APP_ZONE)
+				.with(TemporalAdjusters.nextOrSame(range.day()));
+		return Stream.iterate(first, day -> day.isBefore(until), day -> day.plusWeeks(1))
+				.filter(day -> !setup.isAway(day.toLocalDate()));
+	}
+
+	/** Back-to-back slots of {@code minutes} from {@code start}; a tail too short for one is left unused. */
+	private static Stream<Slot> cut(Instant start, Instant end, int minutes) {
+		Duration length = Duration.ofMinutes(minutes);
+		return Stream.iterate(start, at -> !at.plus(length).isAfter(end), at -> at.plus(length))
+				.map(at -> new Slot(at, minutes));
+	}
+
+	private static LocalDate dayOf(Instant instant) {
+		return instant.atZone(MeetingSlotTimes.APP_ZONE).toLocalDate();
 	}
 
 	/** The booking rules on top of the hours: far enough ahead, and clear of meetings and their buffer. */

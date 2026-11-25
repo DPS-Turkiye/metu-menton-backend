@@ -39,7 +39,7 @@ import com.dps.teknokent.repository.OfficeHoursRuleRepository;
 import com.dps.teknokent.repository.OfficeHoursSettingsRepository;
 import com.dps.teknokent.service.OfficeHoursAvailabilityImpactService.Impact;
 import com.dps.teknokent.service.OfficeHoursAvailabilityImpactService.Item;
-import com.dps.teknokent.service.OfficeHoursSlotService.DateRange;
+import com.dps.teknokent.service.OfficeHoursSlotService.DaysAway;
 import com.dps.teknokent.service.OfficeHoursSlotService.Hours;
 import com.dps.teknokent.service.OfficeHoursSlotService.Setup;
 import com.dps.teknokent.service.OfficeHoursSlotService.WeeklyRange;
@@ -175,7 +175,7 @@ class OfficeHoursAvailabilityImpactServiceTest {
 		saved(rule(DayOfWeek.TUESDAY, 10, 12, 30));
 		booked(meeting(TUESDAY_10AM, 30));
 		Setup away = new Setup(List.of(range(DayOfWeek.TUESDAY, 10, 12, 30)),
-				List.of(new DateRange(LocalDate.of(2026, 11, 10), LocalDate.of(2026, 11, 10))), List.of(), 30);
+				List.of(new DaysAway(LocalDate.of(2026, 11, 10), LocalDate.of(2026, 11, 10))), List.of(), 30);
 
 		assertThat(service.affectedBy(ACADEMIC, away).meetings()).hasSize(1);
 	}
