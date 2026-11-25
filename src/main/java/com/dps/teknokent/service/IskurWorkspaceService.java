@@ -44,6 +44,7 @@ import com.dps.teknokent.exception.InvalidRequestException;
 import com.dps.teknokent.exception.ResourceNotFoundException;
 import com.dps.teknokent.repository.AppUserRepository;
 import com.dps.teknokent.repository.InstitutionPersonRepository;
+import com.dps.teknokent.repository.IskurOnboardingRepository;
 import com.dps.teknokent.repository.IskurPlacementRepository;
 import com.dps.teknokent.repository.IskurTeamRepository;
 import com.dps.teknokent.repository.IskurUnitRepository;
@@ -79,6 +80,7 @@ public class IskurWorkspaceService {
 	private final IskurUnitRepository units;
 	private final IskurTeamRepository teams;
 	private final IskurPlacementRepository placements;
+	private final IskurOnboardingRepository onboardings;
 	private final AppUserRepository users;
 	private final ProgramMentorRepository programMentors;
 	private final ProgramRepository programs;
@@ -200,6 +202,8 @@ public class IskurWorkspaceService {
 	@Transactional
 	public IskurWorkspaceResponse place(UUID actorId, UUID programId, UUID userId, IskurPlacementRequest request) {
 		Program program = requireEditable(actorId, programId);
+		// Placing closes the intern's sent form: one being sent again now finishes first, or finds the placement.
+		onboardings.findForUpdate(program.getId(), userId);
 		Optional<IskurPlacement> existing = placements.findByProgramIdAndUserId(program.getId(), userId);
 		if (existing.isEmpty() && !candidateIds(program).contains(userId)) {
 			throw new InvalidRequestException(Texts.forRequest("error.iskurNotInProgram"));
