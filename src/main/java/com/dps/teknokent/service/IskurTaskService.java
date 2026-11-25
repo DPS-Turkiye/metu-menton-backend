@@ -32,6 +32,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
+import com.dps.teknokent.domain.IskurTaskKind;
 import com.dps.teknokent.domain.IskurTaskStatus;
 import com.dps.teknokent.domain.IskurTeamRole;
 import com.dps.teknokent.domain.IskurWeeklySplit;
@@ -53,6 +54,7 @@ import com.dps.teknokent.repository.IskurPlacementRepository;
 import com.dps.teknokent.repository.IskurTaskRepository;
 import com.dps.teknokent.repository.IskurTeamRepository;
 import com.dps.teknokent.repository.IskurUnitRepository;
+import com.dps.teknokent.repository.IskurWorkEntryRepository;
 import com.dps.teknokent.repository.ProgramRepository;
 import com.dps.teknokent.util.MeetingSlotTimes;
 import com.dps.teknokent.util.TextUtils;
@@ -78,6 +80,7 @@ public class IskurTaskService {
 	private final IskurTeamRepository teams;
 	private final IskurUnitRepository units;
 	private final IskurTaskRepository tasks;
+	private final IskurWorkEntryRepository workEntries;
 	private final AppUserRepository users;
 	private final ProgramRepository programs;
 	private final NotificationService notifications;
@@ -87,15 +90,16 @@ public class IskurTaskService {
 
 	@Autowired
 	public IskurTaskService(IskurInternService interns, IskurPlacementRepository placements,
-			IskurTeamRepository teams, IskurUnitRepository units, IskurTaskRepository tasks, AppUserRepository users,
-			ProgramRepository programs, NotificationService notifications, IskurOnboardingService onboarding,
-			IskurTaskOutputFiles outputFiles) {
-		this(interns, placements, teams, units, tasks, users, programs, notifications, onboarding, outputFiles,
-				Clock.systemUTC());
+			IskurTeamRepository teams, IskurUnitRepository units, IskurTaskRepository tasks,
+			IskurWorkEntryRepository workEntries, AppUserRepository users, ProgramRepository programs,
+			NotificationService notifications, IskurOnboardingService onboarding, IskurTaskOutputFiles outputFiles) {
+		this(interns, placements, teams, units, tasks, workEntries, users, programs, notifications, onboarding,
+				outputFiles, Clock.systemUTC());
 	}
 
 	IskurTaskService(IskurInternService interns, IskurPlacementRepository placements, IskurTeamRepository teams,
-			IskurUnitRepository units, IskurTaskRepository tasks, AppUserRepository users, ProgramRepository programs,
+			IskurUnitRepository units, IskurTaskRepository tasks, IskurWorkEntryRepository workEntries,
+			AppUserRepository users, ProgramRepository programs,
 			NotificationService notifications, IskurOnboardingService onboarding, IskurTaskOutputFiles outputFiles,
 			Clock clock) {
 		this.interns = interns;
@@ -103,6 +107,7 @@ public class IskurTaskService {
 		this.teams = teams;
 		this.units = units;
 		this.tasks = tasks;
+		this.workEntries = workEntries;
 		this.users = users;
 		this.programs = programs;
 		this.notifications = notifications;
@@ -126,39 +131,133 @@ public class IskurTaskService {
 			throw forbidden("error.iskurLeadersOnly");
 		}
 		requireOpenProgram(me.getProgramId());
-		IskurPlacement assignee = placements.findByProgramIdAndUserId(me.getProgramId(), request.assigneeId())
-				.filter(placement -> placement.getTeamId().equals(me.getTeamId()))
-				.filter(placement -> placement.getUserId().equals(me.getUserId())
-						|| me.getUserId().equals(placement.getLeaderId()))
-				.orElseThrow(() -> new InvalidRequestException(
-						Texts.forRequest("error.iskurTaskAssigneeNotInSubgroup")));
-		int estimate = request.estimatedMinutes();
-		if (estimate % IskurWeeklySplit.STEP_MINUTES != 0) {
-			throw new InvalidRequestException(Texts.forRequest("error.iskurTaskEstimateStep"));
-		}
-		LocalDate today = today();
-		if (request.dueDate().isBefore(today) || request.dueDate().isAfter(today.plusDays(MAX_DAYS_AHEAD))) {
-			throw new InvalidRequestException(Texts.forRequest("error.iskurTaskDueDate", MAX_DAYS_AHEAD));
-		}
-		// Due on one of the assignee's work days, once they have given them (onboarding); before that, any day.
-		Set<DayOfWeek> workDays = onboarding.workDays(me.getProgramId(), assignee.getUserId());
-		if (!workDays.isEmpty() && !workDays.contains(request.dueDate().getDayOfWeek())) {
-			throw new InvalidRequestException(Texts.forRequest("error.iskurTaskNotWorkDay"));
-		}
-
+		IskurPlacement assignee = requireAssignable(me, request.assigneeId());
+		requireEstimateStep(request);
+		requireDueDate(request.dueDate());
+		requireWorkDay(me.getProgramId(), assignee.getUserId(), request.dueDate());
 		IskurTask task = new IskurTask(me.getProgramId(), me.getTeamId(), assignee.getUserId(), actorId,
 				clock.instant());
-		task.setTitle(request.title().strip());
-		task.setKind(request.kind());
-		task.setEstimatedMinutes(estimate);
-		task.setDueDate(request.dueDate());
-		task.setNeedsOutput(request.needsOutput());
-		task.setDescription(TextUtils.normalizeOptional(request.description()));
+		requireOnlyContributionProject(me.getProgramId(), assignee.getUserId(), request.kind(), task);
+		apply(task, request);
 		tasks.save(task);
 		if (!assignee.getUserId().equals(actorId)) {
 			notifyAssigned(task, actorId);
 		}
 		return build(me, mondayOf(task.getDueDate()));
+	}
+
+	/**
+	 * "Düzenle" and "Başka üyeye ata": a leader of the team changes the task, or gives it to someone they may assign
+	 * to.
+	 * A done task is locked until it is reopened. A due date that does not change is not checked again, so its
+	 * assignee's late task can still be edited; someone new gets a date ahead. A task that goes to someone else starts
+	 * afresh: what its first assignee logged stays in
+	 * their own work log, and files they handed in keep it with them.
+	 */
+	@Transactional
+	public IskurTeamTasksResponse edit(UUID actorId, UUID taskId, IskurTaskRequest request) {
+		IskurTask task = requireTaskForUpdate(taskId);
+		Access access = accessOf(actorId, task);
+		if (!access.manages()) {
+			throw forbidden("error.iskurLeadersOnly");
+		}
+		requireOpenProgram(task.getProgramId());
+		if (task.getStatus() == IskurTaskStatus.DONE) {
+			throw new ConflictException(Texts.forRequest("error.iskurTaskDoneLocked"));
+		}
+		UUID before = task.getAssigneeId();
+		boolean reassigned = !before.equals(request.assigneeId());
+		boolean dueMoved = !task.getDueDate().equals(request.dueDate());
+		if (reassigned) {
+			requireAssignable(access.placement(), request.assigneeId());
+			if (outputFiles.count(task.getId()) > 0) {
+				throw new ConflictException(Texts.forRequest("error.iskurTaskHasFiles"));
+			}
+		}
+		requireEstimateStep(request);
+		if (dueMoved || reassigned) {
+			requireDueDate(request.dueDate());
+			requireWorkDay(task.getProgramId(), request.assigneeId(), request.dueDate());
+		}
+		if (reassigned || task.getStatus() == IskurTaskStatus.OPEN) {
+			requireOnlyContributionProject(task.getProgramId(), request.assigneeId(), request.kind(), task);
+		}
+
+		Instant now = clock.instant();
+		if (reassigned) {
+			workEntries.detachTask(task.getId());
+			task.reassign(request.assigneeId(), now);
+		}
+		apply(task, request);
+		task.setUpdatedAt(now);
+		savedOrConflict(() -> tasks.saveAndFlush(task));
+		if (reassigned) {
+			notifyTask(before, actorId, "iskurTaskTaken", task.getTitle(), "/student/team");
+			notifyIfOther(task, actorId, () -> notifyAssigned(task, actorId));
+		} else {
+			notifyIfOther(task, actorId, () -> notifyTask(task.getAssigneeId(), actorId, "iskurTaskChanged",
+					task.getTitle(), taskHref(task)));
+		}
+		return build(access.placement(), mondayOf(task.getDueDate()));
+	}
+
+	private static void apply(IskurTask task, IskurTaskRequest request) {
+		task.setTitle(request.title().strip());
+		task.setKind(request.kind());
+		task.setEstimatedMinutes(request.estimatedMinutes());
+		task.setDueDate(request.dueDate());
+		task.setNeedsOutput(request.needsOutput());
+		task.setDescription(TextUtils.normalizeOptional(request.description()));
+	}
+
+	/** The leader themselves, or someone of their sub-group. */
+	private IskurPlacement requireAssignable(IskurPlacement leader, UUID assigneeId) {
+		return placements.findByProgramIdAndUserId(leader.getProgramId(), assigneeId)
+				.filter(placement -> placement.getTeamId().equals(leader.getTeamId()))
+				.filter(placement -> placement.getUserId().equals(leader.getUserId())
+						|| leader.getUserId().equals(placement.getLeaderId()))
+				.orElseThrow(() -> new InvalidRequestException(
+						Texts.forRequest("error.iskurTaskAssigneeNotInSubgroup")));
+	}
+
+	private static void requireEstimateStep(IskurTaskRequest request) {
+		if (request.estimatedMinutes() % IskurWeeklySplit.STEP_MINUTES != 0) {
+			throw new InvalidRequestException(Texts.forRequest("error.iskurTaskEstimateStep"));
+		}
+	}
+
+	private void requireDueDate(LocalDate dueDate) {
+		LocalDate today = today();
+		if (dueDate.isBefore(today) || dueDate.isAfter(today.plusDays(MAX_DAYS_AHEAD))) {
+			throw new InvalidRequestException(Texts.forRequest("error.iskurTaskDueDate", MAX_DAYS_AHEAD));
+		}
+	}
+
+	/** Due on one of the assignee's work days, once they have given them (onboarding); before that, any day. */
+	private void requireWorkDay(UUID programId, UUID assigneeId, LocalDate dueDate) {
+		Set<DayOfWeek> workDays = onboarding.workDays(programId, assigneeId);
+		if (!workDays.isEmpty() && !workDays.contains(dueDate.getDayOfWeek())) {
+			throw new InvalidRequestException(Texts.forRequest("error.iskurTaskNotWorkDay"));
+		}
+	}
+
+	/** "Öğrenci başına tek katkı projesi": one open at a time; a done or handed-over one does not count. */
+	private void requireOnlyContributionProject(UUID programId, UUID assigneeId, IskurTaskKind kind,
+			IskurTask task) {
+		if (kind != IskurTaskKind.CONTRIBUTION_PROJECT) {
+			return;
+		}
+		// Two leaders at once must not each open one.
+		placements.findForUpdate(programId, assigneeId);
+		tasks.findByProgramIdAndAssigneeIdAndKindAndStatus(programId, assigneeId, kind, IskurTaskStatus.OPEN).stream()
+				.filter(other -> !other.getId().equals(task.getId()))
+				.findFirst()
+				.ifPresent(other -> {
+					// A task of another team is not named to this one's leader.
+					throw new InvalidRequestException(other.getTeamId().equals(task.getTeamId())
+							? Texts.forRequest("error.iskurTaskContributionProject", other.getTitle())
+							: Texts.forRequest("error.iskurTaskContributionProjectElsewhere"));
+				});
 	}
 
 	@Transactional(readOnly = true)
@@ -270,7 +369,10 @@ public class IskurTaskService {
 		return access;
 	}
 
-	/** A leader of the team takes a task back; the log lines that used it keep their own title and minutes. */
+	/**
+	 * "İptal et": a leader of the team takes a task back and its assignee is told; the log lines that used it keep
+	 * their own title and minutes.
+	 */
 	@Transactional
 	public IskurTeamTasksResponse delete(UUID actorId, UUID taskId) {
 		IskurTask task = requireTask(taskId);
@@ -285,6 +387,8 @@ public class IskurTaskService {
 			tasks.flush();
 			return task;
 		});
+		notifyIfOther(task, actorId, () -> notifyTask(task.getAssigneeId(), actorId, "iskurTaskCancelled",
+				task.getTitle(), "/student/team"));
 		return build(access.placement(), mondayOf(task.getDueDate()));
 	}
 
@@ -445,6 +549,28 @@ public class IskurTaskService {
 				});
 	}
 
+	private static void notifyIfOther(IskurTask task, UUID actorId, Runnable notify) {
+		if (!task.getAssigneeId().equals(actorId)) {
+			notify.run();
+		}
+	}
+
+	/** Tells someone what a leader did with a task; a leader who did it to their own task is told nothing. */
+	private void notifyTask(UUID recipientId, UUID leaderId, String key, String title, String href) {
+		if (recipientId.equals(leaderId)) {
+			return;
+		}
+		users.findById(recipientId).ifPresent(reader -> notifications.create(reader,
+				NotificationCategory.TASK_ASSIGNED, Texts.get(reader, "notification." + key + ".title"),
+				Texts.get(reader, "notification." + key + ".body",
+						users.findById(leaderId).map(AppUser::getFullName).orElse(""), title),
+				href));
+	}
+
+	private static String taskHref(IskurTask task) {
+		return "/student/team/tasks/" + task.getId();
+	}
+
 	private void notifyAssigned(IskurTask task, UUID leaderId) {
 		Optional<AppUser> recipient = users.findById(task.getAssigneeId());
 		if (recipient.isEmpty()) {
@@ -456,7 +582,7 @@ public class IskurTaskService {
 				Texts.get(reader, "notification.iskurTaskAssigned.title"),
 				Texts.get(reader, "notification.iskurTaskAssigned.body", leaderName, task.getTitle(),
 						DUE_FORMAT.format(task.getDueDate())),
-				"/student/team/tasks/" + task.getId());
+				taskHref(task));
 	}
 
 	private Map<UUID, String> names(Set<UUID> ids, @Nullable UUID also) {

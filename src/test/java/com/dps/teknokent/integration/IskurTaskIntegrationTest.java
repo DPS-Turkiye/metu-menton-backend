@@ -8,6 +8,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -348,6 +349,92 @@ class IskurTaskIntegrationTest {
 	}
 
 	@Test
+	void aLeaderEditsATaskAndItsAssigneeIsTold() throws Exception {
+		UUID id = createTask(mert, false);
+
+		edit(zeynep, id, mert, "Sponsor listesi: 15 firma", 180, today, true)
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.members[2].tasks[0].title").value("Sponsor listesi: 15 firma"))
+				.andExpect(jsonPath("$.members[2].tasks[0].estimatedMinutes").value(180))
+				.andExpect(jsonPath("$.members[2].tasks[0].needsOutput").value(true))
+				.andExpect(jsonPath("$.members[2].plannedMinutes").value(180));
+		assertThat(titles(mert)).contains("Görevin güncellendi");
+
+		edit(mert, id, mert, "Üye düzenleyemez", 60, today, false).andExpect(status().isForbidden());
+		edit(outsider, id, mert, "Başka ekip", 60, today, false).andExpect(status().isNotFound());
+		edit(zeynep, id, mert, "Adım dışı", 100, today, false).andExpect(status().isBadRequest());
+		edit(zeynep, id, mert, "Geçmiş tarih", 60, today.minusDays(1), false).andExpect(status().isBadRequest());
+	}
+
+	@Test
+	void aTaskGivenToSomeoneElseStartsAfreshAndBothAreTold() throws Exception {
+		UUID id = createTask(mert, false);
+		update(mert, id, "{\"actualMinutes\":45,\"outputNote\":\"Taslak hazır\"}").andExpect(status().isOk());
+
+		edit(zeynep, id, ayse, "Sponsor listesi: 10 firma", 120, today, false)
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.members[1].fullName").value("Ayşe Yıldız"))
+				.andExpect(jsonPath("$.members[1].tasks[0].actualMinutes").doesNotExist())
+				.andExpect(jsonPath("$.members[1].tasks[0].outputNote").doesNotExist())
+				.andExpect(jsonPath("$.members[2].tasks").isEmpty());
+		assertThat(titles(mert)).contains("Görevin başka birine verildi");
+		assertThat(titles(ayse)).contains("Yeni ekip görevi");
+		task(mert, id).andExpect(status().isNotFound());
+		task(ayse, id).andExpect(status().isOk());
+
+		edit(zeynep, id, burak, "Başka alt grup", 60, today, false).andExpect(status().isBadRequest());
+	}
+
+	@Test
+	void aDoneTaskIsNotEditedUntilItIsReopened() throws Exception {
+		UUID id = createTask(mert, false);
+		update(mert, id, "{\"status\":\"DONE\",\"actualMinutes\":45}").andExpect(status().isOk());
+
+		edit(zeynep, id, mert, "Kilitli", 60, today, false).andExpect(status().isConflict());
+		update(zeynep, id, "{\"status\":\"OPEN\"}").andExpect(status().isOk());
+		edit(zeynep, id, mert, "Yeniden açıldı", 60, today, false).andExpect(status().isOk());
+	}
+
+	@Test
+	void aPersonHasOneOpenContributionProjectAtATime() throws Exception {
+		contribution(zeynep, mert, "Staj rehberi").andExpect(status().isOk());
+		contribution(zeynep, mert, "İkinci proje")
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.message").value(Matchers.containsString("Staj rehberi")));
+		contribution(zeynep, ayse, "Ayşe'nin projesi").andExpect(status().isOk());
+
+		UUID first = taskRepository.findAll().stream().filter(task -> task.getTitle().equals("Staj rehberi"))
+				.findFirst().orElseThrow().getId();
+		update(mert, first, "{\"status\":\"DONE\",\"actualMinutes\":60}").andExpect(status().isOk());
+		contribution(zeynep, mert, "Yeni proje").andExpect(status().isOk());
+	}
+
+	@Test
+	void aHandedOverProjectIsEditedWhileAnotherIsOpenAndALateTaskNeedsANewDateForSomeoneElse() throws Exception {
+		contribution(zeynep, mert, "Staj rehberi").andExpect(status().isOk());
+		UUID first = taskRepository.findAll().getFirst().getId();
+		update(mert, first, "{\"status\":\"HANDED_OVER\",\"handoverReason\":\"Devam ediyor\"}")
+				.andExpect(status().isOk());
+		contribution(zeynep, mert, "Staj rehberi 2").andExpect(status().isOk());
+		send(put("/api/iskur/tasks/" + first), taskBody(zeynep, mert, "Staj rehberi 1", 120, today, false)
+				.replace("EVENT", "CONTRIBUTION_PROJECT")).andExpect(status().isOk());
+
+		IskurTask late = taskRepository.findById(first).orElseThrow();
+		late.setDueDate(today.minusDays(3));
+		taskRepository.saveAndFlush(late);
+		edit(zeynep, first, mert, "Geciken görev", 120, today.minusDays(3), false).andExpect(status().isOk());
+		edit(zeynep, first, ayse, "Geciken görev", 120, today.minusDays(3), false).andExpect(status().isBadRequest());
+		edit(zeynep, first, ayse, "Geciken görev", 120, today, false).andExpect(status().isOk());
+	}
+
+	@Test
+	void aCancelledTasksAssigneeIsTold() throws Exception {
+		UUID id = createTask(mert, false);
+		deleteTask(zeynep, id).andExpect(status().isOk());
+		assertThat(titles(mert)).contains("Görevin iptal edildi");
+	}
+
+	@Test
 	void onlyALeaderDeletesATask() throws Exception {
 		UUID taskId = createTask(mert, false);
 		deleteTask(mert, taskId).andExpect(status().isForbidden());
@@ -398,6 +485,21 @@ class IskurTaskIntegrationTest {
 		return ("{\"actorId\":\"%s\",\"assigneeId\":\"%s\",\"title\":\"%s\",\"kind\":\"EVENT\","
 				+ "\"estimatedMinutes\":%d,\"dueDate\":\"%s\",\"needsOutput\":%s,\"description\":\"Bilim sohbetleri\"}")
 				.formatted(actor.getId(), assignee.getId(), title, minutes, due, needsOutput);
+	}
+
+	private ResultActions edit(AppUser actor, UUID taskId, AppUser assignee, String title, int minutes, LocalDate due,
+			boolean needsOutput) throws Exception {
+		return send(put("/api/iskur/tasks/" + taskId), taskBody(actor, assignee, title, minutes, due, needsOutput));
+	}
+
+	private ResultActions contribution(AppUser actor, AppUser assignee, String title) throws Exception {
+		return send(post("/api/iskur/team/tasks"), taskBody(actor, assignee, title, 120, today, false)
+				.replace("EVENT", "CONTRIBUTION_PROJECT"));
+	}
+
+	private List<String> titles(AppUser person) {
+		return notificationRepository.findByRecipientIdOrderByCreatedAtDesc(person.getId()).stream()
+				.map(Notification::getTitle).toList();
 	}
 
 	private ResultActions teamTasks(AppUser actor, LocalDate weekStart) throws Exception {

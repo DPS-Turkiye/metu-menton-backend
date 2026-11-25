@@ -35,7 +35,7 @@ public class IskurTask {
 	@Column(name = "team_id", nullable = false, updatable = false)
 	private UUID teamId;
 
-	@Column(name = "assignee_id", nullable = false, updatable = false)
+	@Column(name = "assignee_id", nullable = false)
 	private UUID assigneeId;
 
 	@Column(name = "created_by")
@@ -99,6 +99,15 @@ public class IskurTask {
 		this.status = IskurTaskStatus.OPEN;
 		this.createdAt = now;
 		this.updatedAt = now;
+	}
+
+	/** "Başka üyeye ata": the new assignee starts afresh; the old one's logged time stays in their own work log. */
+	public void reassign(UUID newAssigneeId, Instant now) {
+		this.assigneeId = newAssigneeId;
+		this.actualMinutes = null;
+		this.outputLink = null;
+		this.outputNote = null;
+		reopen(now);
 	}
 
 	public void complete(Instant now) {
