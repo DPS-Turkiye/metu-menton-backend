@@ -32,6 +32,7 @@ import com.dps.teknokent.dto.requests.DecideOfficeHoursRequest;
 import com.dps.teknokent.dto.requests.UpdateOfficeHoursAvailabilityRequest;
 import com.dps.teknokent.dto.requests.UpdateOfficeHoursProfileRequest;
 import com.dps.teknokent.dto.responses.OfficeHoursAcademicianMeetingResponse;
+import com.dps.teknokent.dto.responses.OfficeHoursAvailabilityImpactResponse;
 import com.dps.teknokent.dto.responses.OfficeHoursAvailabilityResponse;
 import com.dps.teknokent.dto.responses.OfficeHoursInboxRequestResponse;
 import com.dps.teknokent.dto.responses.OfficeHoursProfileResponse;
@@ -187,7 +188,7 @@ class OfficeHoursMeServiceTest {
 		when(userRepository.findByAppUserId(ACCOUNT)).thenReturn(Optional.empty())
 				.thenReturn(Optional.of(person(PERSON, ACCOUNT, "Elif Şahin")));
 		UpdateOfficeHoursAvailabilityRequest hours = new UpdateOfficeHoursAvailabilityRequest(List.of(), List.of(),
-				null, 30, 10, null);
+				null, 30, 10, null, null);
 
 		service.saveAvailability(ACCOUNT, hours);
 
@@ -390,5 +391,78 @@ class OfficeHoursMeServiceTest {
 		assertThat(only.place()).isEqualTo("A-204");
 		assertThat(only.onlineLink()).isEqualTo("https://meet.example/x");
 		assertThat(only.courseName()).isNull();
+	}
+
+	@Test
+	void previewNamesWhoIsAffectedWithTheTitleAndTimesButNotTheNoteOrMessages() {
+		academic();
+		hasPerson();
+		OfficeHoursMeeting booked = new OfficeHoursMeeting();
+		booked.setRequestId(REQUEST);
+		booked.setStudentId(STUDENT);
+		booked.setScheduledAt(TUESDAY_2PM);
+		booked.setDurationMinutes(30);
+		OfficeHoursRequest bookedRequest = request(null, STUDENT, OfficeHoursRequestStatus.ACCEPTED);
+		bookedRequest.setTopic("Ödev 2");
+		bookedRequest.setExpectedOutcome("Özel not");
+		OfficeHoursRequest waiting = request(COURSE, STUDENT, OfficeHoursRequestStatus.COUNTER_PROPOSED);
+		waiting.setId(UUID.randomUUID());
+		waiting.setTopic("Proje");
+		Instant wednesday = TUESDAY_2PM.plusSeconds(86_400);
+		UpdateOfficeHoursAvailabilityRequest hours = new UpdateOfficeHoursAvailabilityRequest(List.of(), List.of(),
+				null, 30, 10, null, null);
+		when(availabilityService.preview(PERSON, hours)).thenReturn(new OfficeHoursAvailabilityImpactService.Impact(
+				List.of(booked), List.of(new OfficeHoursAvailabilityImpactService.AffectedRequest(waiting,
+						List.of(TUESDAY_2PM), List.of(wednesday)))));
+		when(requestRepository.findAllById(List.of(REQUEST))).thenReturn(List.of(bookedRequest));
+		when(userRepository.findAllById(any())).thenReturn(List.of(person(STUDENT, null, "Ali Kaya")));
+		OfficeHoursCourse course = new OfficeHoursCourse();
+		course.setId(COURSE);
+		course.setTitle("CENG 111");
+		when(courseRepository.findAllById(List.of(COURSE))).thenReturn(List.of(course));
+
+		OfficeHoursAvailabilityImpactResponse impact = service.previewAvailability(ACCOUNT, hours);
+
+		assertThat(impact.meetings()).singleElement().satisfies(meeting -> {
+			assertThat(meeting.requestId()).isEqualTo(REQUEST);
+			assertThat(meeting.status()).isEqualTo(OfficeHoursRequestStatus.ACCEPTED);
+			assertThat(meeting.studentName()).isEqualTo("Ali Kaya");
+			assertThat(meeting.topic()).isEqualTo("Ödev 2");
+			assertThat(meeting.courseName()).isNull();
+			assertThat(meeting.time()).isEqualTo(OfficeHoursTimeResponse.of(TUESDAY_2PM, 30));
+		});
+		assertThat(impact.requests()).singleElement().satisfies(request -> {
+			assertThat(request.status()).isEqualTo(OfficeHoursRequestStatus.COUNTER_PROPOSED);
+			assertThat(request.courseName()).isEqualTo("CENG 111");
+			assertThat(request.lostTimes()).containsExactly(OfficeHoursTimeResponse.of(TUESDAY_2PM, 30));
+			assertThat(request.keptTimes()).containsExactly(OfficeHoursTimeResponse.of(wednesday, 30));
+		});
+		assertThat(impact.toString()).doesNotContain("Özel not");
+		verify(messageRepository, never()).findByRequestIdInOrderByCreatedAtAsc(any());
+	}
+
+	@Test
+	void previewIsEmptyForAnAcademicWhoHasNeverSavedHours() {
+		academic();
+		when(userRepository.findByAppUserId(ACCOUNT)).thenReturn(Optional.empty());
+
+		OfficeHoursAvailabilityImpactResponse impact = service.previewAvailability(ACCOUNT,
+				new UpdateOfficeHoursAvailabilityRequest(List.of(), List.of(), null, 30, 10, null, null));
+
+		assertThat(impact.meetings()).isEmpty();
+		assertThat(impact.requests()).isEmpty();
+		verify(availabilityService, never()).preview(any(), any());
+		verify(userRepository, never()).insertForAccountIfAbsent(any(), any(), any(), any());
+	}
+
+	@Test
+	void previewIsNotFoundForAStudent() {
+		when(institutionPeople.findFirstByUserIdOrderBySyncedAtDesc(STUDENT_ACCOUNT))
+				.thenReturn(Optional.of(record(STUDENT_ACCOUNT, "Ali Kaya", IdentityKind.STUDENT)));
+
+		assertThatThrownBy(() -> service.previewAvailability(STUDENT_ACCOUNT,
+				new UpdateOfficeHoursAvailabilityRequest(List.of(), List.of(), null, 30, 10, null, null)))
+				.isInstanceOf(ResourceNotFoundException.class);
+		verify(availabilityService, never()).preview(any(), any());
 	}
 }
