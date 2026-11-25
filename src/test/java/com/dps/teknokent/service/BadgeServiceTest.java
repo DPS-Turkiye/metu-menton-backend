@@ -208,7 +208,7 @@ class BadgeServiceTest {
 				.isInstanceOf(ConflictException.class);
 	}
 
-	// Arya, 19 Nov: only the program's İŞKUR interns become its Akran mentors, by "Rozet ver" as by Prism approval.
+	// With the setting on, only the program's İŞKUR interns become its Akran mentors, by "Rozet ver" as by Prism.
 	@Test
 	void withTheInternsOnlyRuleOnlyAnInternOfTheProgramCanBeAwarded() {
 		when(peerTraining.internsOnly()).thenReturn(true);
