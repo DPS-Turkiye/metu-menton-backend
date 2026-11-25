@@ -18,6 +18,7 @@ import org.springframework.web.bind.annotation.RestController;
 import com.dps.teknokent.domain.PeerTopicCategory;
 import com.dps.teknokent.domain.UserRole;
 import com.dps.teknokent.dto.requests.CreatePeerMentoringRequest;
+import com.dps.teknokent.dto.requests.SavePeerMentorIntakeRequest;
 import com.dps.teknokent.dto.requests.SavePeerMentorProfileDraftRequest;
 import com.dps.teknokent.dto.requests.SavePeerMentorProfileRequest;
 import com.dps.teknokent.dto.responses.AppointmentResponse;
@@ -103,6 +104,12 @@ public class PeerMentoringController {
 	@PutMapping("/profile")
 	public PeerMentorProfileResponse saveProfile(@Valid @RequestBody SavePeerMentorProfileRequest request) {
 		return peerMentoringService.saveProfile(CurrentActor.resolve(request.actorId()), request);
+	}
+
+	@PutMapping("/profile/intake")
+	public PeerMentorProfileResponse saveIntake(@Valid @RequestBody SavePeerMentorIntakeRequest request) {
+		return peerMentoringService.saveIntake(CurrentActor.resolve(request.actorId()), request.menteeCapacity(),
+				request.acceptingRequests());
 	}
 
 	/** The peer mentor's unfinished wizard ("Taslak kaydet"); 404 when there is none. */

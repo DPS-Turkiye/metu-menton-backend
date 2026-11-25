@@ -22,6 +22,7 @@ public record PeerMentorDetailResponse(
 		String helpWith,
 		List<String> recommendationReasons,
 		boolean capacityFull,
+		boolean acceptingRequests,
 		List<PublicBadgeResponse> badges,
 		boolean availableThisWeek,
 		List<String> subTopics,
@@ -39,7 +40,8 @@ public record PeerMentorDetailResponse(
 			Map<PeerTopicCategory, PeerTopicLevel> levels, List<PeerExperienceCardResponse> experiences) {
 		StudentProfileResponse studies = profile.studentProfile();
 		return new PeerMentorDetailResponse(card.mentorId(), card.fullName(), card.department(), card.classYear(),
-				card.categories(), card.helpWith(), card.recommendationReasons(), card.capacityFull(), card.badges(),
+				card.categories(), card.helpWith(), card.recommendationReasons(), card.capacityFull(),
+				card.acceptingRequests(), card.badges(),
 				card.availableThisWeek(),
 				profile.offerings() == null ? List.of() : List.copyOf(profile.offerings()),
 				studies == null ? List.of() : studies.strongCourses(),

@@ -92,6 +92,10 @@ public class MentorProfile {
 	@Column(name = "mentee_capacity")
 	private Integer menteeCapacity;
 
+	/** "Yeni talep almaya açığım": off, the peer directory says the mentor takes no new mentees. */
+	@Column(name = "accepting_requests", nullable = false)
+	private boolean acceptingRequests = true;
+
 	@Column(name = "about", nullable = false, columnDefinition = "TEXT")
 	private String about = "";
 

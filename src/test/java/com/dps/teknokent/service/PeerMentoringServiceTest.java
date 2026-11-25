@@ -381,6 +381,46 @@ class PeerMentoringServiceTest {
 	}
 
 	@Test
+	void aMentorWhoPausedRequestsIsListedAsSuchAndGetsNoNewRequest() {
+		when(profileRepository.findIdsNotAcceptingRequests(any())).thenReturn(Set.of(peerMentor.getId()));
+
+		assertThat(service.mentors(student.getId(), null, null, null, false))
+				.singleElement()
+				.satisfies(card -> {
+					assertThat(card.acceptingRequests()).isFalse();
+					assertThat(card.capacityFull()).isFalse();
+				});
+		assertThatThrownBy(() -> service.create(student.getId(), new CreatePeerMentoringRequest(null,
+				peerMentor.getId(), PeerTopicCategory.CAREER_INTERNSHIP, "Staj başvurusu için CV'me bakar mısın?")))
+				.isInstanceOf(ConflictException.class);
+		verify(personalTeams, never()).ensureFor(any());
+		verify(requestService, never()).create(any());
+	}
+
+	@Test
+	void theMentorSavesTheirCapacityAndPausesRequests() {
+		when(profileRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+		assertThat(service.profile(peerMentor.getId()).acceptingRequests()).isTrue();
+
+		PeerMentorProfileResponse saved = service.saveIntake(peerMentor.getId(), 4, false);
+
+		assertThat(saved.menteeCapacity()).isEqualTo(4);
+		assertThat(saved.acceptingRequests()).isFalse();
+		assertThat(published.getMenteeCapacity()).isEqualTo(4);
+
+		assertThat(service.saveIntake(peerMentor.getId(), null, true).menteeCapacity()).isEqualTo(4);
+	}
+
+	@Test
+	void onlyAPeerMentorWithAProfileSavesTheirCapacity() {
+		assertThatThrownBy(() -> service.saveIntake(student.getId(), 4, true))
+				.isInstanceOf(ResponseStatusException.class);
+		when(profileRepository.findById(peerMentor.getId())).thenReturn(Optional.empty());
+		assertThatThrownBy(() -> service.saveIntake(peerMentor.getId(), 4, true))
+				.isInstanceOf(ResourceNotFoundException.class);
+	}
+
+	@Test
 	void theStudentsListHoldsOnlyPeerRequests() {
 		MentorshipRequest peer = request(UUID.randomUUID(), peerMentor, "INTERNATIONAL");
 		MentorshipRequest startup = request(UUID.randomUUID(), teknokentMentor, "Yatırım");
