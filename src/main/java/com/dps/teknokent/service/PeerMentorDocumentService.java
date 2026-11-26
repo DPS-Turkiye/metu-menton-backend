@@ -48,11 +48,9 @@ import com.dps.teknokent.exception.InvalidRequestException;
 import com.dps.teknokent.exception.ResourceNotFoundException;
 import com.dps.teknokent.repository.IskurOnboardingRepository;
 import com.dps.teknokent.repository.PeerMentorDocumentRepository;
-import com.dps.teknokent.repository.ProgramCoordinatorRepository;
 import com.dps.teknokent.repository.ProgramMentorRepository;
 import com.dps.teknokent.repository.ProgramRepository;
 import com.dps.teknokent.repository.StoredDocumentRepository;
-import com.dps.teknokent.util.ProgramCoordination;
 import com.dps.teknokent.util.Texts;
 
 import lombok.RequiredArgsConstructor;
@@ -86,8 +84,8 @@ public class PeerMentorDocumentService {
 	private final InstitutionDirectoryService institutionDirectoryService;
 	private final MenteeProgramService menteeProgramService;
 	private final ProgramMentorRepository programMentorRepository;
+	private final ProgramFeatureAccess featureAccess;
 	private final ProgramRepository programRepository;
-	private final ProgramCoordinatorRepository programCoordinatorRepository;
 	private final PlatformTransactionManager transactionManager;
 
 	/** The file of one piece of evidence: what the download endpoint streams. */
@@ -255,8 +253,7 @@ public class PeerMentorDocumentService {
 			return Access.NONE;
 		}
 		if (viewer.has(UserRole.COORDINATOR) && programs.stream()
-				.anyMatch(program -> ProgramCoordination.coordinates(program, viewer.getId(),
-						programCoordinatorRepository))) {
+				.anyMatch(program -> featureAccess.of(viewer, program).contains(ProgramFeature.PEER_MENTORING))) {
 			return Access.ALL;
 		}
 		if (viewer.has(UserRole.MENTEE) && isStudent(viewer)) {

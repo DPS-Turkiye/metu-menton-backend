@@ -78,6 +78,7 @@ public class PeerReportReviewService {
 	private final PeerReportCalendar calendar;
 	private final PeerReportStatuses statuses;
 	private final PeerReportAccess access;
+	private final ProgramFeatureAccess featureAccess;
 
 	/**
 	 * The reviewer's list of weekly summaries, oldest sent first: by default those waiting for them (in review and not
@@ -300,7 +301,7 @@ public class PeerReportReviewService {
 		}
 		Set<UUID> programs = ProgramCoordination.programsOf(actor.getId(), programRepository,
 				programCoordinatorRepository).stream()
-				.filter(program -> program.has(ProgramFeature.PEER_MENTORING))
+				.filter(program -> featureAccess.of(actor, program).contains(ProgramFeature.PEER_MENTORING))
 				.map(Program::getId)
 				.collect(Collectors.toSet());
 		if (programs.isEmpty()) {

@@ -22,6 +22,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import com.dps.teknokent.domain.AttendanceState;
+import com.dps.teknokent.domain.ProgramFeature;
 import com.dps.teknokent.domain.ProgramStatus;
 import com.dps.teknokent.domain.UserAccountStatus;
 import com.dps.teknokent.domain.UserRole;
@@ -302,7 +303,7 @@ public class ProgramAttendanceService {
 
 	private Program requireReportReader(UUID actorId, UUID programId) {
 		try {
-			return coordinatorProgramService.requireManagedProgram(actorId, programId);
+			return peerProgram(actorId, programId);
 		} catch (InvalidRequestException refused) {
 			throw new ResponseStatusException(HttpStatus.FORBIDDEN,
 					"Only the program's coordinators and admins can read its attendance.");
@@ -311,5 +312,12 @@ public class ProgramAttendanceService {
 
 	private static LocalDate today() {
 		return LocalDate.now(MeetingSlotTimes.APP_ZONE);
+	}
+
+	/** A peer-mentoring screen: a semester coordinator who does not run Akran Mentörlüğü gets a 403. */
+	private Program peerProgram(UUID actorId, UUID programId) {
+		Program program = coordinatorProgramService.requireManagedProgram(actorId, programId);
+		coordinatorProgramService.requireAssigned(actorId, program, ProgramFeature.PEER_MENTORING);
+		return program;
 	}
 }

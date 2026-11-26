@@ -135,6 +135,7 @@ public class CoordinatorProgramService {
 	private final TeamChangeRequestRepository teamChangeRequestRepository;
 	private final ProgramParticipantCounts participantCounts;
 	private final ProgramWorkBlockers workBlockers;
+	private final ProgramFeatureAccess featureAccess;
 
 	public enum HealthBucket {
 		HEALTHY,
@@ -159,16 +160,19 @@ public class CoordinatorProgramService {
 
 	@Transactional(readOnly = true)
 	public List<CoordinatorProgramResponse> list(UUID actorId) {
-		List<Program> programs = managedPrograms(requireCoordinatorOrAdmin(actorId));
+		AppUser actor = requireCoordinatorOrAdmin(actorId);
+		List<Program> programs = managedPrograms(actor);
 		Snapshot snapshot = snapshot(programs);
 		Map<UUID, ProgramCountsResponse> counts = participantCounts.of(programs);
-		return programs.stream().map(program -> summarize(program, snapshot, counts)).toList();
+		return programs.stream()
+				.map(program -> summarize(program, snapshot, counts, featureAccess.of(actor, program)))
+				.toList();
 	}
 
 	@Transactional(readOnly = true)
 	public CoordinatorProgramResponse.Detail detail(UUID actorId, UUID programId) {
 		Program program = requireManagedProgram(actorId, programId);
-		return detailOf(program);
+		return detailOf(actorId, program);
 	}
 
 	@Transactional
@@ -215,7 +219,7 @@ public class CoordinatorProgramService {
 			program.setIndividualMentees(request.individualMentees());
 		}
 		programRepository.save(program);
-		return detailOf(program);
+		return detailOf(actorId, program);
 	}
 
 	@Transactional
@@ -226,7 +230,7 @@ public class CoordinatorProgramService {
 		Program program = requireSettingsEditor(actorId, programId);
 		writePhases(programId, request.phases());
 		attachSyllabus(program, actorId, request.syllabusDocumentId());
-		return detailOf(program);
+		return detailOf(actorId, program);
 	}
 
 	/**
@@ -336,7 +340,7 @@ public class CoordinatorProgramService {
 		}
 		programRepository.save(program);
 		log.info("Program {} features changed from {} to {} by {}", programId, before, program.features(), actorId);
-		return detailOf(program);
+		return detailOf(actorId, program);
 	}
 
 	/** Taslak → Aktif. Only an admin launches, and only a program with an approved coordinator to run it. */
@@ -356,7 +360,7 @@ public class CoordinatorProgramService {
 		}
 		program.setStatus(ProgramStatus.ACTIVE);
 		programRepository.save(program);
-		return detailOf(program);
+		return detailOf(actorId, program);
 	}
 
 	/**
@@ -371,7 +375,7 @@ public class CoordinatorProgramService {
 		}
 		program.setStatus(archived ? ProgramStatus.COMPLETED : ProgramStatus.ACTIVE);
 		programRepository.save(program);
-		return detailOf(program);
+		return detailOf(actorId, program);
 	}
 
 	@Transactional(readOnly = true)
@@ -676,9 +680,10 @@ public class CoordinatorProgramService {
 		return value == null || value.isBlank();
 	}
 
-	private CoordinatorProgramResponse.Detail detailOf(Program program) {
+	private CoordinatorProgramResponse.Detail detailOf(UUID actorId, Program program) {
 		Snapshot snapshot = snapshot(List.of(program));
-		CoordinatorProgramResponse summary = summarize(program, snapshot, participantCounts.of(List.of(program)));
+		CoordinatorProgramResponse summary = summarize(program, snapshot, participantCounts.of(List.of(program)),
+				featureAccess.of(domainLookupService.requireUser(actorId), program));
 		List<ProgramStartup> startups = snapshot.startups().getOrDefault(program.getId(), List.of());
 		List<ProgramStartup> awaiting = awaitingMatch(program, startups, snapshot);
 		List<CoordinatorProgramResponse.AwaitingTeam> awaitingTeams = awaiting.stream()
@@ -751,16 +756,18 @@ public class CoordinatorProgramService {
 		List<UUID> ids = ProgramCoordination.coordinatorIds(program, programCoordinatorRepository);
 		Map<UUID, AppUser> users = appUserRepository.findAllById(ids).stream()
 				.collect(Collectors.toMap(AppUser::getId, Function.identity()));
+		Map<UUID, List<ProgramFeature>> features = featureAccess.ofCoordinators(program, ids);
 		return ids.stream()
 				.map(users::get)
 				.filter(user -> user != null && user.has(UserRole.COORDINATOR))
 				.map(user -> new CoordinatorProgramResponse.CoordinatorRef(
-						user.getId(), user.getFullName(), user.getId().equals(program.getCreatedBy())))
+						user.getId(), user.getFullName(), user.getId().equals(program.getCreatedBy()),
+						features.getOrDefault(user.getId(), List.of())))
 				.toList();
 	}
 
 	private CoordinatorProgramResponse summarize(Program program, Snapshot snapshot,
-			Map<UUID, ProgramCountsResponse> counts) {
+			Map<UUID, ProgramCountsResponse> counts, Set<ProgramFeature> mine) {
 		List<ProgramStartup> startups = snapshot.startups().getOrDefault(program.getId(), List.of());
 		List<ProgramMentor> mentors = snapshot.mentors().getOrDefault(program.getId(), List.of());
 		List<ProgramPhase> phases = snapshot.phases().getOrDefault(program.getId(), List.of());
@@ -798,7 +805,7 @@ public class CoordinatorProgramService {
 				ProgramCalendar.totalWeeks(program.getStartDate(), program.getEndDate()),
 				counts.getOrDefault(program.getId(), ProgramCountsResponse.NONE),
 				List.copyOf(program.features()),
-				List.copyOf(program.features()));
+				program.features().stream().filter(mine::contains).toList());
 	}
 
 	private CoordinatorProgramResponse.Health health(Program program, Snapshot snapshot) {
@@ -1028,6 +1035,18 @@ public class CoordinatorProgramService {
 			throw new InvalidRequestException("This program is archived; restore it before changing it.");
 		}
 		return program;
+	}
+
+	/**
+	 * For a screen of one feature of a program the caller runs: a semester that has it switched off is a 400, and a
+	 * semester coordinator who was not given it a 403. Programs of the other types are left as they were.
+	 */
+	public void requireAssigned(UUID actorId, Program program, ProgramFeature feature) {
+		if (program.has(feature)) {
+			featureAccess.requireAssigned(actorId, program, feature);
+		} else if (program.getProgramType() == ProgramType.SEMESTER) {
+			throw new InvalidRequestException(Texts.forRequest("error.programFeatureOff"));
+		}
 	}
 
 	public Program requireManagedProgram(UUID actorId, UUID programId) {

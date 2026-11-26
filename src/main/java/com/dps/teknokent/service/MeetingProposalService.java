@@ -19,6 +19,7 @@ import com.dps.teknokent.domain.MeetingProposalStatus;
 import com.dps.teknokent.domain.MeetingStatus;
 import com.dps.teknokent.domain.MentorshipStatus;
 import com.dps.teknokent.domain.NotificationCategory;
+import com.dps.teknokent.domain.ProgramFeature;
 import com.dps.teknokent.domain.UserRole;
 import com.dps.teknokent.dto.requests.CreateMeetingRequest;
 import com.dps.teknokent.dto.requests.DeclineMeetingProposalRequest;
@@ -66,6 +67,7 @@ public class MeetingProposalService {
 	private final AppUserRepository appUserRepository;
 	private final ProgramRepository programRepository;
 	private final NotificationService notificationService;
+	private final ProgramFeatureAccess featureAccess;
 
 	private enum Side {
 		MENTOR,
@@ -180,6 +182,7 @@ public class MeetingProposalService {
 		AppUser actor = programService.requireCoordinatorOrAdmin(actorId);
 		Map<UUID, Program> scope = programService.scopeOf(actorId, programService.managedPrograms(actor), programId)
 				.stream()
+				.filter(program -> featureAccess.opens(actor, program, ProgramFeature.PEER_MENTORING))
 				.collect(Collectors.toMap(Program::getId, Function.identity(), (first, second) -> first));
 		if (scope.isEmpty()) {
 			return List.of();

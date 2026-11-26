@@ -8,6 +8,7 @@ import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.dps.teknokent.domain.ProgramFeature;
 import com.dps.teknokent.domain.ProgramMentorInvitedBy;
 import com.dps.teknokent.domain.ProgramMentorStatus;
 import com.dps.teknokent.domain.TeamChangeStatus;
@@ -17,6 +18,7 @@ import com.dps.teknokent.dto.responses.ProgramApprovalsResponse;
 import com.dps.teknokent.dto.responses.TeamChangeResponse;
 import com.dps.teknokent.entity.AppUser;
 import com.dps.teknokent.entity.Organization;
+import com.dps.teknokent.entity.Program;
 import com.dps.teknokent.entity.ProgramMentor;
 import com.dps.teknokent.entity.ProgramStartup;
 import com.dps.teknokent.exception.InvalidRequestException;
@@ -52,14 +54,14 @@ public class ProgramApprovalService {
 
 	@Transactional(readOnly = true)
 	public ProgramApprovalsResponse approvals(UUID actorId, UUID programId) {
-		coordinatorProgramService.requireManagedProgram(actorId, programId);
+		peerProgram(actorId, programId);
 		return approvalsOf(programId);
 	}
 
 	/** "Takımı olmayanlar": approved people of the program who have not joined or created a startup yet. */
 	@Transactional(readOnly = true)
 	public List<ProgramApprovalsResponse.Person> withoutTeam(UUID actorId, UUID programId) {
-		coordinatorProgramService.requireManagedProgram(actorId, programId);
+		peerProgram(actorId, programId);
 		return appUserRepository.findByProgramIdAndPermissionAndStatusAndOrganizationIsNullOrderByFullNameAsc(
 				programId, UserRole.MENTEE, UserAccountStatus.APPROVED).stream()
 				.map(ProgramApprovalsResponse.Person::of)
@@ -68,7 +70,7 @@ public class ProgramApprovalService {
 
 	@Transactional
 	public ProgramApprovalsResponse decidePerson(UUID actorId, UUID programId, UUID userId, boolean accepted) {
-		coordinatorProgramService.requireManagedProgram(actorId, programId);
+		peerProgram(actorId, programId);
 		AppUser person = domainLookupService.requireUser(userId);
 		if (!person.has(UserRole.MENTEE) || !programId.equals(person.getProgramId())) {
 			throw new ResourceNotFoundException("No applicant " + userId + " in this program");
@@ -81,7 +83,7 @@ public class ProgramApprovalService {
 	@Transactional
 	public ProgramApprovalsResponse decideStartup(UUID actorId, UUID programId, UUID organizationId,
 			boolean accepted) {
-		coordinatorProgramService.requireManagedProgram(actorId, programId);
+		peerProgram(actorId, programId);
 		Organization startup = domainLookupService.requireOrganization(organizationId);
 		if (programStartupRepository.findByProgramIdAndOrganizationId(programId, organizationId).isEmpty()) {
 			throw new ResourceNotFoundException("No startup " + organizationId + " in this program");
@@ -110,7 +112,7 @@ public class ProgramApprovalService {
 
 	@Transactional
 	public ProgramApprovalsResponse decideTeamChange(UUID actorId, UUID programId, UUID requestId, boolean accepted) {
-		coordinatorProgramService.requireManagedProgram(actorId, programId);
+		peerProgram(actorId, programId);
 		teamChangeService.decide(actorId, programId, requestId, accepted);
 		return approvalsOf(programId);
 	}
@@ -147,5 +149,12 @@ public class ProgramApprovalService {
 				.map(TeamChangeResponse::of)
 				.toList();
 		return new ProgramApprovalsResponse(people, mentors, startups, teamChanges);
+	}
+
+	/** A peer-mentoring screen: a semester coordinator who does not run Akran Mentörlüğü gets a 403. */
+	private Program peerProgram(UUID actorId, UUID programId) {
+		Program program = coordinatorProgramService.requireManagedProgram(actorId, programId);
+		coordinatorProgramService.requireAssigned(actorId, program, ProgramFeature.PEER_MENTORING);
+		return program;
 	}
 }

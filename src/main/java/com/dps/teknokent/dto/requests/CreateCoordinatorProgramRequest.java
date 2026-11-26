@@ -2,6 +2,7 @@ package com.dps.teknokent.dto.requests;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -40,9 +41,15 @@ public record CreateCoordinatorProgramRequest(
 		@Size(max = 200) List<@Valid TeamInviteInput> teams,
 		@Size(max = 12) List<@Valid PhaseInput> phases,
 		UUID syllabusDocumentId,
-		@Size(max = 3) Set<@NotNull ProgramFeature> features) {
+		@Size(max = 3) Set<@NotNull ProgramFeature> features,
+		@Size(max = 10) Map<@NotNull UUID, @NotNull @Size(min = 1, max = 3) Set<@NotNull ProgramFeature>> coordinatorFeatures) {
 
 	public static final int MAX_COORDINATORS = 10;
+
+	/*
+	 * coordinatorFeatures: for a semester, what each coordinator in coordinatorIds runs; one left out (and every
+	 * invited coordinator) runs all of it.
+	 */
 
 	/** A request without features: a Teknokent program, or an ODTÜ client from before semesters. */
 	public CreateCoordinatorProgramRequest(UUID actorId, ProgramType type, String name, String description,
@@ -52,7 +59,7 @@ public record CreateCoordinatorProgramRequest(
 			List<PhaseInput> phases, UUID syllabusDocumentId) {
 		this(actorId, type, name, description, startDate, endDate, coordinatorIds, newCoordinators,
 				defaultMentorCapacity, meetingFrequencyDays, communicationGapDays, bottleneckFlagDays, teams, phases,
-				syllabusDocumentId, null);
+				syllabusDocumentId, null, null);
 	}
 
 	/** Ids and invited emails together: at least one coordinator, at most {@value #MAX_COORDINATORS}. */

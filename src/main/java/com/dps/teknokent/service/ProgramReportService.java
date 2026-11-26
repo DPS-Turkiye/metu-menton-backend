@@ -26,6 +26,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import com.dps.teknokent.domain.MeetingStatus;
+import com.dps.teknokent.domain.ProgramFeature;
 import com.dps.teknokent.domain.UserRole;
 import com.dps.teknokent.dto.responses.AdminOverviewResponse;
 import com.dps.teknokent.dto.responses.PageResponse;
@@ -70,7 +71,7 @@ public class ProgramReportService {
 
 	@Transactional(readOnly = true)
 	public AdminOverviewResponse report(UUID actorId, UUID programId) {
-		return adminOverviewService.programReport(programService.requireManagedProgram(actorId, programId));
+		return adminOverviewService.programReport(peerProgram(actorId, programId));
 	}
 
 	/**
@@ -79,7 +80,7 @@ public class ProgramReportService {
 	 */
 	@Transactional(readOnly = true)
 	public ProgramMeetingRatingsResponse meetingRatings(UUID actorId, UUID programId, LocalDate from) {
-		Program program = programService.requireManagedProgram(actorId, programId);
+		Program program = peerProgram(actorId, programId);
 		List<UUID> held = heldMeetingIds(program, from);
 		List<MeetingFeedback> feedback = held.isEmpty()
 				? List.of()
@@ -110,7 +111,7 @@ public class ProgramReportService {
 
 	private Program requireFeedbackReader(UUID actorId, UUID programId) {
 		try {
-			return programService.requireManagedProgram(actorId, programId);
+			return peerProgram(actorId, programId);
 		} catch (InvalidRequestException refused) {
 			throw new ResponseStatusException(HttpStatus.FORBIDDEN,
 					"Only the program's coordinators and admins can read its meeting feedback.");
@@ -166,7 +167,7 @@ public class ProgramReportService {
 	 */
 	@Transactional(readOnly = true)
 	public ProgramSessionsResponse sessions(UUID actorId, UUID programId, LocalDate from, LocalDate to) {
-		Program program = programService.requireManagedProgram(actorId, programId);
+		Program program = peerProgram(actorId, programId);
 		LocalDate today = LocalDate.now(MeetingSlotTimes.APP_ZONE);
 		LocalDate first = from != null ? from : today.withDayOfMonth(1);
 		LocalDate last = to != null ? to : today.with(TemporalAdjusters.lastDayOfMonth());
@@ -294,5 +295,12 @@ public class ProgramReportService {
 
 	private static double round(double value) {
 		return Math.round(value * 10) / 10.0;
+	}
+
+	/** A peer-mentoring screen: a semester coordinator who does not run Akran Mentörlüğü gets a 403. */
+	private Program peerProgram(UUID actorId, UUID programId) {
+		Program program = programService.requireManagedProgram(actorId, programId);
+		programService.requireAssigned(actorId, program, ProgramFeature.PEER_MENTORING);
+		return program;
 	}
 }

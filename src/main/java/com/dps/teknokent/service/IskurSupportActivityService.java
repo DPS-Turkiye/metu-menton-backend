@@ -133,6 +133,7 @@ public class IskurSupportActivityService {
 		if (!program.has(ProgramFeature.ISKUR)) {
 			throw new InvalidRequestException(Texts.forRequest("error.iskurPeerProgramsOnly"));
 		}
+		coordinatorProgramService.requireAssigned(actorId, program, ProgramFeature.ISKUR);
 		return program;
 	}
 

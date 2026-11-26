@@ -21,6 +21,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import com.dps.teknokent.domain.MatchNeedSource;
 import com.dps.teknokent.domain.MentorshipRequestStatus;
 import com.dps.teknokent.domain.MentorshipStatus;
+import com.dps.teknokent.domain.ProgramFeature;
 import com.dps.teknokent.domain.ProgramMentorStatus;
 import com.dps.teknokent.domain.UserRole;
 import com.dps.teknokent.dto.requests.CreateMentorshipRequest;
@@ -81,7 +82,7 @@ public class ProgramMatchingService {
 
 	@Transactional(readOnly = true)
 	public ProgramMatchingResponse.Overview overview(UUID actorId, UUID programId) {
-		return overviewOf(coordinatorProgramService.requireManagedProgram(actorId, programId));
+		return overviewOf(peerProgram(actorId, programId));
 	}
 
 	/**
@@ -118,7 +119,7 @@ public class ProgramMatchingService {
 	}
 
 	private SuggestionInput suggestionInput(UUID actorId, UUID programId, UUID organizationId) {
-		Program program = coordinatorProgramService.requireManagedProgram(actorId, programId);
+		Program program = peerProgram(actorId, programId);
 		Organization team = requireTeam(program, organizationId);
 		Set<UUID> matchedMentors = mentorshipRepository.findByOrganizationIdIn(List.of(team.getId())).stream()
 				.filter(mentorship -> MATCHED.contains(mentorship.getStatus()))
@@ -149,7 +150,7 @@ public class ProgramMatchingService {
 	/** "Eşleşmeyi onayla": the mentorship starts today; a full mentor is allowed, the screen warned about it. */
 	@Transactional
 	public ProgramMatchingResponse.Overview match(UUID actorId, UUID programId, UUID organizationId, UUID mentorId) {
-		Program program = coordinatorProgramService.requireManagedProgram(actorId, programId);
+		Program program = peerProgram(actorId, programId);
 		Organization team = requireTeam(program, organizationId);
 		if (!poolOf(program).contains(mentorId)) {
 			throw new InvalidRequestException("Only a mentor in this program's pool can be matched.");
@@ -320,5 +321,12 @@ public class ProgramMatchingService {
 	}
 
 	private record SuggestionInput(List<UUID> pool, RecommendMentorsRequest request, int defaultCapacity) {
+	}
+
+	/** A peer-mentoring screen: a semester coordinator who does not run Akran Mentörlüğü gets a 403. */
+	private Program peerProgram(UUID actorId, UUID programId) {
+		Program program = coordinatorProgramService.requireManagedProgram(actorId, programId);
+		coordinatorProgramService.requireAssigned(actorId, program, ProgramFeature.PEER_MENTORING);
+		return program;
 	}
 }

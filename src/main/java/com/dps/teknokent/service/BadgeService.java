@@ -447,6 +447,7 @@ public class BadgeService {
 		if (!program.has(ProgramFeature.PEER_MENTORING)) {
 			throw new InvalidRequestException(Texts.forRequest("error.badgeNotPeerProgram"));
 		}
+		coordinatorProgramService.requireAssigned(actorId, program, ProgramFeature.PEER_MENTORING);
 		return program;
 	}
 

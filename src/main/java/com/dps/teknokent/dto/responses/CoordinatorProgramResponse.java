@@ -66,8 +66,11 @@ public record CoordinatorProgramResponse(
 	public record Syllabus(UUID id, String filename, long sizeBytes, Instant uploadedAt, DocumentKind kind) {
 	}
 
-	/** {@code owner} is the coordinator who created the program; the others were added to it. */
-	public record CoordinatorRef(UUID id, String fullName, boolean owner) {
+	/**
+	 * {@code owner} is the coordinator who created the program; the others were added to it. {@code features}: what
+	 * they run here; the owner, and every coordinator of a program from before semesters, runs all of it.
+	 */
+	public record CoordinatorRef(UUID id, String fullName, boolean owner, List<ProgramFeature> features) {
 	}
 
 	public record Rules(
