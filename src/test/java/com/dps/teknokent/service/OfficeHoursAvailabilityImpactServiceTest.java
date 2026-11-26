@@ -1,6 +1,7 @@
 package com.dps.teknokent.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
@@ -10,6 +11,7 @@ import static org.mockito.Mockito.when;
 
 import java.time.Clock;
 import java.time.DayOfWeek;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
@@ -43,6 +45,7 @@ import com.dps.teknokent.service.OfficeHoursSlotService.DaysAway;
 import com.dps.teknokent.service.OfficeHoursSlotService.Hours;
 import com.dps.teknokent.service.OfficeHoursSlotService.Setup;
 import com.dps.teknokent.service.OfficeHoursSlotService.WeeklyRange;
+import com.dps.teknokent.util.MeetingSlotTimes;
 
 @ExtendWith(MockitoExtension.class)
 class OfficeHoursAvailabilityImpactServiceTest {
@@ -283,5 +286,24 @@ class OfficeHoursAvailabilityImpactServiceTest {
 		booked(meeting(TUESDAY_10AM, 30));
 
 		assertThat(service.affectedBy(ACADEMIC, proposed()).meetings()).isEmpty();
+	}
+
+	@Test
+	void readsOnlyTheDayOfATimeYearsAheadAndStillComparesItsHours() {
+		// A time typed by hand far ahead used to make every week up to it be worked out; only its own day is read now.
+		Instant farAhead = Instant.parse("9999-12-30T07:00:00Z");
+		DayOfWeek day = farAhead.atZone(MeetingSlotTimes.APP_ZONE).getDayOfWeek();
+		saved(rule(day, 9, 17, 30));
+		OfficeHoursRequest offered = request(OfficeHoursRequestStatus.COUNTER_PROPOSED, "2026-11-10T10:00",
+				"9999-12-30T10:00");
+		open(offered);
+
+		Impact impact = assertTimeoutPreemptively(Duration.ofSeconds(2),
+				() -> service.affectedBy(ACADEMIC, proposed()));
+		Impact kept = service.affectedBy(ACADEMIC, proposed(range(day, 9, 17, 30)));
+
+		assertThat(impact.requests()).singleElement()
+				.satisfies(affected -> assertThat(affected.lostTimes()).containsExactly(farAhead));
+		assertThat(kept.requests()).isEmpty();
 	}
 }

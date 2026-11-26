@@ -6,8 +6,10 @@ import java.time.LocalDate;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -91,23 +93,24 @@ public class OfficeHoursAvailabilityImpactService {
 			return new Impact(List.of(), List.of());
 		}
 		Setup saved = slotService.savedSetup(instructorId);
-		LocalDate today = now.atZone(MeetingSlotTimes.APP_ZONE).toLocalDate();
-		ZonedDateTime until = lastMoment(meetings, open, now).atZone(MeetingSlotTimes.APP_ZONE).plusDays(1);
 
-		List<Hours> savedHours = merged(OfficeHoursSlotService.blocks(saved, today, until));
-		List<Hours> proposedHours = merged(OfficeHoursSlotService.blocks(proposed, today, until));
+		// Only the days the meetings and times fall on are read, never the range up to the latest one: a time years
+		// ahead (typed by hand, or sent from Moodle) costs no more than one tomorrow.
 		List<OfficeHoursMeeting> leftOut = meetings.stream()
-				.filter(meeting -> covers(savedHours, meeting) && !covers(proposedHours, meeting))
+				.filter(meeting -> covers(hoursAround(saved, meeting), meeting)
+						&& !covers(hoursAround(proposed, meeting), meeting))
 				.toList();
 
-		Set<Instant> savedStarts = slotStarts(saved, today, until);
-		Set<Instant> proposedStarts = slotStarts(proposed, today, until);
+		Map<LocalDate, Set<Instant>> savedStarts = new HashMap<>();
+		Map<LocalDate, Set<Instant>> proposedStarts = new HashMap<>();
 		List<AffectedRequest> requests = new ArrayList<>();
 		for (OfficeHoursRequest request : open) {
 			List<Instant> times = OfficeHoursSlotService.timesHeldBy(request).filter(at -> at.isAfter(now)).sorted()
 					.toList();
 			List<Instant> lost = times.stream()
-					.filter(at -> savedStarts.contains(at) && !proposedStarts.contains(at)).toList();
+					.filter(at -> startsOn(saved, at, savedStarts).contains(at)
+							&& !startsOn(proposed, at, proposedStarts).contains(at))
+					.toList();
 			if (!lost.isEmpty()) {
 				requests.add(new AffectedRequest(request, lost,
 						times.stream().filter(at -> !lost.contains(at)).toList()));
@@ -117,20 +120,37 @@ public class OfficeHoursAvailabilityImpactService {
 		return new Impact(leftOut, requests);
 	}
 
-	private static Instant lastMoment(List<OfficeHoursMeeting> meetings, List<OfficeHoursRequest> open, Instant now) {
-		Stream<Instant> meetingEnds = meetings.stream()
-				.map(meeting -> meeting.getScheduledAt().plusSeconds(meeting.getDurationMinutes() * 60L));
-		Stream<Instant> requestTimes = open.stream().flatMap(OfficeHoursSlotService::timesHeldBy);
-		return Stream.concat(meetingEnds, requestTimes).max(Comparator.naturalOrder()).filter(at -> at.isAfter(now))
-				.orElse(now);
+	/** The setup's hours, merged, on the day or days a meeting spans. */
+	private static List<Hours> hoursAround(Setup setup, OfficeHoursMeeting meeting) {
+		LocalDate first = dayOf(meeting.getScheduledAt());
+		LocalDate last = dayOf(endOf(meeting));
+		return merged(OfficeHoursSlotService.blocks(setup, first, startOf(last.plusDays(1))));
 	}
 
-	/** Slot starts from the hours alone: no lead time, meetings or buffer, which a change to hours doesn't move. */
-	private static Set<Instant> slotStarts(Setup setup, LocalDate today, ZonedDateTime until) {
-		Set<Instant> starts = new HashSet<>();
-		OfficeHoursSlotService.weeklySlots(setup, today, until).forEach(slot -> starts.add(slot.startsAt()));
-		OfficeHoursSlotService.oneOffSlots(setup, until.toInstant()).forEach(slot -> starts.add(slot.startsAt()));
-		return starts;
+	/**
+	 * Slot starts on the day of {@code at}, from the hours alone: no lead time, meetings or buffer, which a change to
+	 * hours doesn't move. Each day is worked out once.
+	 */
+	private static Set<Instant> startsOn(Setup setup, Instant at, Map<LocalDate, Set<Instant>> known) {
+		return known.computeIfAbsent(dayOf(at), day -> {
+			ZonedDateTime until = startOf(day.plusDays(1));
+			Set<Instant> starts = new HashSet<>();
+			OfficeHoursSlotService.weeklySlots(setup, day, until).forEach(slot -> starts.add(slot.startsAt()));
+			OfficeHoursSlotService.oneOffSlots(setup, until.toInstant()).forEach(slot -> starts.add(slot.startsAt()));
+			return starts;
+		});
+	}
+
+	private static LocalDate dayOf(Instant at) {
+		return at.atZone(MeetingSlotTimes.APP_ZONE).toLocalDate();
+	}
+
+	private static ZonedDateTime startOf(LocalDate day) {
+		return day.atStartOfDay(MeetingSlotTimes.APP_ZONE);
+	}
+
+	private static Instant endOf(OfficeHoursMeeting meeting) {
+		return meeting.getScheduledAt().plusSeconds(meeting.getDurationMinutes() * 60L);
 	}
 
 	/**
@@ -154,7 +174,7 @@ public class OfficeHoursAvailabilityImpactService {
 
 	private static boolean covers(List<Hours> merged, OfficeHoursMeeting meeting) {
 		Instant start = meeting.getScheduledAt();
-		Instant end = start.plusSeconds(meeting.getDurationMinutes() * 60L);
+		Instant end = endOf(meeting);
 		return merged.stream().anyMatch(block -> !start.isBefore(block.startsAt()) && !end.isAfter(block.endsAt()));
 	}
 }

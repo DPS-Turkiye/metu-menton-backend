@@ -24,5 +24,5 @@ public record UpdateOfficeHoursAvailabilityRequest(
 		 * The meetings and requests the academic was shown as affected (FR-OH-29). Left out, nothing is checked, as
 		 * before (Moodle). Sent, even empty, the save is refused if anything else is affected by then.
 		 */
-		@Size(max = 500) List<@Valid OfficeHoursAffectedItemRequest> confirmedAffected) {
+		@Size(max = 500) List<@NotNull @Valid OfficeHoursAffectedItemRequest> confirmedAffected) {
 }

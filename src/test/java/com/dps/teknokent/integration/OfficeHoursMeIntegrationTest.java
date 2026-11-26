@@ -345,4 +345,11 @@ class OfficeHoursMeIntegrationTest {
 						+ "\"defaultMeetingDurationMinutes\":30,\"meetingBufferMinutes\":0}"))
 				.andExpect(status().isOk());
 	}
+
+	@Test
+	void aConfirmedListWithAnEmptyItemIsRefusedAsABadRequest() throws Exception {
+		mockMvc.perform(put("/api/office-hours/me/availability").param("actorId", as(academician))
+				.with(frontendServer()).contentType(MediaType.APPLICATION_JSON).content(noHours("[null]")))
+				.andExpect(status().isBadRequest());
+	}
 }
