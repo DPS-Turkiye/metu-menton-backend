@@ -164,6 +164,29 @@ class IskurTeamChangeIntegrationTest {
 	}
 
 	@Test
+	void anEditInsideTheSameTeamOrAFinalizeLeavesTheRequestWaiting() throws Exception {
+		ask(ayse, "Dijital ekibe geçmek istiyorum.").andExpect(status().isOk());
+		place(ayse, media).andExpect(status().isOk());
+		send(post("/api/coordinator/programs/{programId}/iskur/placements/finalize", program.getId()),
+				"{\"actorId\":\"%s\",\"teamId\":\"%s\"}".formatted(selin.getId(), media.getId()))
+				.andExpect(status().isOk());
+		mine(ayse).andExpect(jsonPath("$.latest.status").value("PENDING"));
+		list(kaan).andExpect(jsonPath("$.requests[0].status").value("PENDING"));
+	}
+
+	@Test
+	void everyProgramCoordinatorIsToldWhileTheUnitHasNoneOfItsOwn() throws Exception {
+		IskurUnit events = unitRepository.saveAndFlush(new IskurUnit(program.getId(), "Etkinlik ve Topluluk", 1,
+				selin.getId(), Instant.now()));
+		IskurTeam community = teamRepository.saveAndFlush(new IskurTeam(events, "Etkinlik ve Topluluk Yönetimi", 0,
+				Instant.now()));
+		place(burak, community).andExpect(status().isOk());
+		ask(burak, "Medya ekibine geçmek istiyorum.").andExpect(status().isOk());
+		assertThat(titles(selin)).containsExactly("Ekip değişikliği talebi");
+		assertThat(titles(kaan)).containsExactly("Ekip değişikliği talebi");
+	}
+
+	@Test
 	void unplacingTheInternCancelsTheirRequest() throws Exception {
 		ask(ayse, "Dijital ekibe geçmek istiyorum.").andExpect(status().isOk());
 		send(delete(PLACE, program.getId(), ayse.getId()).param("actorId", selin.getId().toString()), null)

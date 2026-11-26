@@ -106,7 +106,7 @@ public class IskurTeamChangeService {
 		boolean canAsk = mayAsk(program, placement) && (latest == null
 				|| latest.getStatus() != IskurTeamChangeStatus.PENDING);
 		return new IskurTeamChangeMineResponse(program.getId(), canAsk,
-				latest == null ? null : describe(List.of(latest)).getFirst());
+				latest == null ? null : describeOne(latest, placement));
 	}
 
 	/** Only while placed and provisional: once the coordinator finalizes the team, the trial is over. */
@@ -221,6 +221,32 @@ public class IskurTeamChangeService {
 		return program;
 	}
 
+	/** The intern's own request: only their placement and the one or two teams it names. */
+	private IskurTeamChangeResponse describeOne(IskurTeamChangeRequest row, @Nullable IskurPlacement placement) {
+		Set<UUID> teamIds = new HashSet<>();
+		if (row.getFromTeamId() != null) {
+			teamIds.add(row.getFromTeamId());
+		}
+		UUID current = placement == null ? null : placement.getTeamId();
+		if (current != null) {
+			teamIds.add(current);
+		}
+		Map<UUID, String> teamNames = teams.findAllById(teamIds).stream()
+				.collect(Collectors.toMap(IskurTeam::getId, IskurTeam::getName));
+		AppUser intern = users.findById(row.getUserId()).orElse(null);
+		AppUser decider = row.getDecidedBy() == null ? null : users.findById(row.getDecidedBy()).orElse(null);
+		return response(row, intern, decider, teamNames, current);
+	}
+
+	private static IskurTeamChangeResponse response(IskurTeamChangeRequest row, @Nullable AppUser intern,
+			@Nullable AppUser decider, Map<UUID, String> teamNames, @Nullable UUID currentTeamId) {
+		return new IskurTeamChangeResponse(row.getId(), row.getUserId(), intern == null ? "" : intern.getFullName(),
+				row.getFromTeamId() == null ? null : teamNames.get(row.getFromTeamId()),
+				currentTeamId == null ? null : teamNames.get(currentTeamId), row.getReason(), row.getStatus(),
+				row.getDecisionNote(), decider == null ? null : decider.getFullName(), row.getCreatedAt(),
+				row.getDecidedAt());
+	}
+
 	private List<IskurTeamChangeResponse> describe(List<IskurTeamChangeRequest> rows) {
 		if (rows.isEmpty()) {
 			return List.of();
@@ -240,16 +266,10 @@ public class IskurTeamChangeService {
 				.forEach(placement -> currentTeam.put(placement.getUserId(), placement.getTeamId()));
 		Map<UUID, String> teamNames = teams.findByProgramIdOrderBySortOrderAscCreatedAtAsc(programId).stream()
 				.collect(Collectors.toMap(IskurTeam::getId, IskurTeam::getName));
-		return rows.stream().map(row -> {
-			AppUser intern = byId.get(row.getUserId());
-			AppUser decider = row.getDecidedBy() == null ? null : byId.get(row.getDecidedBy());
-			UUID current = currentTeam.get(row.getUserId());
-			return new IskurTeamChangeResponse(row.getId(), row.getUserId(),
-					intern == null ? "" : intern.getFullName(),
-					row.getFromTeamId() == null ? null : teamNames.get(row.getFromTeamId()),
-					current == null ? null : teamNames.get(current), row.getReason(), row.getStatus(),
-					row.getDecisionNote(), decider == null ? null : decider.getFullName(), row.getCreatedAt(),
-					row.getDecidedAt());
-		}).toList();
+		return rows.stream()
+				.map(row -> response(row, byId.get(row.getUserId()),
+						row.getDecidedBy() == null ? null : byId.get(row.getDecidedBy()), teamNames,
+						currentTeam.get(row.getUserId())))
+				.toList();
 	}
 }
