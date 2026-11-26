@@ -254,18 +254,25 @@ public class IskurTeamSupportService {
 	}
 
 	/**
-	 * The leader, checked again once the program row is locked: placement changes take the same lock, so a leader
-	 * demoted or moved meanwhile is not let through on what was read before it.
+	 * The leader, read only once the program row is locked: placement changes take the same lock, so a leader demoted
+	 * or moved meanwhile is seen as they are now. The placement is loaded for the first time after the lock (the
+	 * program look-up does not touch it), so the persistence context cannot hand back an older copy.
 	 */
 	private IskurPlacement lockedLeader(UUID actorId) {
-		programs.findByIdForUpdate(requireLeader(actorId).getProgramId());
-		return requireLeader(actorId);
+		Program program = interns.currentProgram(actorId)
+				.orElseThrow(() -> new ResourceNotFoundException(Texts.forRequest("error.iskurNotAnIntern")));
+		programs.findByIdForUpdate(program.getId());
+		return leaderOnly(placements.findByProgramIdAndUserId(program.getId(), actorId)
+				.orElseThrow(() -> new ResourceNotFoundException(Texts.forRequest("error.iskurNotAnIntern"))));
 	}
 
 	/** Only a team leader opens and answers requests ("talebi lider açar"). */
 	private IskurPlacement requireLeader(UUID actorId) {
-		IskurPlacement placement = interns.currentPlacement(actorId)
-				.orElseThrow(() -> new ResourceNotFoundException(Texts.forRequest("error.iskurNotAnIntern")));
+		return leaderOnly(interns.currentPlacement(actorId)
+				.orElseThrow(() -> new ResourceNotFoundException(Texts.forRequest("error.iskurNotAnIntern"))));
+	}
+
+	private static IskurPlacement leaderOnly(IskurPlacement placement) {
 		if (placement.getTeamRole() != IskurTeamRole.LEADER) {
 			throw new ResponseStatusException(HttpStatus.FORBIDDEN,
 					Texts.forRequest("error.iskurTeamSupportLeadersOnly"));
