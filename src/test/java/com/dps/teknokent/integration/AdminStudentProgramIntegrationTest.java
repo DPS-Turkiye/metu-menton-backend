@@ -40,12 +40,14 @@ import com.dps.teknokent.domain.UserAccountStatus;
 import com.dps.teknokent.domain.UserRole;
 import com.dps.teknokent.entity.AppUser;
 import com.dps.teknokent.entity.IskurPlacement;
+import com.dps.teknokent.entity.PrismTrainingReview;
 import com.dps.teknokent.entity.Program;
 import com.dps.teknokent.entity.ProgramCoordinator;
 import com.dps.teknokent.entity.ProgramMentor;
 import com.dps.teknokent.entity.UserBadge;
 import com.dps.teknokent.repository.AppUserRepository;
 import com.dps.teknokent.repository.IskurPlacementRepository;
+import com.dps.teknokent.repository.PrismTrainingReviewRepository;
 import com.dps.teknokent.repository.ProgramCoordinatorRepository;
 import com.dps.teknokent.repository.ProgramMentorRemovalRepository;
 import com.dps.teknokent.repository.ProgramMentorRepository;
@@ -82,6 +84,8 @@ class AdminStudentProgramIntegrationTest {
 	private UserBadgeRepository badges;
 	@Autowired
 	private IskurPlacementRepository placements;
+	@Autowired
+	private PrismTrainingReviewRepository prismReviews;
 
 	private AppUser admin;
 	private AppUser coordinator;
@@ -142,7 +146,7 @@ class AdminStudentProgramIntegrationTest {
 
 		send(put("/api/admin/users/{id}/program", student.getId()), admin, officeHoursOnly.getId())
 				.andExpect(status().isOk())
-				.andExpect(jsonPath("$.movedMentorRow").value(true));
+				.andExpect(jsonPath("$.movedMentorRow").value(false));
 
 		assertThat(programMentors.findByProgramIdAndMentorId(officeHoursOnly.getId(), student.getId())).isEmpty();
 		assertThat(users.findById(student.getId()).orElseThrow().getProgramId()).isEqualTo(officeHoursOnly.getId());
@@ -181,6 +185,23 @@ class AdminStudentProgramIntegrationTest {
 		assertThat(badges.findById(gate.getId()).orElseThrow().getStatus()).isEqualTo(BadgeStatus.REVOKED);
 		assertThat(removals.findAll()).anyMatch(removal -> removal.getMentorId().equals(student.getId())
 				&& removal.getProgramId().equals(fall.getId()));
+	}
+
+	@Test
+	void aMovedStudentsTrainingReviewGoesWithThemSoTheirBadgeCanStillCome() throws Exception {
+		PrismTrainingReview pending = new PrismTrainingReview();
+		pending.setId(UUID.randomUUID());
+		pending.setProgramId(fall.getId());
+		pending.setUserId(student.getId());
+		pending.setCompletedAt(Instant.now());
+		prismReviews.saveAndFlush(pending);
+
+		send(put("/api/admin/users/{id}/program", student.getId()), admin, spring.getId())
+				.andExpect(status().isOk());
+
+		assertThat(prismReviews.findByProgramIdAndUserId(spring.getId(), student.getId())).isPresent();
+		assertThat(prismReviews.findByProgramIdAndUserId(fall.getId(), student.getId()))
+				.as("the old semester keeps its row").isPresent();
 	}
 
 	@Test

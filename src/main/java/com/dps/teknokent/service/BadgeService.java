@@ -467,14 +467,17 @@ public class BadgeService {
 	/**
 	 * An admin moved {@code person} out of {@code from} ({@code to} null: out of every semester). If they mentor
 	 * there, they keep mentoring in {@code to} as at a roll-over; in {@code from} their gate badge is revoked and
-	 * their accepted row rejected, both kept as history, with a removal record. True when they were a mentor there.
+	 * their accepted row rejected, both kept as history, with a removal record. True when their mentoring carried
+	 * over into {@code to}; false when it ended (a removal, or a semester without peer mentoring) or they had none.
 	 */
 	@Transactional
 	public boolean movePeerMentor(AppUser person, Program from, @Nullable Program to, UUID actorId) {
 		Instant now = Instant.now();
 		Map<UUID, @Nullable UserBadge> carried = carriedMentors(from.getId(), now);
 		boolean mentor = carried.containsKey(person.getId());
+		boolean carriesOver = false;
 		if (to != null && mentor && to.has(ProgramFeature.PEER_MENTORING)) {
+			carriesOver = true;
 			UserBadge gate = carried.get(person.getId());
 			if (gate != null && activeGate(person.getId(), to.getId()) == null) {
 				UserBadge copy = award(person, GATE, to, BadgeSource.ADMIN, actorId, false);
@@ -508,7 +511,7 @@ public class BadgeService {
 					mentorRemovals.save(new ProgramMentorRemoval(person.getId(), from.getId(), actorId, now,
 							row.getCreatedAt()));
 				});
-		return mentor;
+		return carriesOver;
 	}
 
 	private void acceptMembership(Program program, UUID mentorId, Instant now) {
@@ -658,6 +661,6 @@ public class BadgeService {
 				GateBadgeState.of(award == null ? null : award.getStatus()),
 				award == null ? null : award.getId(), award == null ? null : award.getSource(),
 				award == null ? null : award.getAwardedAt(), award == null ? null : award.getRevokedAt(),
-				award == null ? null : award.getReason(), training, profile, prism);
+				award == null ? null : award.getReason(), training, profile, prism, person.has(UserRole.MENTEE));
 	}
 }

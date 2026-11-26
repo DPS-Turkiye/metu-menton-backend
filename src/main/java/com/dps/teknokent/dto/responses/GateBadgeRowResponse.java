@@ -31,7 +31,9 @@ public record GateBadgeRowResponse(
 		@Nullable String reason,
 		Training training,
 		@Nullable Profile profile,
-		@Nullable Prism prism) {
+		@Nullable Prism prism,
+		/* A student account, whose semester the admin can change; false for a gate holder who is not one. */
+		boolean student) {
 
 	/**
 	 * The person's Prism training in the program, for its coordinators and admins only: when they said they finished

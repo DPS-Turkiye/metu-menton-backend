@@ -1,8 +1,10 @@
 package com.dps.teknokent.service;
 
 import java.util.Comparator;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import org.jspecify.annotations.Nullable;
@@ -44,11 +46,15 @@ public class AdminStudentProgramService {
 	public static final String ALREADY_IN_PROGRAM = "ALREADY_IN_PROGRAM";
 	public static final String NOT_IN_PROGRAM = "NOT_IN_PROGRAM";
 
+	private static final Set<ProgramType> STUDENT_TYPES = EnumSet.of(ProgramType.SEMESTER,
+			ProgramType.PEER_MENTORING);
+
 	private final DomainLookupService domainLookupService;
 	private final AppUserRepository users;
 	private final ProgramRepository programs;
 	private final ProgramWorkBlockers workBlockers;
 	private final BadgeService badges;
+	private final TrainingCarryOver trainingCarryOver;
 
 	@Transactional(readOnly = true)
 	public StudentProgramResponse overview(UUID actorId, UUID userId) {
@@ -69,6 +75,7 @@ public class AdminStudentProgramService {
 	@Transactional
 	public StudentProgramChangeResponse move(UUID actorId, UUID userId, UUID programId) {
 		requireAdmin(actorId);
+		lockSemesters();
 		AppUser student = requireStudent(userId);
 		Program target = programs.findById(programId)
 				.orElseThrow(() -> new ResourceNotFoundException("Program not found: " + programId));
@@ -80,6 +87,7 @@ public class AdminStudentProgramService {
 			throw new ConflictException(Texts.forRequest("error.studentAlreadyInProgram"), ALREADY_IN_PROGRAM);
 		}
 		boolean movedMentor = current.isPresent() && leave(actorId, student, current.get(), target);
+		current.ifPresent(from -> trainingCarryOver.forStudent(from.getId(), target.getId(), student.getId()));
 		return change(actorId, student, current.orElse(null), target, movedMentor);
 	}
 
@@ -87,6 +95,7 @@ public class AdminStudentProgramService {
 	@Transactional
 	public StudentProgramChangeResponse remove(UUID actorId, UUID userId) {
 		requireAdmin(actorId);
+		lockSemesters();
 		AppUser student = requireStudent(userId);
 		Program current = currentOf(student)
 				.orElseThrow(() -> new ConflictException(Texts.forRequest("error.studentNotInProgram"),
@@ -115,8 +124,22 @@ public class AdminStudentProgramService {
 		return new StudentProgramChangeResponse(student.getId(), fromId, toId, movedMentor);
 	}
 
+	/**
+	 * As a launch does, before any program is read here: a change runs before or after a launch, never in between,
+	 * so a student is never left in a semester that was just completed, nor rolled over and moved at once.
+	 */
+	private void lockSemesters() {
+		programs.lockAllOfType(ProgramType.SEMESTER);
+	}
+
+	/**
+	 * The student's semester, by the same rule as the Öğrenciler list: a semester, or a peer mentoring program from
+	 * before semesters. A {@code program_id} pointing anywhere else counts as none.
+	 */
 	private Optional<Program> currentOf(AppUser student) {
-		return student.getProgramId() == null ? Optional.empty() : programs.findById(student.getProgramId());
+		return student.getProgramId() == null ? Optional.empty()
+				: programs.findById(student.getProgramId())
+						.filter(program -> STUDENT_TYPES.contains(program.getProgramType()));
 	}
 
 	private void requireAdmin(UUID actorId) {

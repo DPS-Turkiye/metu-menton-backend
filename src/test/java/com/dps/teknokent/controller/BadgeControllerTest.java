@@ -171,7 +171,7 @@ class BadgeControllerTest {
 				plain.awardedAt(), plain.revokedAt(), plain.reason(), plain.training(),
 				new GateBadgeRowResponse.Profile("Endüstri Mühendisliği", 4, true,
 						List.of(com.dps.teknokent.domain.PeerTopicCategory.CAREER_INTERNSHIP), 3, 4),
-				null);
+				null, true);
 		when(badgeService.roster(ACTOR, PROGRAM, null)).thenReturn(List.of(withProfile));
 
 		mockMvc.perform(get("/api/coordinator/programs/" + PROGRAM + "/badges/roster")
@@ -189,6 +189,6 @@ class BadgeControllerTest {
 	private static GateBadgeRowResponse row(GateBadgeState state) {
 		return new GateBadgeRowResponse(STUDENT, "Zeynep Öğrenci", "zeynep@odtu-dev.invalid", PROGRAM,
 				"İŞKUR 2026 Bahar", state, AWARD, BadgeSource.COORDINATOR, Instant.parse("2026-11-08T10:00:00Z"),
-				null, null, GateBadgeRowResponse.Training.NONE, null, null);
+				null, null, GateBadgeRowResponse.Training.NONE, null, null, true);
 	}
 }
