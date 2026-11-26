@@ -39,6 +39,14 @@ public interface ProgramRepository extends JpaRepository<Program, UUID> {
 
 	List<Program> findBySyllabusDocumentId(UUID syllabusDocumentId);
 
+	/**
+	 * Every program of the type, each row locked until the transaction ends, in id order so two callers never wait
+	 * on each other crosswise. Read first in a transaction, the rows come back as the last committer left them.
+	 */
+	@Lock(LockModeType.PESSIMISTIC_WRITE)
+	@Query("select p from Program p where p.programType = :type order by p.id")
+	List<Program> lockAllOfType(@Param("type") ProgramType type);
+
 	/** The row locked until the transaction ends, so changes to one program's İŞKUR structure run one at a time. */
 	@Lock(LockModeType.PESSIMISTIC_WRITE)
 	@Query("select p from Program p where p.id = :id")

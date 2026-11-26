@@ -407,7 +407,7 @@ public class BadgeService {
 	}
 
 	/**
-	 * A semester's Akran mentors who carry over to the next one: approved accounts with a live gate badge there (active
+	 * A semester's Akran mentors who carry over to the next one: approved students with a live gate badge there (active
 	 * and not past its expiry), and accepted mentors from before gate badges. Someone whose gate was revoked or ran
 	 * out stays behind, even with an accepted row.
 	 */
@@ -435,7 +435,7 @@ public class BadgeService {
 			}
 		}
 		Set<UUID> approved = users.findAllById(live.keySet()).stream()
-				.filter(account -> account.getStatus() == UserAccountStatus.APPROVED)
+				.filter(account -> account.getStatus() == UserAccountStatus.APPROVED && account.has(UserRole.MENTEE))
 				.map(AppUser::getId)
 				.collect(Collectors.toSet());
 		live.keySet().retainAll(approved);
