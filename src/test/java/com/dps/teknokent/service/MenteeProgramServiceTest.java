@@ -212,6 +212,17 @@ class MenteeProgramServiceTest {
 	}
 
 	@Test
+	void aStudentOfACompletedSemesterSeesNoFeatures() {
+		AppUser student = new AppUser();
+		student.setId(UUID.randomUUID());
+		student.setProgramId(FIRST_PROGRAM);
+		when(programRepository.findById(FIRST_PROGRAM)).thenReturn(
+				Optional.of(semester(FIRST_PROGRAM, ProgramStatus.COMPLETED, ProgramFeature.OFFICE_HOURS)));
+
+		assertThat(service.semesterFeaturesOf(student)).isEmpty();
+	}
+
+	@Test
 	void someoneInNoSemesterSeesNoFeatures() {
 		AppUser outside = new AppUser();
 		outside.setId(UUID.randomUUID());

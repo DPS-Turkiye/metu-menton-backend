@@ -66,12 +66,15 @@ public class MenteeProgramService {
 	}
 
 	/**
-	 * The features of the semester the person is in: as a student ({@code program_id}), else as an accepted Akran
-	 * mentor of a running program; empty when they are in none. The web shows the ODTÜ screens by it.
+	 * The features of the running semester the person is in: as a student ({@code program_id}), else as an accepted
+	 * Akran mentor of a running program; empty when they are in none. The web shows the ODTÜ screens by it.
 	 */
 	public List<ProgramFeature> semesterFeaturesOf(AppUser user) {
 		UUID programId = user.getProgramId();
-		Optional<Program> program = programId == null ? Optional.empty() : programRepository.findById(programId);
+		// A completed semester's features are no longer anyone's to see; a draft's are not yet.
+		Optional<Program> program = programId == null ? Optional.empty()
+				: programRepository.findById(programId)
+						.filter(candidate -> candidate.getStatus() == ProgramStatus.ACTIVE);
 		if (program.isEmpty()) {
 			// The newest accepted row first, so a mentor in two running programs always gets the same one.
 			List<UUID> mentored = programMentorRepository
