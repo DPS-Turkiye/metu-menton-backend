@@ -43,9 +43,11 @@ import com.dps.teknokent.dto.responses.OfficeHoursTimeResponse;
 import com.dps.teknokent.entity.InstitutionPerson;
 import com.dps.teknokent.entity.OfficeHoursCourse;
 import com.dps.teknokent.entity.OfficeHoursMeeting;
+import com.dps.teknokent.entity.OfficeHoursProfileCourse;
 import com.dps.teknokent.entity.OfficeHoursRequest;
 import com.dps.teknokent.entity.OfficeHoursRequestMessage;
 import com.dps.teknokent.entity.OfficeHoursSettings;
+import com.dps.teknokent.entity.OfficeHoursTopic;
 import com.dps.teknokent.entity.OfficeHoursUser;
 import com.dps.teknokent.exception.InvalidRequestException;
 import com.dps.teknokent.exception.ResourceNotFoundException;
@@ -158,6 +160,13 @@ public class OfficeHoursMeService {
 		settings.setDefaultPlace(TextUtils.normalizeOptional(request.defaultPlace()));
 		settings.setOnlineLink(webLink(request.onlineLink()));
 		settings.setContactEmail(TextUtils.normalizeOptional(request.contactEmail()));
+		if (request.details() != null) {
+			applyDetails(settings, request.details());
+		}
+		if (request.emails() != null) {
+			settings.setNewRequestEmails(request.emails().newRequest());
+			settings.setCancellationEmails(request.emails().cancellation());
+		}
 		settings.setUpdatedAt(clock.instant());
 		return profileOf(settingsRepository.saveAndFlush(settings));
 	}
@@ -440,9 +449,48 @@ public class OfficeHoursMeService {
 				settings.getDefaultMeetingDurationMinutes(), settings.getMeetingBufferMinutes(), List.of());
 	}
 
+	/**
+	 * The lists are changed in place, not replaced: Hibernate tracks the collection it loaded, and an empty list sent
+	 * means "none" just as an empty field does.
+	 */
+	private static void applyDetails(OfficeHoursSettings settings, UpdateOfficeHoursProfileRequest.Details details) {
+		settings.setAbout(TextUtils.normalizeOptional(details.about()));
+		settings.getTopics().clear();
+		settings.getTopics().addAll(orEmpty(details.topics()).stream()
+				.map(topic -> new OfficeHoursTopic(topic.title().trim(), TextUtils.normalizeOptional(topic.body())))
+				.toList());
+		settings.getCourses().clear();
+		settings.getCourses().addAll(orEmpty(details.courses()).stream()
+				.map(course -> new OfficeHoursProfileCourse(course.code().trim(), course.name().trim()))
+				.toList());
+		settings.getExpertise().clear();
+		settings.getExpertise().addAll(TextUtils.normalizedList(details.expertise()));
+		settings.setResponseDays(details.responseDays());
+	}
+
+	private static <T> List<T> orEmpty(@Nullable List<T> values) {
+		if (values == null) {
+			return List.of();
+		}
+		return values;
+	}
+
 	private static OfficeHoursProfileResponse profileOf(OfficeHoursSettings settings) {
 		return new OfficeHoursProfileResponse(settings.isListed(), settings.getDefaultPlace(),
-				settings.getOnlineLink(), settings.getContactEmail());
+				settings.getOnlineLink(), settings.getContactEmail(), detailsOf(settings),
+				new OfficeHoursProfileResponse.Emails(settings.isNewRequestEmails(), settings.isCancellationEmails()));
+	}
+
+	/** Package-visible so the students' view shows the same thing the academician saved. */
+	static OfficeHoursProfileResponse.Details detailsOf(OfficeHoursSettings settings) {
+		return new OfficeHoursProfileResponse.Details(settings.getAbout(),
+				settings.getTopics().stream()
+						.map(topic -> new OfficeHoursProfileResponse.Topic(topic.getTitle(), topic.getBody()))
+						.toList(),
+				settings.getCourses().stream()
+						.map(course -> new OfficeHoursProfileResponse.Course(course.getCode(), course.getName()))
+						.toList(),
+				List.copyOf(settings.getExpertise()), settings.getResponseDays());
 	}
 
 	private static <T> Map<UUID, T> byId(Collection<T> items, Function<T, UUID> id) {

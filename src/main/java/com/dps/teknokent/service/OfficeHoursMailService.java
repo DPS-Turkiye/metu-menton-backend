@@ -21,11 +21,13 @@ import com.dps.teknokent.entity.AppUser;
 import com.dps.teknokent.entity.OfficeHoursCourse;
 import com.dps.teknokent.entity.OfficeHoursMeeting;
 import com.dps.teknokent.entity.OfficeHoursRequest;
+import com.dps.teknokent.entity.OfficeHoursSettings;
 import com.dps.teknokent.entity.OfficeHoursUser;
 import com.dps.teknokent.repository.AppUserRepository;
 import com.dps.teknokent.repository.OfficeHoursCourseRepository;
 import com.dps.teknokent.repository.OfficeHoursMeetingRepository;
 import com.dps.teknokent.repository.OfficeHoursRequestRepository;
+import com.dps.teknokent.repository.OfficeHoursSettingsRepository;
 import com.dps.teknokent.repository.OfficeHoursUserRepository;
 import com.dps.teknokent.util.MeetingSlotTimes;
 import com.dps.teknokent.util.Texts;
@@ -44,7 +46,7 @@ public class OfficeHoursMailService {
 
 	/** A step of a request, who hears about it, and which times the e-mail lists. */
 	public enum Event {
-		NEW_REQUEST("newRequest", true, Times.PREFERRED),
+		NEW_REQUEST("newRequest", true, Times.PREFERRED, Choice.NEW_REQUEST),
 		ACCEPTED("accepted", false, Times.MEETING),
 		DECLINED("declined", false, Times.NONE),
 		MORE_INFO_REQUESTED("moreInfoRequested", false, Times.NONE),
@@ -52,7 +54,7 @@ public class OfficeHoursMailService {
 		REPLIED("replied", true, Times.NONE),
 		SLOT_CHOSEN("slotChosen", true, Times.MEETING),
 		WITHDRAWN("withdrawn", true, Times.NONE),
-		CANCELLED_BY_STUDENT("meetingCancelled", true, Times.MEETING),
+		CANCELLED_BY_STUDENT("meetingCancelled", true, Times.MEETING, Choice.CANCELLATION),
 		CANCELLED_BY_INSTRUCTOR("meetingCancelled", false, Times.MEETING),
 		/** Nobody acted in time (FR-OH-15); the student hears, since the request was theirs. */
 		EXPIRED("expired", false, Times.NONE);
@@ -61,12 +63,26 @@ public class OfficeHoursMailService {
 		final String key;
 		private final boolean toInstructor;
 		private final Times times;
+		private final Choice choice;
 
 		Event(String key, boolean toInstructor, Times times) {
+			this(key, toInstructor, times, Choice.ALWAYS);
+		}
+
+		Event(String key, boolean toInstructor, Times times, Choice choice) {
 			this.key = key;
 			this.toInstructor = toInstructor;
 			this.times = times;
+			this.choice = choice;
 		}
+	}
+
+	/**
+	 * Which of the academician's own switches (FR-OH-28) an e-mail to them follows. Only those two steps can be turned
+	 * off; a student's e-mails and the in-app notification always go.
+	 */
+	private enum Choice {
+		ALWAYS, NEW_REQUEST, CANCELLATION
 	}
 
 	private enum Times {
@@ -80,6 +96,7 @@ public class OfficeHoursMailService {
 	private final OfficeHoursRequestRepository requestRepository;
 	private final OfficeHoursMeetingRepository meetingRepository;
 	private final AppUserRepository appUserRepository;
+	private final OfficeHoursSettingsRepository settingsRepository;
 	private final OfficeHoursInAppNotifications inAppNotifications;
 
 	/**
@@ -101,9 +118,11 @@ public class OfficeHoursMailService {
 		case MEETING -> meetingRepository.findByRequestId(request.getId())
 				.map(meeting -> List.of(meeting.getScheduledAt())).orElse(List.of());
 		};
-		compose(people.get(to), people.get(from), course(request), request.getTopic(), event.key, times, note,
-				event.toInstructor)
-				.ifPresent(mail -> outbox.enqueue(mail.to(), mail.subject(), mail.body()));
+		if (wanted(event, request.getInstructorId())) {
+			compose(people.get(to), people.get(from), course(request), request.getTopic(), event.key, times, note,
+					event.toInstructor)
+					.ifPresent(mail -> outbox.enqueue(mail.to(), mail.subject(), mail.body()));
+		}
 		inAppNotifications.requestChanged(people.get(to), people.get(from), event.key, request.getTopic(),
 				event.toInstructor);
 	}
@@ -144,6 +163,17 @@ public class OfficeHoursMailService {
 			return Delivery.SENT;
 		}
 		return Delivery.FAILED;
+	}
+
+	/** An academician with no settings row yet has never turned anything off. */
+	private boolean wanted(Event event, UUID instructorId) {
+		return switch (event.choice) {
+		case ALWAYS -> true;
+		case NEW_REQUEST -> settingsRepository.findById(instructorId)
+				.map(OfficeHoursSettings::isNewRequestEmails).orElse(true);
+		case CANCELLATION -> settingsRepository.findById(instructorId)
+				.map(OfficeHoursSettings::isCancellationEmails).orElse(true);
+		};
 	}
 
 	private record Mail(String to, String subject, String body) {

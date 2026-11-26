@@ -44,6 +44,11 @@ import com.dps.teknokent.service.OfficeHoursStudentMeService;
 @TestPropertySource(properties = "app.edition=ODTU")
 class OfficeHoursMeControllerTest {
 
+	private static final OfficeHoursProfileResponse.Details NO_DETAILS = new OfficeHoursProfileResponse.Details(null,
+			List.of(), List.of(), List.of(), null);
+	private static final OfficeHoursProfileResponse.Emails BOTH_EMAILS = new OfficeHoursProfileResponse.Emails(true,
+			true);
+
 	private static final UUID ACTOR = UUID.fromString("00000000-0000-0000-0000-00000000d001");
 	private static final UUID REQUEST = UUID.fromString("00000000-0000-0000-0000-00000000d002");
 
@@ -62,7 +67,8 @@ class OfficeHoursMeControllerTest {
 
 	@Test
 	void answersForTheAccountTheFrontendServerNames() throws Exception {
-		when(meService.profile(ACTOR)).thenReturn(new OfficeHoursProfileResponse(true, "A-204", null, null));
+		when(meService.profile(ACTOR))
+				.thenReturn(new OfficeHoursProfileResponse(true, "A-204", null, null, NO_DETAILS, BOTH_EMAILS));
 
 		mockMvc.perform(get("/api/office-hours/me/profile").param("actorId", ACTOR.toString())
 				.with(frontendServer()))
@@ -105,7 +111,8 @@ class OfficeHoursMeControllerTest {
 	@Test
 	void savesTheProfile() throws Exception {
 		when(meService.saveProfile(eq(ACTOR), any()))
-				.thenReturn(new OfficeHoursProfileResponse(true, null, "https://meet.example/x", null));
+				.thenReturn(new OfficeHoursProfileResponse(true, null, "https://meet.example/x", null, NO_DETAILS,
+						BOTH_EMAILS));
 
 		mockMvc.perform(put("/api/office-hours/me/profile").param("actorId", ACTOR.toString())
 				.with(frontendServer())
@@ -114,7 +121,7 @@ class OfficeHoursMeControllerTest {
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.onlineLink").value("https://meet.example/x"));
 		verify(meService).saveProfile(ACTOR,
-				new UpdateOfficeHoursProfileRequest(true, null, "https://meet.example/x", null));
+				new UpdateOfficeHoursProfileRequest(true, null, "https://meet.example/x", null, null, null));
 	}
 
 	@Test

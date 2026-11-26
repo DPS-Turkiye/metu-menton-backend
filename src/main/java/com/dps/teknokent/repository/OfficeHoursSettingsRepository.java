@@ -23,8 +23,8 @@ public interface OfficeHoursSettingsRepository extends JpaRepository<OfficeHours
 	@Modifying
 	@Query(value = """
 			INSERT INTO office_hours_settings (instructor_id, default_meeting_duration_minutes, meeting_buffer_minutes,
-			    listed, updated_at)
-			VALUES (:instructorId, :meetingMinutes, :bufferMinutes, FALSE, :now)
+			    listed, new_request_emails, cancellation_emails, updated_at)
+			VALUES (:instructorId, :meetingMinutes, :bufferMinutes, FALSE, TRUE, TRUE, :now)
 			ON CONFLICT DO NOTHING
 			""", nativeQuery = true)
 	int insertIfAbsent(@Param("instructorId") UUID instructorId, @Param("meetingMinutes") int meetingMinutes,

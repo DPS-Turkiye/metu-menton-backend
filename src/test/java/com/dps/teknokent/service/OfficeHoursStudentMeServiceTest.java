@@ -250,7 +250,7 @@ class OfficeHoursStudentMeServiceTest {
 
 		assertThat(service.academicians(STUDENT_ACCOUNT)).containsExactly(new OfficeHoursAcademicianResponse(
 				ACADEMIC, ACADEMIC_ACCOUNT, "Elif Şahin", "Doç. Dr.", "Bilgisayar Mühendisliği",
-				"Mühendislik Fakültesi", "elif@example.edu", 30));
+				"Mühendislik Fakültesi", "elif@example.edu", 30, null, List.of(), List.of(), List.of(), null));
 	}
 
 	@Test
@@ -269,7 +269,7 @@ class OfficeHoursStudentMeServiceTest {
 
 		assertThat(service.academician(STUDENT_ACCOUNT, ACADEMIC)).isEqualTo(new OfficeHoursAcademicianResponse(
 				ACADEMIC, ACADEMIC_ACCOUNT, "Elif Şahin", "Doç. Dr.", "Bilgisayar Mühendisliği",
-				"Mühendislik Fakültesi", "elif@example.edu", 30));
+				"Mühendislik Fakültesi", "elif@example.edu", 30, null, List.of(), List.of(), List.of(), null));
 	}
 
 	@Test

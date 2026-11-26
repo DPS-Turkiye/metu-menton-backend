@@ -57,6 +57,11 @@ import com.dps.teknokent.repository.OfficeHoursUserRepository;
 @ExtendWith(MockitoExtension.class)
 class OfficeHoursMeServiceTest {
 
+	private static final OfficeHoursProfileResponse.Details NO_DETAILS = new OfficeHoursProfileResponse.Details(null,
+			List.of(), List.of(), List.of(), null);
+	private static final OfficeHoursProfileResponse.Emails BOTH_EMAILS = new OfficeHoursProfileResponse.Emails(true,
+			true);
+
 	private static final UUID ACCOUNT = UUID.fromString("00000000-0000-0000-0000-00000000e001");
 	private static final UUID PERSON = UUID.fromString("00000000-0000-0000-0000-00000000e002");
 	private static final UUID STUDENT_ACCOUNT = UUID.fromString("00000000-0000-0000-0000-00000000e003");
@@ -153,7 +158,7 @@ class OfficeHoursMeServiceTest {
 
 		assertThatThrownBy(() -> service.inbox(ACCOUNT)).isInstanceOf(ResourceNotFoundException.class);
 		assertThatThrownBy(() -> service.saveProfile(ACCOUNT, new UpdateOfficeHoursProfileRequest(true, null, null,
-				null))).isInstanceOf(ResourceNotFoundException.class);
+				null, null, null))).isInstanceOf(ResourceNotFoundException.class);
 		verify(userRepository, never()).insertForAccountIfAbsent(any(), any(), any(), any());
 	}
 
@@ -207,10 +212,11 @@ class OfficeHoursMeServiceTest {
 		when(settingsRepository.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
 		OfficeHoursProfileResponse saved = service.saveProfile(ACCOUNT,
-				new UpdateOfficeHoursProfileRequest(true, "  A-204  ", " ", "elif@example.edu"));
+				new UpdateOfficeHoursProfileRequest(true, "  A-204  ", " ", "elif@example.edu", null, null));
 
 		verify(settingsRepository).insertIfAbsent(PERSON, 45, 15, NOW);
-		assertThat(saved).isEqualTo(new OfficeHoursProfileResponse(true, "A-204", null, "elif@example.edu"));
+		assertThat(saved).isEqualTo(
+				new OfficeHoursProfileResponse(true, "A-204", null, "elif@example.edu", NO_DETAILS, BOTH_EMAILS));
 		ArgumentCaptor<OfficeHoursSettings> settings = ArgumentCaptor.forClass(OfficeHoursSettings.class);
 		verify(settingsRepository).saveAndFlush(settings.capture());
 		assertThat(settings.getValue().getInstructorId()).isEqualTo(PERSON);
@@ -230,10 +236,10 @@ class OfficeHoursMeServiceTest {
 				"ftp://meet.example.com",
 				"https://meet example.com")) {
 			assertThatThrownBy(() -> service.saveProfile(ACCOUNT, new UpdateOfficeHoursProfileRequest(true, null, bad,
-					null))).as(bad).isInstanceOf(InvalidRequestException.class);
+					null, null, null))).as(bad).isInstanceOf(InvalidRequestException.class);
 		}
 		assertThat(service.saveProfile(ACCOUNT, new UpdateOfficeHoursProfileRequest(true, null,
-				"HTTPS://meet.example.com/abc-defg", null)).onlineLink())
+				"HTTPS://meet.example.com/abc-defg", null, null, null)).onlineLink())
 				.isEqualTo("HTTPS://meet.example.com/abc-defg");
 	}
 
