@@ -96,4 +96,15 @@ public interface AppUserRepository extends JpaRepository<AppUser, UUID> {
 	@Modifying
 	@Query("update AppUser u set u.signInsRevokedAt = :at where u.id = :id")
 	int recordSignInsRevokedAt(@Param("id") UUID id, @Param("at") Instant at);
+
+	/** A semester's students in the given states: who moves when it rolls over. */
+	@Query("select u from AppUser u where u.programId = :programId and " + HAS_PERMISSION
+			+ " and u.status in :statuses")
+	List<AppUser> findByProgramIdAndPermissionAndStatusIn(@Param("programId") UUID programId,
+			@Param("role") UserRole role, @Param("statuses") Collection<UserAccountStatus> statuses);
+
+	@Query("select count(u) from AppUser u where u.programId = :programId and " + HAS_PERMISSION
+			+ " and u.status in :statuses")
+	long countByProgramIdAndPermissionAndStatusIn(@Param("programId") UUID programId, @Param("role") UserRole role,
+			@Param("statuses") Collection<UserAccountStatus> statuses);
 }

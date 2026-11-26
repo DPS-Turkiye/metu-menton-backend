@@ -4,6 +4,7 @@ import java.time.Instant;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.EnumSet;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -403,6 +404,68 @@ public class BadgeService {
 				.filter(GATE_BADGES::contains)
 				.map(BadgeCode::grants)
 				.collect(Collectors.toCollection(() -> EnumSet.noneOf(UserRole.class)));
+	}
+
+	/**
+	 * A semester's Akran mentors who carry over to the next one: approved students with a live gate badge there (active
+	 * and not past its expiry), and accepted mentors from before gate badges. Someone whose gate was revoked or ran
+	 * out stays behind, even with an accepted row.
+	 */
+	@Transactional(readOnly = true)
+	public Set<UUID> peerMentorIds(UUID programId) {
+		return carriedMentors(programId, Instant.now()).keySet();
+	}
+
+	/** Each carried mentor with their live gate badge, or {@code null} for an accepted mentor without one. */
+	private Map<UUID, @Nullable UserBadge> carriedMentors(UUID programId, Instant now) {
+		List<UserBadge> gates = awards.findByProgramIdAndBadgeCodeOrderByAwardedAtDesc(programId, GATE);
+		Set<UUID> heldAGate = new HashSet<>();
+		Map<UUID, @Nullable UserBadge> live = new LinkedHashMap<>();
+		for (UserBadge gate : gates) {
+			heldAGate.add(gate.getUserId());
+			boolean active = gate.getStatus() == BadgeStatus.ACTIVE
+					&& (gate.getExpiresAt() == null || gate.getExpiresAt().isAfter(now));
+			if (active) {
+				live.putIfAbsent(gate.getUserId(), gate);
+			}
+		}
+		for (ProgramMentor row : programMentors.findByProgramIdOrderByCreatedAtAsc(programId)) {
+			if (row.getStatus() == ProgramMentorStatus.ACCEPTED && !heldAGate.contains(row.getMentorId())) {
+				live.putIfAbsent(row.getMentorId(), null);
+			}
+		}
+		Set<UUID> approved = users.findAllById(live.keySet()).stream()
+				.filter(account -> account.getStatus() == UserAccountStatus.APPROVED && account.has(UserRole.MENTEE))
+				.map(AppUser::getId)
+				.collect(Collectors.toSet());
+		live.keySet().retainAll(approved);
+		return live;
+	}
+
+	/**
+	 * At a semester roll-over the Akran mentors of {@code from} keep mentoring in {@code to} without retraining: each
+	 * active gate badge is awarded again there, silently and with the same expiry, which also accepts them in the new
+	 * pool; an accepted mentor without one gets an accepted row. The old awards and rows stay as history.
+	 */
+	@Transactional
+	public int carryOverPeerMentors(Program from, Program to, UUID actorId) {
+		Instant now = Instant.now();
+		Map<UUID, @Nullable UserBadge> carried = carriedMentors(from.getId(), now);
+		Map<UUID, AppUser> holders = users.findAllById(carried.keySet()).stream()
+				.collect(Collectors.toMap(AppUser::getId, Function.identity()));
+		carried.forEach((mentorId, gate) -> {
+			AppUser holder = holders.get(mentorId);
+			if (gate == null || holder == null) {
+				acceptMembership(to, mentorId, now);
+			} else if (activeGate(mentorId, to.getId()) == null) {
+				UserBadge copy = award(holder, GATE, to, BadgeSource.RULE, actorId, false);
+				copy.setExpiresAt(gate.getExpiresAt());
+				awards.save(copy);
+			} else {
+				acceptMembership(to, mentorId, now);
+			}
+		});
+		return carried.size();
 	}
 
 	private void acceptMembership(Program program, UUID mentorId, Instant now) {

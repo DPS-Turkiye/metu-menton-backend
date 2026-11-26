@@ -54,6 +54,7 @@ import com.dps.teknokent.service.ProgramCoordinatorService;
 import com.dps.teknokent.service.ProgramLaunchService;
 import com.dps.teknokent.service.ProgramMatchingService;
 import com.dps.teknokent.service.ProgramRosterService;
+import com.dps.teknokent.service.SemesterLaunchService;
 import com.dps.teknokent.service.SyllabusPhaseService;
 
 @WebMvcTest(CoordinatorProgramController.class)
@@ -79,6 +80,8 @@ class CoordinatorProgramControllerTest {
 	private ProgramApprovalService programApprovalService;
 	@MockitoBean
 	private ProgramRosterService programRosterService;
+	@MockitoBean
+	private SemesterLaunchService semesterLaunchService;
 
 	private static final UUID ACTOR_ID = UUID.fromString("00000000-0000-0000-0000-0000000000c1");
 	private static final UUID SIGNED_IN_ID = UUID.fromString("00000000-0000-0000-0000-0000000000c9");
@@ -313,7 +316,7 @@ class CoordinatorProgramControllerTest {
 		mockMvc.perform(post("/api/coordinator/programs/{id}/launch", PROGRAM_ID)
 				.with(authentication(signedIn())))
 				.andExpect(status().isOk());
-		verify(coordinatorProgramService).launch(SIGNED_IN_ID, PROGRAM_ID);
+		verify(semesterLaunchService).launch(SIGNED_IN_ID, PROGRAM_ID);
 
 		mockMvc.perform(post("/api/coordinator/programs")
 				.with(authentication(signedIn()))

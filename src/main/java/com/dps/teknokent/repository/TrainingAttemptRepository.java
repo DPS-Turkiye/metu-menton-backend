@@ -18,4 +18,6 @@ public interface TrainingAttemptRepository extends JpaRepository<TrainingAttempt
 			int version);
 
 	List<TrainingAttempt> findByModuleIdAndVersionAndUserIdIn(UUID moduleId, int version, Collection<UUID> userIds);
+
+	List<TrainingAttempt> findByModuleId(UUID moduleId);
 }
