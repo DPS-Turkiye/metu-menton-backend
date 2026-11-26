@@ -428,6 +428,9 @@ class UserDataEraser {
 		// The Prism score is the person's alone; who decided or set the link is only a reference.
 		update("delete from PrismTrainingReview r where r.userId = :id", "id", id);
 		update("update PrismTrainingReview r set r.decidedBy = null where r.decidedBy = :id", "id", id);
+		// A team change request and its reason are the intern's; who answered it is only a reference.
+		update("delete from IskurTeamChangeRequest r where r.userId = :id", "id", id);
+		update("update IskurTeamChangeRequest r set r.decidedBy = null where r.decidedBy = :id", "id", id);
 		update("update PrismTrainingLink l set l.updatedBy = null where l.updatedBy = :id", "id", id);
 		update("delete from UserBadge b where b.userId = :id", "id", id);
 		update("delete from ProgramAttendance a where a.userId = :id", "id", id);
