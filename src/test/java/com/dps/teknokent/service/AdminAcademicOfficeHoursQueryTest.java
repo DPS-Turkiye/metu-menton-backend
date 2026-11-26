@@ -87,6 +87,9 @@ class AdminAcademicOfficeHoursQueryTest {
 		long ten = countQueries(() -> service.list(admin.getId()));
 
 		assertThat(ten).isEqualTo(one);
+		// The admin, the academicians, the advisee counts, the sign-ins, the office-hours persons with their hours,
+		// and this month's meetings: one each, so a fixed extra query shows up too.
+		assertThat(ten).isEqualTo(6);
 	}
 
 	@Test

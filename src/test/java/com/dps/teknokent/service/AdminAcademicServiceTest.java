@@ -174,6 +174,26 @@ class AdminAcademicServiceTest {
 	}
 
 	@Test
+	void takesIstanbulsMonthEvenWhenUtcIsStillTheYearBefore() {
+		// 22:00 UTC on 31 December is already 1 January 2027 in Istanbul.
+		AdminAcademicService atNewYear = new AdminAcademicService(domainLookupService, people, advising,
+				identities, coordinatorProgramService, officeHoursPeople, meetings,
+				Clock.fixed(Instant.parse("2026-12-31T22:00:00Z"), ZoneOffset.UTC));
+		when(domainLookupService.requireUser(ADMIN)).thenReturn(user(ADMIN, UserRole.ADMIN));
+		UUID aliPerson = UUID.fromString("00000000-0000-0000-0000-0000000000c1");
+		when(people.findByAcademicTrueOrderByFullNameAsc())
+				.thenReturn(List.of(academic("A-1", "Ali Demir", user(ALI, UserRole.MENTOR))));
+		when(advising.countAdviseesByAdvisor()).thenReturn(List.of());
+		when(officeHoursPeople.findHoursByAccountIdIn(any(), any()))
+				.thenReturn(List.of(new Hours(ALI, aliPerson, true)));
+
+		atNewYear.list(ADMIN);
+
+		verify(meetings).countLiveByInstructorBetween(List.of(aliPerson), Instant.parse("2026-12-31T21:00:00Z"),
+				Instant.parse("2027-01-31T21:00:00Z"));
+	}
+
+	@Test
 	void onlyAnAdminListsAcademicians() {
 		UUID coordinator = UUID.randomUUID();
 		when(domainLookupService.requireUser(coordinator)).thenReturn(user(coordinator, UserRole.COORDINATOR));
