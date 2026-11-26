@@ -95,6 +95,8 @@ class SemesterCoordinatorFeaturesIntegrationTest {
 				.andExpect(status().isForbidden());
 		call(get("/api/coordinator/programs/{id}/iskur/workspace", semester.getId()), officeHoursCoordinator)
 				.andExpect(status().isForbidden());
+		call(get("/api/coordinator/programs/{id}/iskur/team-changes", semester.getId()), officeHoursCoordinator)
+				.andExpect(status().isForbidden());
 	}
 
 	@Test
@@ -102,6 +104,8 @@ class SemesterCoordinatorFeaturesIntegrationTest {
 		call(get("/api/coordinator/programs/{id}/peer-categories", semester.getId()), peerCoordinator)
 				.andExpect(status().isOk());
 		call(get("/api/coordinator/programs/{id}/iskur/workspace", semester.getId()), peerCoordinator)
+				.andExpect(status().isOk());
+		call(get("/api/coordinator/programs/{id}/iskur/team-changes", semester.getId()), peerCoordinator)
 				.andExpect(status().isOk());
 
 		call(get("/api/coordinator/programs/{id}/office-hours/appointments", semester.getId()), peerCoordinator)
