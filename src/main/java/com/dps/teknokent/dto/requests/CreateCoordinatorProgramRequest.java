@@ -2,8 +2,10 @@ package com.dps.teknokent.dto.requests;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
+import com.dps.teknokent.domain.ProgramFeature;
 import com.dps.teknokent.domain.ProgramType;
 import com.dps.teknokent.dto.requests.ReplaceProgramPhasesRequest.PhaseInput;
 import com.fasterxml.jackson.annotation.JsonIgnore;
@@ -37,9 +39,21 @@ public record CreateCoordinatorProgramRequest(
 		@Min(1) @Max(365) Integer bottleneckFlagDays,
 		@Size(max = 200) List<@Valid TeamInviteInput> teams,
 		@Size(max = 12) List<@Valid PhaseInput> phases,
-		UUID syllabusDocumentId) {
+		UUID syllabusDocumentId,
+		@Size(max = 3) Set<@NotNull ProgramFeature> features) {
 
 	public static final int MAX_COORDINATORS = 10;
+
+	/** A request without features: a Teknokent program, or an ODTÜ client from before semesters. */
+	public CreateCoordinatorProgramRequest(UUID actorId, ProgramType type, String name, String description,
+			LocalDate startDate, LocalDate endDate, List<UUID> coordinatorIds,
+			List<NewCoordinatorInput> newCoordinators, Integer defaultMentorCapacity, Integer meetingFrequencyDays,
+			Integer communicationGapDays, Integer bottleneckFlagDays, List<TeamInviteInput> teams,
+			List<PhaseInput> phases, UUID syllabusDocumentId) {
+		this(actorId, type, name, description, startDate, endDate, coordinatorIds, newCoordinators,
+				defaultMentorCapacity, meetingFrequencyDays, communicationGapDays, bottleneckFlagDays, teams, phases,
+				syllabusDocumentId, null);
+	}
 
 	/** Ids and invited emails together: at least one coordinator, at most {@value #MAX_COORDINATORS}. */
 	@JsonIgnore

@@ -10,7 +10,9 @@ import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.dps.teknokent.domain.ProgramFeature;
 import com.dps.teknokent.domain.ProgramMentorStatus;
+import com.dps.teknokent.domain.ProgramStatus;
 import com.dps.teknokent.domain.UserRole;
 import com.dps.teknokent.entity.AppUser;
 import com.dps.teknokent.entity.Organization;
@@ -58,6 +60,26 @@ public class MenteeProgramService {
 			return programOf(mentee.getOrganization());
 		}
 		return Optional.ofNullable(mentee.getProgramId());
+	}
+
+	/**
+	 * The features of the semester the person is in: as a student ({@code program_id}), else as an accepted Akran
+	 * mentor of a running program; empty when they are in none. The web shows the ODTÜ screens by it.
+	 */
+	public List<ProgramFeature> semesterFeaturesOf(AppUser user) {
+		UUID programId = user.getProgramId();
+		Optional<Program> program = programId == null ? Optional.empty() : programRepository.findById(programId);
+		if (program.isEmpty()) {
+			List<UUID> mentored = programMentorRepository
+					.findByMentorIdAndStatusOrderByCreatedAtDesc(user.getId(), ProgramMentorStatus.ACCEPTED).stream()
+					.map(ProgramMentor::getProgramId)
+					.toList();
+			program = mentored.isEmpty() ? Optional.empty()
+					: programRepository.findAllById(mentored).stream()
+							.filter(candidate -> candidate.getStatus() == ProgramStatus.ACTIVE)
+							.findFirst();
+		}
+		return program.map(found -> List.copyOf(found.features())).orElse(List.of());
 	}
 
 	/** Whether the mentee's program takes students as teams of one (İŞKUR-style). */

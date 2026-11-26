@@ -12,7 +12,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.dps.teknokent.domain.PeerTopicCategory;
-import com.dps.teknokent.domain.ProgramType;
+import com.dps.teknokent.domain.ProgramFeature;
 import com.dps.teknokent.dto.responses.ProgramPeerCategoriesResponse;
 import com.dps.teknokent.entity.Program;
 import com.dps.teknokent.entity.ProgramPeerCategory;
@@ -78,7 +78,7 @@ public class ProgramPeerCategoryService {
 	}
 
 	private static Program requirePeerProgram(Program program) {
-		if (program.getProgramType() != ProgramType.PEER_MENTORING) {
+		if (!program.has(ProgramFeature.PEER_MENTORING)) {
 			throw new InvalidRequestException(Texts.forRequest("error.peerCategoriesPeerProgramsOnly"));
 		}
 		return program;

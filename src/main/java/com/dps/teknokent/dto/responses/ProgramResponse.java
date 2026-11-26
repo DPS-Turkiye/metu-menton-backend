@@ -4,6 +4,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
+import com.dps.teknokent.domain.ProgramFeature;
 import com.dps.teknokent.domain.ProgramStatus;
 
 public record ProgramResponse(
@@ -14,5 +15,6 @@ public record ProgramResponse(
 		Instant createdAt,
 		ProgramStatus status,
 		List<OrganizationResponse> startups,
-		List<ProgramMentorResponse> mentors) {
+		List<ProgramMentorResponse> mentors,
+		List<ProgramFeature> features) {
 }

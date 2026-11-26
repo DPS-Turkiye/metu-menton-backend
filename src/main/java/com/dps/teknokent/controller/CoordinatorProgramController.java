@@ -27,6 +27,7 @@ import com.dps.teknokent.dto.requests.ExtractSyllabusPhasesRequest;
 import com.dps.teknokent.dto.requests.InviteProgramMentorRequest;
 import com.dps.teknokent.dto.requests.ReplaceProgramPhasesRequest;
 import com.dps.teknokent.dto.requests.SetProgramArchivedRequest;
+import com.dps.teknokent.dto.requests.SetProgramFeaturesRequest;
 import com.dps.teknokent.dto.requests.TeamInviteInput;
 import com.dps.teknokent.dto.requests.UpdateProgramDetailsRequest;
 import com.dps.teknokent.dto.responses.CoordinatorProgramResponse;
@@ -144,6 +145,14 @@ public class CoordinatorProgramController {
 			@PathVariable UUID eventId,
 			@RequestParam(required = false) UUID actorId) {
 		coordinatorProgramService.deleteEvent(CurrentActor.resolve(actorId), id, eventId);
+	}
+
+	/** Switches a semester's features; see CoordinatorProgramService#setFeatures for who may and when. */
+	@PutMapping("/{id}/features")
+	public CoordinatorProgramResponse.Detail setFeatures(
+			@PathVariable UUID id,
+			@Valid @RequestBody SetProgramFeaturesRequest request) {
+		return coordinatorProgramService.setFeatures(CurrentActor.resolve(request.actorId()), id, request.features());
 	}
 
 	@PutMapping("/{id}/archive")

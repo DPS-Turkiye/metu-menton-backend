@@ -20,4 +20,6 @@ public interface PeerMeetingReportRepository extends JpaRepository<PeerMeetingRe
 			Collection<PeerReportStatus> statuses);
 
 	List<PeerMeetingReport> findByStatusInOrderBySubmittedAtAsc(Collection<PeerReportStatus> statuses);
+
+	long countByProgramIdAndStatusIn(UUID programId, Collection<PeerReportStatus> statuses);
 }

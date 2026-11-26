@@ -327,7 +327,8 @@ public class AdminOverviewService {
 				pending,
 				startups,
 				mentors,
-				counts);
+				counts,
+				List.copyOf(program.features()));
 	}
 
 	private static MentorshipRow toMentorship(

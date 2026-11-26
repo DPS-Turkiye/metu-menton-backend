@@ -27,8 +27,8 @@ import com.dps.teknokent.domain.IskurWeekDecision;
 import com.dps.teknokent.domain.IskurWeekStatus;
 import com.dps.teknokent.domain.IskurWorkEntryKind;
 import com.dps.teknokent.domain.NotificationCategory;
+import com.dps.teknokent.domain.ProgramFeature;
 import com.dps.teknokent.domain.ProgramStatus;
-import com.dps.teknokent.domain.ProgramType;
 import com.dps.teknokent.dto.requests.IskurWeekDecisionRequest;
 import com.dps.teknokent.dto.responses.IskurLeaderQueueResponse;
 import com.dps.teknokent.dto.responses.IskurLeaderWeekResponse;
@@ -314,7 +314,7 @@ public class IskurLeaderReviewService {
 
 	private Program requireCoordinated(UUID actorId, UUID programId) {
 		Program program = coordinatorProgramService.requireManagedProgram(actorId, programId);
-		if (program.getProgramType() != ProgramType.PEER_MENTORING) {
+		if (!program.has(ProgramFeature.ISKUR)) {
 			throw new InvalidRequestException(Texts.forRequest("error.iskurPeerProgramsOnly"));
 		}
 		return program;

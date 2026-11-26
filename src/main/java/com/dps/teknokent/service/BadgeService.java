@@ -29,9 +29,9 @@ import com.dps.teknokent.domain.GateBadgeState;
 import com.dps.teknokent.domain.MentorshipStatus;
 import com.dps.teknokent.domain.NotificationCategory;
 import com.dps.teknokent.domain.PermissionSource;
+import com.dps.teknokent.domain.ProgramFeature;
 import com.dps.teknokent.domain.ProgramMentorInvitedBy;
 import com.dps.teknokent.domain.ProgramMentorStatus;
-import com.dps.teknokent.domain.ProgramType;
 import com.dps.teknokent.domain.UserAccountStatus;
 import com.dps.teknokent.domain.UserRole;
 import com.dps.teknokent.dto.responses.BadgeAwardResponse;
@@ -163,7 +163,7 @@ public class BadgeService {
 	@Transactional(readOnly = true)
 	public List<GateBadgeRowResponse> students(UUID actorId, GateBadgeState state) {
 		AdminAccess.requireAdmin(domainLookupService.requireUser(actorId), "error.badgeAdminOnly");
-		Map<UUID, Program> peerPrograms = programs.findByProgramType(ProgramType.PEER_MENTORING).stream()
+		Map<UUID, Program> peerPrograms = programs.findWithFeature(ProgramFeature.PEER_MENTORING).stream()
 				.collect(Collectors.toMap(Program::getId, Function.identity()));
 		List<UserBadge> gateAwards = awards.findByBadgeCodeOrderByAwardedAtDesc(GATE);
 		Map<String, UserBadge> latest = new LinkedHashMap<>();
@@ -314,7 +314,7 @@ public class BadgeService {
 	 */
 	@Transactional
 	public void awardAfterMentorApproval(UUID actorId, Program program, AppUser mentor) {
-		if (program.getProgramType() != ProgramType.PEER_MENTORING
+		if (!program.has(ProgramFeature.PEER_MENTORING)
 				|| activeGate(mentor.getId(), program.getId()) != null) {
 			return;
 		}
@@ -444,7 +444,7 @@ public class BadgeService {
 	/** The program, when it is a peer program the actor coordinates (or the actor is an admin). */
 	Program requirePeerProgram(UUID actorId, UUID programId) {
 		Program program = coordinatorProgramService.requireManagedProgram(actorId, programId);
-		if (program.getProgramType() != ProgramType.PEER_MENTORING) {
+		if (!program.has(ProgramFeature.PEER_MENTORING)) {
 			throw new InvalidRequestException(Texts.forRequest("error.badgeNotPeerProgram"));
 		}
 		return program;

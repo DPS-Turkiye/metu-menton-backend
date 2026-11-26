@@ -12,8 +12,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.dps.teknokent.domain.AppLanguage;
+import com.dps.teknokent.domain.ProgramFeature;
 import com.dps.teknokent.domain.ProgramStatus;
-import com.dps.teknokent.domain.ProgramType;
 import com.dps.teknokent.dto.requests.IskurSupportActivityRequest;
 import com.dps.teknokent.dto.responses.IskurSupportActivitiesResponse;
 import com.dps.teknokent.entity.IskurSupportActivity;
@@ -130,7 +130,7 @@ public class IskurSupportActivityService {
 
 	private Program requireProgram(UUID actorId, UUID programId) {
 		Program program = coordinatorProgramService.requireManagedProgram(actorId, programId);
-		if (program.getProgramType() != ProgramType.PEER_MENTORING) {
+		if (!program.has(ProgramFeature.ISKUR)) {
 			throw new InvalidRequestException(Texts.forRequest("error.iskurPeerProgramsOnly"));
 		}
 		return program;

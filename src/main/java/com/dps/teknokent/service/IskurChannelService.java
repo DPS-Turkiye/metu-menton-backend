@@ -29,7 +29,7 @@ import org.springframework.web.server.ResponseStatusException;
 import com.dps.teknokent.config.RateLimitingConfig;
 import com.dps.teknokent.domain.IskurChannelEventType;
 import com.dps.teknokent.domain.IskurChannelKind;
-import com.dps.teknokent.domain.ProgramType;
+import com.dps.teknokent.domain.ProgramFeature;
 import com.dps.teknokent.domain.UserAccountStatus;
 import com.dps.teknokent.domain.UserRole;
 import com.dps.teknokent.dto.requests.IskurChannelPreferencesRequest;
@@ -370,11 +370,11 @@ public class IskurChannelService {
 			managed = program == null || !(admin || ProgramCoordination.coordinates(program, actor.getId(),
 					programCoordinators)) ? List.of() : List.of(program);
 		} else {
-			managed = admin ? programs.findByProgramType(ProgramType.PEER_MENTORING)
+			managed = admin ? programs.findWithFeature(ProgramFeature.ISKUR)
 					: ProgramCoordination.programsOf(actor.getId(), programs, programCoordinators);
 		}
 		return managed.stream()
-				.filter(program -> program.getProgramType() == ProgramType.PEER_MENTORING)
+				.filter(program -> program.has(ProgramFeature.ISKUR))
 				.map(program -> new StaffScope(program, admin,
 						units.findByProgramIdOrderBySortOrderAscCreatedAtAsc(program.getId()).stream()
 								.collect(Collectors.toMap(IskurUnit::getId, Function.identity())),

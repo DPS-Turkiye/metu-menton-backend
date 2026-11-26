@@ -18,6 +18,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import com.dps.teknokent.domain.ProgramFeature;
 import com.dps.teknokent.domain.ProgramStatus;
 import com.dps.teknokent.domain.ProgramType;
 import com.dps.teknokent.domain.TeamJoinStatus;
@@ -76,11 +77,25 @@ public class ProgramLaunchService {
 	private final AdminCoordinatorService adminCoordinatorService;
 	private final EditionService editionService;
 
+	/** A semester's switches, checked; the other types take none (their features follow from the type). */
+	private static Set<ProgramFeature> featuresOf(CreateCoordinatorProgramRequest request) {
+		if (request.type() != ProgramType.SEMESTER) {
+			return Set.of();
+		}
+		Set<ProgramFeature> features = request.features() == null ? Set.of() : request.features();
+		if (!ProgramFeature.validSet(features)) {
+			throw new InvalidRequestException(Texts.forRequest("error.programFeaturesInvalid"),
+					ProgramFeature.INVALID_SET_CODE);
+		}
+		return features;
+	}
+
 	/** An admin creates every program as a draft (Taslak) with its coordinators; launching is a separate step. */
 	@Transactional
 	public CoordinatorProgramResponse.Detail create(UUID actorId, CreateCoordinatorProgramRequest request) {
 		AppUser actor = AdminAccess.requireAdmin(programService.requireCoordinatorOrAdmin(actorId));
 		editionService.requireProgramType(request.type());
+		Set<ProgramFeature> features = featuresOf(request);
 		if (request.startDate() != null && request.endDate() != null
 				&& request.endDate().isBefore(request.startDate())) {
 			throw new InvalidRequestException("The program cannot end before it starts.");
@@ -98,7 +113,8 @@ public class ProgramLaunchService {
 		program.setCreatedAt(Instant.now());
 		program.setProgramType(request.type());
 		program.setStatus(ProgramStatus.DRAFT);
-		program.setIndividualMentees(request.type() == ProgramType.PEER_MENTORING);
+		program.setFeatures(features);
+		program.setIndividualMentees(program.has(ProgramFeature.PEER_MENTORING));
 		if (request.defaultMentorCapacity() != null) {
 			program.setDefaultMentorCapacity(request.defaultMentorCapacity());
 		}

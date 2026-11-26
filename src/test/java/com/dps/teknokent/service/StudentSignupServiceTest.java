@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -58,7 +59,7 @@ class StudentSignupServiceTest {
 		iskur = program(ProgramStatus.ACTIVE);
 		iskur.setIndividualMentees(true);
 		peerPrograms.add(iskur);
-		when(programs.findByProgramType(ProgramType.PEER_MENTORING)).thenReturn(peerPrograms);
+		when(programs.findByProgramTypeIn(anyCollection())).thenReturn(peerPrograms);
 		when(users.findByFirebaseUid(any())).thenReturn(Optional.empty());
 		when(users.saveAndFlush(any(AppUser.class))).thenAnswer(invocation -> {
 			AppUser user = invocation.getArgument(0);
