@@ -697,6 +697,34 @@ class OfficeHoursBookingServiceTest {
 		verify(requestRepository).saveAndFlush(any());
 	}
 
+	// NOW is 9 November 2026, 09:00 in Turkey, so 9 November 2027 at 09:00 is exactly a year ahead.
+	@Test
+	void aTimeExactlyAYearAheadIsBookableAndOneMinuteLaterIsNot() {
+		enrolled(STUDENT, OfficeHoursRole.STUDENT);
+		enrolled(ACADEMIC, OfficeHoursRole.INSTRUCTOR);
+
+		OfficeHoursRequestResponse response = service.create(STUDENT, COURSE,
+				new CreateOfficeHoursRequest(ACADEMIC, "Soru", null, List.of("2027-11-09T09:00")));
+
+		assertThat(response.preferredSlots()).containsExactly("2027-11-09T09:00");
+		assertThatThrownBy(() -> service.create(STUDENT, COURSE,
+				new CreateOfficeHoursRequest(ACADEMIC, "Soru", null, List.of("2027-11-09T09:01"))))
+				.isInstanceOf(InvalidRequestException.class)
+				.hasMessage("Görüşme saati en fazla bir yıl sonrası için seçilebilir.");
+		verify(requestRepository).saveAndFlush(any());
+	}
+
+	@Test
+	void anAcademicCannotOfferATimeYearsAhead() {
+		OfficeHoursRequest request = existing(OfficeHoursRequestStatus.PENDING);
+
+		assertThatThrownBy(() -> service.decide(request, ACADEMIC, new DecideOfficeHoursRequest(
+				OfficeHoursRequestStatus.COUNTER_PROPOSED, null, null, List.of("9999-12-30T10:00"))))
+				.isInstanceOf(InvalidRequestException.class);
+		assertThat(request.getStatus()).isEqualTo(OfficeHoursRequestStatus.PENDING);
+		verify(requestRepository, never()).saveAndFlush(any());
+	}
+
 	@Test
 	void aTimeThatIsNotADateAndAnHourIsRefused() {
 		enrolled(STUDENT, OfficeHoursRole.STUDENT);

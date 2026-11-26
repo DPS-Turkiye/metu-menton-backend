@@ -66,7 +66,7 @@ import com.dps.teknokent.util.Texts;
  * Office hours booked the way a mentee books a mentor: the student sends a request with a note and up to three
  * times; the academic accepts one of them, declines, asks a question, or offers other times; the student answers
  * a question, takes an offered time, or withdraws. Accepting makes the meeting. Every time must be at least
- * {@link MeetingSlotTimes#MIN_BOOKING_LEAD} away, as for mentors.
+ * {@link MeetingSlotTimes#MIN_BOOKING_LEAD} away, as for mentors, and no more than a year ahead.
  */
 @Service
 public class OfficeHoursBookingService {
@@ -487,9 +487,14 @@ public class OfficeHoursBookingService {
 		if (slots.stream().anyMatch(slot -> MeetingSlotTimes.parseMachineSlot(slot) == null)) {
 			throw new InvalidRequestException("Times must look like 2026-11-24T14:00");
 		}
-		Instant earliest = clock.instant().plus(MeetingSlotTimes.MIN_BOOKING_LEAD);
+		Instant now = clock.instant();
+		Instant earliest = now.plus(MeetingSlotTimes.MIN_BOOKING_LEAD);
 		if (slots.stream().map(MeetingSlotTimes::parseMachineSlot).anyMatch(at -> at.isBefore(earliest))) {
 			throw new InvalidRequestException(Texts.forRequest("error.slotTooSoon"));
+		}
+		Instant latest = MeetingSlotTimes.latestBookable(now);
+		if (slots.stream().map(MeetingSlotTimes::parseMachineSlot).anyMatch(at -> at.isAfter(latest))) {
+			throw new InvalidRequestException(Texts.forRequest("error.slotTooFar"));
 		}
 	}
 
