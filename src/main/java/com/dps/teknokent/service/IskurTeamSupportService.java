@@ -5,6 +5,7 @@ import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
@@ -111,6 +112,15 @@ public class IskurTeamSupportService {
 				.filter(task -> task.getTeamId().equals(leader.getTeamId()))
 				.isEmpty()) {
 			throw new ResourceNotFoundException(Texts.forRequest("error.iskurTaskNotFound"));
+		}
+		// One open request per pair of teams and task: asking again would only notify the same leaders again.
+		boolean alreadyOpen = requests.findForTeam(leader.getTeamId()).stream()
+				.anyMatch(row -> row.getStatus() == IskurTeamSupportStatus.OPEN
+						&& row.getFromTeamId().equals(leader.getTeamId())
+						&& row.getToTeamId().equals(target.getId())
+						&& Objects.equals(row.getTaskId(), taskId));
+		if (alreadyOpen) {
+			throw new ConflictException(Texts.forRequest("error.iskurTeamSupportOpenExists"));
 		}
 		IskurTeamSupportRequest created = new IskurTeamSupportRequest(leader.getProgramId(), leader.getTeamId(),
 				target.getId(), actorId, request.need().strip(), clock.instant());
@@ -219,12 +229,13 @@ public class IskurTeamSupportService {
 		}).toList();
 	}
 
-	/** The asking leader, and the task's assignee when it is someone else. */
+	/** The asking leader, the asking team's leaders now, and the task's assignee. */
 	private void notifyAnswer(IskurTeamSupportRequest request, boolean accept) {
 		Set<UUID> recipients = new LinkedHashSet<>();
 		if (request.getOpenedBy() != null) {
 			recipients.add(request.getOpenedBy());
 		}
+		recipients.addAll(leaderIds(request.getFromTeamId()));
 		if (request.getTaskId() != null) {
 			tasks.findById(request.getTaskId()).map(IskurTask::getAssigneeId).ifPresent(recipients::add);
 		}

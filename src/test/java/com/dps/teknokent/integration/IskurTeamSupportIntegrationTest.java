@@ -190,6 +190,8 @@ class IskurTeamSupportIntegrationTest {
 		open(ayse, digital, theirs.getId(), "Destek").andExpect(status().isNotFound());
 
 		String id = idOf(open(ayse, digital, null, "Destek"));
+		open(ayse, digital, null, "Yine destek").andExpect(status().isConflict());
+		open(ayse, digital, poster.getId(), "Görev için destek").andExpect(status().isOk());
 		answer(deniz, id, "accept", null).andExpect(status().isForbidden());
 		taskSupport(deniz, poster.getId()).andExpect(status().isNotFound());
 	}
