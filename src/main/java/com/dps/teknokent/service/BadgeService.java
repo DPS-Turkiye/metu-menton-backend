@@ -1,6 +1,7 @@
 package com.dps.teknokent.service;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.EnumSet;
@@ -33,6 +34,7 @@ import com.dps.teknokent.domain.PermissionSource;
 import com.dps.teknokent.domain.ProgramFeature;
 import com.dps.teknokent.domain.ProgramMentorInvitedBy;
 import com.dps.teknokent.domain.ProgramMentorStatus;
+import com.dps.teknokent.domain.ProgramType;
 import com.dps.teknokent.domain.UserAccountStatus;
 import com.dps.teknokent.domain.UserRole;
 import com.dps.teknokent.dto.responses.BadgeAwardResponse;
@@ -45,6 +47,7 @@ import com.dps.teknokent.entity.MentorProfile;
 import com.dps.teknokent.entity.PrismTrainingReview;
 import com.dps.teknokent.entity.Program;
 import com.dps.teknokent.entity.ProgramMentor;
+import com.dps.teknokent.entity.ProgramMentorRemoval;
 import com.dps.teknokent.entity.TrainingAttempt;
 import com.dps.teknokent.entity.TrainingProgress;
 import com.dps.teknokent.entity.UserBadge;
@@ -57,6 +60,7 @@ import com.dps.teknokent.repository.MentorCount;
 import com.dps.teknokent.repository.MentorProfileRepository;
 import com.dps.teknokent.repository.MentorshipRepository;
 import com.dps.teknokent.repository.PrismTrainingReviewRepository;
+import com.dps.teknokent.repository.ProgramMentorRemovalRepository;
 import com.dps.teknokent.repository.ProgramMentorRepository;
 import com.dps.teknokent.repository.ProgramRepository;
 import com.dps.teknokent.repository.TrainingAttemptRepository;
@@ -98,6 +102,7 @@ public class BadgeService {
 	private final AppUserRepository users;
 	private final ProgramRepository programs;
 	private final ProgramMentorRepository programMentors;
+	private final ProgramMentorRemovalRepository mentorRemovals;
 	private final CoordinatorProgramService coordinatorProgramService;
 	private final DomainLookupService domainLookupService;
 	private final NotificationService notificationService;
@@ -164,37 +169,49 @@ public class BadgeService {
 	@Transactional(readOnly = true)
 	public List<GateBadgeRowResponse> students(UUID actorId, GateBadgeState state) {
 		AdminAccess.requireAdmin(domainLookupService.requireUser(actorId), "error.badgeAdminOnly");
-		Map<UUID, Program> peerPrograms = programs.findWithFeature(ProgramFeature.PEER_MENTORING).stream()
+		// One row per approved student, in their semester or (programId null) in none; the gate state is their
+		// latest gate award in any semester, because the badge carries over from one semester to the next.
+		Map<UUID, Program> studentPrograms = programs.findByProgramTypeIn(EnumSet.of(ProgramType.SEMESTER,
+				ProgramType.PEER_MENTORING)).stream()
 				.collect(Collectors.toMap(Program::getId, Function.identity()));
-		List<UserBadge> gateAwards = awards.findByBadgeCodeOrderByAwardedAtDesc(GATE);
-		Map<String, UserBadge> latest = new LinkedHashMap<>();
-		gateAwards.forEach(award -> latest.putIfAbsent(award.getUserId() + "|" + award.getProgramId(), award));
-		Map<String, GateBadgeRowResponse> rows = new LinkedHashMap<>();
-		for (Program program : peerPrograms.values()) {
-			for (AppUser student : users.findByProgramIdAndPermissionAndStatusOrderByCreatedAtAsc(program.getId(),
-					UserRole.MENTEE, UserAccountStatus.APPROVED)) {
-				String key = student.getId() + "|" + program.getId();
-				rows.put(key, row(student, program, latest.get(key)));
+		Map<UUID, UserBadge> latest = new LinkedHashMap<>();
+		awards.findByBadgeCodeOrderByAwardedAtDesc(GATE).forEach(award -> latest.putIfAbsent(award.getUserId(), award));
+		List<AppUser> students = users.findByPermissionAndStatusOrderByFullNameAsc(UserRole.MENTEE,
+				UserAccountStatus.APPROVED);
+		Map<UUID, List<AppUser>> byProgram = new LinkedHashMap<>();
+		List<GateBadgeRowResponse> rows = new ArrayList<>();
+		for (AppUser student : students) {
+			Program program = student.getProgramId() == null ? null : studentPrograms.get(student.getProgramId());
+			if (program == null) {
+				rows.add(row(student, null, latest.get(student.getId())));
+			} else {
+				byProgram.computeIfAbsent(program.getId(), id -> new ArrayList<>()).add(student);
 			}
 		}
-		Map<UUID, AppUser> holders = users.findAllById(gateAwards.stream().map(UserBadge::getUserId)
-				.collect(Collectors.toSet())).stream().collect(Collectors.toMap(AppUser::getId, Function.identity()));
-		latest.forEach((key, award) -> {
-			Program program = peerPrograms.get(award.getProgramId());
-			AppUser holder = holders.get(award.getUserId());
-			if (program != null && holder != null) {
-				rows.putIfAbsent(key, row(holder, program, award));
+		// A gate holder who is not one of the approved students (a mentor's own account) shows under the semester of
+		// their latest gate award, as before semesters.
+		Set<UUID> listed = students.stream().map(AppUser::getId).collect(Collectors.toSet());
+		Map<UUID, AppUser> holders = users.findAllById(latest.keySet().stream()
+				.filter(id -> !listed.contains(id))
+				.collect(Collectors.toSet())).stream()
+				.filter(holder -> holder.getStatus() == UserAccountStatus.APPROVED)
+				.collect(Collectors.toMap(AppUser::getId, Function.identity()));
+		holders.values().forEach(holder -> {
+			UserBadge award = latest.get(holder.getId());
+			Program program = award == null || award.getProgramId() == null ? null
+					: studentPrograms.get(award.getProgramId());
+			if (program != null) {
+				byProgram.computeIfAbsent(program.getId(), id -> new ArrayList<>()).add(holder);
 			}
 		});
-		Map<UUID, List<GateBadgeRowResponse>> byProgram = rows.values().stream()
-				.collect(Collectors.groupingBy(GateBadgeRowResponse::programId));
-		return byProgram.entrySet().stream()
-				.flatMap(entry -> {
-					Map<UUID, GateBadgeRowResponse.Training> training = trainingOf(entry.getKey(),
-							entry.getValue().stream().map(GateBadgeRowResponse::userId).toList());
-					return entry.getValue().stream().map(row -> withTraining(row,
-							training.getOrDefault(row.userId(), GateBadgeRowResponse.Training.NONE)));
-				})
+		byProgram.forEach((programId, members) -> {
+			Program program = studentPrograms.get(programId);
+			Map<UUID, GateBadgeRowResponse.Training> training = trainingOf(programId,
+					members.stream().map(AppUser::getId).toList());
+			members.forEach(student -> rows.add(row(student, program, latest.get(student.getId()),
+					training.getOrDefault(student.getId(), GateBadgeRowResponse.Training.NONE), null, null)));
+		});
+		return rows.stream()
 				.filter(row -> state == null || row.state() == state)
 				.sorted((left, right) -> left.fullName().compareToIgnoreCase(right.fullName()))
 				.toList();
@@ -254,34 +271,6 @@ public class BadgeService {
 				.collect(Collectors.toMap(PrismTrainingReview::getUserId,
 						review -> new GateBadgeRowResponse.Prism(review.getCompletedAt(), review.getDecision(),
 								review.getDecidedAt(), review.getScore())));
-	}
-
-	/** Watched, tries and best score on the program's current training version, for those who started it. */
-	private Map<UUID, GateBadgeRowResponse.Training> trainingOf(UUID programId, Collection<UUID> userIds) {
-		if (userIds.isEmpty()) {
-			return Map.of();
-		}
-		return trainingModules.findByProgramId(programId).map(module -> {
-			int version = module.getCurrentVersion();
-			Set<UUID> watched = trainingProgress.findByModuleIdAndVersionAndUserIdIn(module.getId(), version, userIds)
-					.stream().map(TrainingProgress::getUserId).collect(Collectors.toSet());
-			Map<UUID, List<TrainingAttempt>> tries = trainingAttempts
-					.findByModuleIdAndVersionAndUserIdIn(module.getId(), version, userIds).stream()
-					.collect(Collectors.groupingBy(TrainingAttempt::getUserId));
-			Map<UUID, GateBadgeRowResponse.Training> result = new LinkedHashMap<>();
-			for (UUID userId : userIds) {
-				List<TrainingAttempt> own = tries.getOrDefault(userId, List.of());
-				Integer best = own.stream().map(TrainingAttempt::getScore).max(Integer::compare).orElse(null);
-				result.put(userId, new GateBadgeRowResponse.Training(watched.contains(userId), own.size(), best));
-			}
-			return result;
-		}).orElse(Map.of());
-	}
-
-	private static GateBadgeRowResponse withTraining(GateBadgeRowResponse row, GateBadgeRowResponse.Training training) {
-		return new GateBadgeRowResponse(row.userId(), row.fullName(), row.email(), row.programId(),
-				row.programName(), row.state(), row.awardId(), row.source(), row.awardedAt(), row.revokedAt(),
-				row.reason(), training, row.profile(), row.prism());
 	}
 
 	/**
@@ -468,6 +457,53 @@ public class BadgeService {
 		return carried.size();
 	}
 
+	/**
+	 * An admin moved {@code person} out of {@code from} ({@code to} null: out of every semester). If they mentor
+	 * there, they keep mentoring in {@code to} as at a roll-over; in {@code from} their gate badge is revoked and
+	 * their accepted row rejected, both kept as history, with a removal record. True when they were a mentor there.
+	 */
+	@Transactional
+	public boolean movePeerMentor(AppUser person, Program from, @Nullable Program to, UUID actorId) {
+		Instant now = Instant.now();
+		Map<UUID, @Nullable UserBadge> carried = carriedMentors(from.getId(), now);
+		boolean mentor = carried.containsKey(person.getId());
+		if (to != null && mentor) {
+			UserBadge gate = carried.get(person.getId());
+			if (gate != null && activeGate(person.getId(), to.getId()) == null) {
+				UserBadge copy = award(person, GATE, to, BadgeSource.ADMIN, actorId, false);
+				copy.setExpiresAt(gate.getExpiresAt());
+				awards.save(copy);
+			} else {
+				acceptMembership(to, person.getId(), now);
+			}
+		}
+		boolean revoked = false;
+		for (UserBadge gate : awards.findByProgramIdAndBadgeCodeOrderByAwardedAtDesc(from.getId(), GATE)) {
+			if (gate.getUserId().equals(person.getId()) && gate.getStatus() == BadgeStatus.ACTIVE) {
+				gate.setStatus(BadgeStatus.REVOKED);
+				gate.setRevokedAt(now);
+				gate.setRevokedBy(actorId);
+				gate.setReason(Texts.get(person, "badge.programChangeReason"));
+				awards.save(gate);
+				revoked = true;
+			}
+		}
+		if (revoked) {
+			person.withdraw(PermissionSource.BADGE, permissionsStillGranted(person.getId()), now);
+			users.save(person);
+		}
+		programMentors.findByProgramIdAndMentorId(from.getId(), person.getId())
+				.filter(row -> row.getStatus() == ProgramMentorStatus.ACCEPTED)
+				.ifPresent(row -> {
+					row.setStatus(ProgramMentorStatus.REJECTED);
+					row.setDecidedAt(now);
+					programMentors.save(row);
+					mentorRemovals.save(new ProgramMentorRemoval(person.getId(), from.getId(), actorId, now,
+							row.getCreatedAt()));
+				});
+		return mentor;
+	}
+
 	private void acceptMembership(Program program, UUID mentorId, Instant now) {
 		ProgramMentor membership = programMentors.findByProgramIdAndMentorId(program.getId(), mentorId)
 				.orElseGet(() -> {
@@ -581,15 +617,38 @@ public class BadgeService {
 				: programs.findAllById(ids).stream().collect(Collectors.toMap(Program::getId, Program::getName));
 	}
 
-	private static GateBadgeRowResponse row(AppUser person, Program program, @Nullable UserBadge award) {
+	/** Watched, tries and best score on the program's current training version, for those who started it. */
+	private Map<UUID, GateBadgeRowResponse.Training> trainingOf(UUID programId, Collection<UUID> userIds) {
+		if (userIds.isEmpty()) {
+			return Map.of();
+		}
+		return trainingModules.findByProgramId(programId).map(module -> {
+			int version = module.getCurrentVersion();
+			Set<UUID> watched = trainingProgress.findByModuleIdAndVersionAndUserIdIn(module.getId(), version, userIds)
+					.stream().map(TrainingProgress::getUserId).collect(Collectors.toSet());
+			Map<UUID, List<TrainingAttempt>> tries = trainingAttempts
+					.findByModuleIdAndVersionAndUserIdIn(module.getId(), version, userIds).stream()
+					.collect(Collectors.groupingBy(TrainingAttempt::getUserId));
+			Map<UUID, GateBadgeRowResponse.Training> result = new LinkedHashMap<>();
+			for (UUID userId : userIds) {
+				List<TrainingAttempt> own = tries.getOrDefault(userId, List.of());
+				Integer best = own.stream().map(TrainingAttempt::getScore).max(Integer::compare).orElse(null);
+				result.put(userId, new GateBadgeRowResponse.Training(watched.contains(userId), own.size(), best));
+			}
+			return result;
+		}).orElse(Map.of());
+	}
+
+	private static GateBadgeRowResponse row(AppUser person, @Nullable Program program, @Nullable UserBadge award) {
 		return row(person, program, award, GateBadgeRowResponse.Training.NONE, null, null);
 	}
 
-	private static GateBadgeRowResponse row(AppUser person, Program program, @Nullable UserBadge award,
+	private static GateBadgeRowResponse row(AppUser person, @Nullable Program program, @Nullable UserBadge award,
 			GateBadgeRowResponse.Training training, GateBadgeRowResponse.@Nullable Profile profile,
 			GateBadgeRowResponse.@Nullable Prism prism) {
-		return new GateBadgeRowResponse(person.getId(), person.getFullName(), person.getEmail(), program.getId(),
-				program.getName(), GateBadgeState.of(award == null ? null : award.getStatus()),
+		return new GateBadgeRowResponse(person.getId(), person.getFullName(), person.getEmail(),
+				program == null ? null : program.getId(), program == null ? null : program.getName(),
+				GateBadgeState.of(award == null ? null : award.getStatus()),
 				award == null ? null : award.getId(), award == null ? null : award.getSource(),
 				award == null ? null : award.getAwardedAt(), award == null ? null : award.getRevokedAt(),
 				award == null ? null : award.getReason(), training, profile, prism);

@@ -20,8 +20,9 @@ public record GateBadgeRowResponse(
 		UUID userId,
 		String fullName,
 		String email,
-		UUID programId,
-		String programName,
+		/* Null on the admin's student list for a student in no semester. */
+		@Nullable UUID programId,
+		@Nullable String programName,
 		GateBadgeState state,
 		@Nullable UUID awardId,
 		@Nullable BadgeSource source,

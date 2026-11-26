@@ -47,6 +47,7 @@ public enum Edition {
 					"/api/auth/register/student/**",
 					"/api/admin/academics/**",
 					"/api/admin/students/**",
+					"/api/admin/users/*/program",
 					"/api/lti/**",
 					"/api/office-hours/**",
 					"/api/coordinator/programs/*/academics/**",

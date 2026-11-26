@@ -35,7 +35,6 @@ import com.dps.teknokent.domain.BadgeStatus;
 import com.dps.teknokent.domain.GateBadgeState;
 import com.dps.teknokent.domain.NotificationCategory;
 import com.dps.teknokent.domain.PermissionSource;
-import com.dps.teknokent.domain.ProgramFeature;
 import com.dps.teknokent.domain.ProgramMentorInvitedBy;
 import com.dps.teknokent.domain.ProgramMentorStatus;
 import com.dps.teknokent.domain.ProgramType;
@@ -453,9 +452,9 @@ class BadgeServiceTest {
 	void theAdminStudentListCarriesNoRosterProfile() {
 		AppUser admin = user("Arya Admin", UserRole.ADMIN);
 		when(domainLookupService.requireUser(admin.getId())).thenReturn(admin);
-		when(programs.findWithFeature(ProgramFeature.PEER_MENTORING)).thenReturn(List.of(iskur));
-		when(users.findByProgramIdAndPermissionAndStatusOrderByCreatedAtAsc(iskur.getId(), UserRole.MENTEE,
-				UserAccountStatus.APPROVED)).thenReturn(List.of(student));
+		when(programs.findByProgramTypeIn(any())).thenReturn(List.of(iskur));
+		when(users.findByPermissionAndStatusOrderByFullNameAsc(UserRole.MENTEE, UserAccountStatus.APPROVED))
+				.thenReturn(List.of(student));
 
 		assertThat(service.students(admin.getId(), null)).singleElement()
 				.satisfies(row -> assertThat(row.profile()).isNull());
@@ -539,11 +538,11 @@ class BadgeServiceTest {
 	}
 
 	@Test
-	void theAdminsStudentListCoversEveryPeerProgramWithEachPersonsLatestBadgeThere() {
+	void theAdminsStudentListHasEachStudentOnceWithTheirLatestGateBadge() {
 		AppUser admin = user("Arya Admin", UserRole.ADMIN);
 		when(domainLookupService.requireUser(admin.getId())).thenReturn(admin);
 		Program fall = program("İŞKUR 2026 Güz", ProgramType.PEER_MENTORING);
-		when(programs.findWithFeature(ProgramFeature.PEER_MENTORING)).thenReturn(List.of(iskur, fall));
+		when(programs.findByProgramTypeIn(any())).thenReturn(List.of(iskur, fall));
 		AppUser withoutBadge = student(iskur);
 		withoutBadge.setFullName("ali Yeni");
 		AppUser fallStudent = student(fall);
@@ -559,11 +558,9 @@ class BadgeServiceTest {
 				program("Girişim 2026", ProgramType.STARTUP_MENTORING));
 		when(awards.findByBadgeCodeOrderByAwardedAtDesc(BadgeCode.PEER_MENTOR)).thenReturn(List.of(awardedAgain,
 				revokedEarlier, ofTheMentorAccount, ofADeletedAccount, ofAProgramThatIsNoPeerProgram));
-		when(users.findByProgramIdAndPermissionAndStatusOrderByCreatedAtAsc(iskur.getId(), UserRole.MENTEE,
-				UserAccountStatus.APPROVED)).thenReturn(List.of(student, withoutBadge));
-		when(users.findByProgramIdAndPermissionAndStatusOrderByCreatedAtAsc(fall.getId(), UserRole.MENTEE,
-				UserAccountStatus.APPROVED)).thenReturn(List.of(fallStudent));
-		when(users.findAllById(any())).thenReturn(List.of(student, mentorAccount));
+		when(users.findByPermissionAndStatusOrderByFullNameAsc(UserRole.MENTEE, UserAccountStatus.APPROVED))
+				.thenReturn(List.of(student, withoutBadge, fallStudent));
+		when(users.findAllById(any())).thenReturn(List.of(mentorAccount));
 
 		var everyone = service.students(admin.getId(), null);
 
@@ -587,9 +584,9 @@ class BadgeServiceTest {
 	void theAdminsStudentListShowsHowFarEachStudentGotInTheirProgramsTraining() {
 		AppUser admin = user("Arya Admin", UserRole.ADMIN);
 		when(domainLookupService.requireUser(admin.getId())).thenReturn(admin);
-		when(programs.findWithFeature(ProgramFeature.PEER_MENTORING)).thenReturn(List.of(iskur));
-		when(users.findByProgramIdAndPermissionAndStatusOrderByCreatedAtAsc(iskur.getId(), UserRole.MENTEE,
-				UserAccountStatus.APPROVED)).thenReturn(List.of(student));
+		when(programs.findByProgramTypeIn(any())).thenReturn(List.of(iskur));
+		when(users.findByPermissionAndStatusOrderByFullNameAsc(UserRole.MENTEE, UserAccountStatus.APPROVED))
+				.thenReturn(List.of(student));
 		TrainingModule module = new TrainingModule();
 		module.setId(UUID.randomUUID());
 		module.setCurrentVersion(3);

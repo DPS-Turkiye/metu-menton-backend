@@ -23,4 +23,6 @@ public interface PeerDailyReportRepository extends JpaRepository<PeerDailyReport
 	List<PeerDailyReport> findByStatusInOrderBySubmittedAtAsc(Collection<PeerReportStatus> statuses);
 
 	long countByProgramIdAndStatusIn(UUID programId, Collection<PeerReportStatus> statuses);
+
+	long countByProgramIdAndMentorIdAndStatusIn(UUID programId, UUID mentorId, Collection<PeerReportStatus> statuses);
 }

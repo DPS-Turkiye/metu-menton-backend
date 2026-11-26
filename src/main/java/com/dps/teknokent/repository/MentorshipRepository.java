@@ -110,4 +110,9 @@ public interface MentorshipRepository extends JpaRepository<Mentorship, UUID> {
 
 	/** Mentorships of a program in the given states; a semester's open work (ProgramWorkBlockers). */
 	long countByProgramIdAndStatusIn(UUID programId, Collection<MentorshipStatus> statuses);
+
+	long countByProgramIdAndMentorIdAndStatusIn(UUID programId, UUID mentorId, Collection<MentorshipStatus> statuses);
+
+	long countByProgramIdAndOrganizationIdAndStatusIn(UUID programId, UUID organizationId,
+			Collection<MentorshipStatus> statuses);
 }

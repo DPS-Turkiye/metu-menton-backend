@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -15,6 +16,7 @@ import com.dps.teknokent.domain.PeerReportStatus;
 import com.dps.teknokent.domain.ProgramBlocker;
 import com.dps.teknokent.domain.ProgramBlockerKind;
 import com.dps.teknokent.domain.ProgramFeature;
+import com.dps.teknokent.entity.AppUser;
 import com.dps.teknokent.entity.Program;
 import com.dps.teknokent.repository.IskurPlacementRepository;
 import com.dps.teknokent.repository.MentorshipRepository;
@@ -91,6 +93,38 @@ public class ProgramWorkBlockers {
 		if (switchedOff.contains(ProgramFeature.OFFICE_HOURS)) {
 			add(blockers, ProgramBlockerKind.UPCOMING_OFFICE_HOURS_MEETING, ProgramFeature.OFFICE_HOURS,
 					officeHoursMeetings.countUpcomingForStudentsOf(program.getId(), clock.instant()));
+		}
+		return blockers;
+	}
+
+	/**
+	 * What stops {@code person} from leaving {@code program} (an admin moving or removing them): their live
+	 * mentorships and open requests there, as mentor or as mentee, their unsent peer reports, their İŞKUR placement,
+	 * and, in a semester with Office Hours, their upcoming Office Hours meetings. Empty when they may go.
+	 */
+	@Transactional(readOnly = true)
+	public List<ProgramBlocker> forPerson(Program program, AppUser person) {
+		UUID programId = program.getId();
+		UUID personId = person.getId();
+		List<ProgramBlocker> blockers = new ArrayList<>();
+		long live = mentorships.countByProgramIdAndMentorIdAndStatusIn(programId, personId, LIVE_MENTORSHIPS)
+				+ (person.getOrganization() == null ? 0
+						: mentorships.countByProgramIdAndOrganizationIdAndStatusIn(programId,
+								person.getOrganization().getId(), LIVE_MENTORSHIPS));
+		add(blockers, ProgramBlockerKind.ACTIVE_MENTORSHIP, ProgramFeature.PEER_MENTORING, live);
+		add(blockers, ProgramBlockerKind.OPEN_REQUEST, ProgramFeature.PEER_MENTORING,
+				requests.countByProgramIdAndMentorIdAndStatusIn(programId, personId, PeerMentoringService.OPEN)
+						+ requests.countByProgramIdAndRequesterIdAndStatusIn(programId, personId,
+								PeerMentoringService.OPEN));
+		add(blockers, ProgramBlockerKind.UNSENT_REPORT, ProgramFeature.PEER_MENTORING,
+				dailyReports.countByProgramIdAndMentorIdAndStatusIn(programId, personId, UNSENT_REPORTS)
+						+ weeklyReports.countByProgramIdAndMentorIdAndStatusIn(programId, personId, UNSENT_REPORTS)
+						+ meetingReports.countByProgramIdAndMentorIdAndStatusIn(programId, personId, UNSENT_REPORTS));
+		add(blockers, ProgramBlockerKind.ISKUR_PLACEMENT, ProgramFeature.ISKUR,
+				placements.findByProgramIdAndUserId(programId, personId).isPresent() ? 1 : 0);
+		if (program.has(ProgramFeature.OFFICE_HOURS)) {
+			add(blockers, ProgramBlockerKind.UPCOMING_OFFICE_HOURS_MEETING, ProgramFeature.OFFICE_HOURS,
+					officeHoursMeetings.countUpcomingForStudent(personId, clock.instant()));
 		}
 		return blockers;
 	}
