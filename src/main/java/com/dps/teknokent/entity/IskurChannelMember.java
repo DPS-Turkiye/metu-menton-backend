@@ -12,7 +12,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
-/** An intern in a channel, kept in step with their final placement. {@code leftAt} is set while they are out of it. */
+/** An intern in a channel, kept in step with their placement. {@code leftAt} is set while they are out of it. */
 @Entity
 @Table(name = "iskur_channel_member", uniqueConstraints = @UniqueConstraint(name = "uq_iskur_channel_member", columnNames = {
 		"channel_id", "user_id" }))

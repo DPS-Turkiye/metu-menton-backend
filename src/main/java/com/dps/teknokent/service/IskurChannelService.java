@@ -71,7 +71,7 @@ import lombok.RequiredArgsConstructor;
 
 /**
  * The İŞKUR channels (rules frame 322:3413 §4, 5.1, 6.1). Interns reach a channel only as one of its current members,
- * which {@link IskurChannelMembershipService} keeps in step with their final placement. Coordinators reach channels
+ * which {@link IskurChannelMembershipService} keeps in step with their placement. Coordinators reach channels
  * through their program role, checked on every call:
  * <ul>
  * <li>Genel Duyurular: every coordinator of the program and the admin read and post;</li>

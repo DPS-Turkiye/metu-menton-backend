@@ -22,7 +22,6 @@ import org.springframework.transaction.event.TransactionalEventListener;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import com.dps.teknokent.domain.IskurChannelKind;
-import com.dps.teknokent.domain.IskurPlacementStatus;
 import com.dps.teknokent.domain.IskurTeamRole;
 import com.dps.teknokent.domain.ProgramFeature;
 import com.dps.teknokent.entity.IskurChannel;
@@ -40,9 +39,11 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * Keeps the İŞKUR channels in step with the final placements (5.1: "kanallar ekip ataması kesinleşince otomatik
- * açılır; ekip değişince erişim otomatik güncellenir"). Every change rebuilds the whole program's membership from the
- * placements, so it does not matter which field an event carries or in what order events arrive: a finalize, a move,
+ * Keeps the İŞKUR channels in step with the placements. The student handbook (p.04, p.13) wins over Figma 5.1 here:
+ * "kanalların atamayla otomatik açılır; ekip değişirse erişimin de otomatik güncellenir", so the channels open with
+ * the coordinator's provisional placement, not only once it is final. Every change rebuilds the whole program's
+ * membership from the placements, so it does not matter which field an event carries or in what order events arrive: a
+ * finalize, a move,
  * a new leader and a removal all come out right, and running it twice changes nothing.
  */
 @Slf4j
@@ -88,7 +89,7 @@ public class IskurChannelMembershipService {
 	}
 
 	/**
-	 * Opens the channels the final placements need and moves interns in and out of them. The program row is locked
+	 * Opens the channels the placements need and moves interns in and out of them. The program row is locked
 	 * like every placement write, so two syncs never open the same channel twice.
 	 */
 	@Transactional
@@ -145,18 +146,19 @@ public class IskurChannelMembershipService {
 		members.saveAll(changed);
 	}
 
-	/** Rules frame §4: who belongs in which channel, and whether they may write there, from the final placements. */
+	/**
+	 * Rules frame §4: who belongs in which channel, and whether they may write there, from the placements, provisional
+	 * or final.
+	 */
 	private Map<ChannelKey, Map<UUID, Boolean>> wantedMembership(UUID programId) {
-		List<IskurPlacement> finals = placements.findByProgramId(programId).stream()
-				.filter(placement -> placement.getStatus() == IskurPlacementStatus.FINAL)
-				.toList();
+		List<IskurPlacement> placed = placements.findByProgramId(programId);
 		Map<UUID, IskurTeam> teamById = teams.findByProgramIdOrderBySortOrderAscCreatedAtAsc(programId).stream()
 				.collect(Collectors.toMap(IskurTeam::getId, Function.identity()));
-		Map<UUID, IskurPlacement> finalByUser = finals.stream()
+		Map<UUID, IskurPlacement> byUser = placed.stream()
 				.collect(Collectors.toMap(IskurPlacement::getUserId, Function.identity()));
 
 		Map<ChannelKey, Map<UUID, Boolean>> wanted = new LinkedHashMap<>();
-		for (IskurPlacement placement : finals) {
+		for (IskurPlacement placement : placed) {
 			IskurTeam team = teamById.get(placement.getTeamId());
 			if (team == null) {
 				continue;
@@ -165,7 +167,7 @@ public class IskurChannelMembershipService {
 			join(wanted, ChannelKey.announcements(), userId, false);
 			join(wanted, new ChannelKey(IskurChannelKind.UNIT, team.getUnitId(), null), userId, true);
 			join(wanted, new ChannelKey(IskurChannelKind.TEAM, team.getId(), null), userId, true);
-			IskurPlacement leader = placement.getLeaderId() == null ? null : finalByUser.get(placement.getLeaderId());
+			IskurPlacement leader = placement.getLeaderId() == null ? null : byUser.get(placement.getLeaderId());
 			if (placement.getTeamRole() == IskurTeamRole.MEMBER && leader != null
 					&& leader.getTeamRole() == IskurTeamRole.LEADER
 					&& leader.getTeamId().equals(placement.getTeamId())) {
