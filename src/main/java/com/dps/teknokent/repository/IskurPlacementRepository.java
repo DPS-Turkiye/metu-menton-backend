@@ -30,4 +30,6 @@ public interface IskurPlacementRepository extends JpaRepository<IskurPlacement, 
 	@Lock(LockModeType.PESSIMISTIC_WRITE)
 	@Query("select p from IskurPlacement p where p.programId = :programId and p.userId = :userId")
 	Optional<IskurPlacement> findForUpdate(@Param("programId") UUID programId, @Param("userId") UUID userId);
+
+	long countByProgramId(UUID programId);
 }

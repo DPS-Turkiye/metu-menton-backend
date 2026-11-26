@@ -19,4 +19,6 @@ public interface PeerWeeklyReportRepository extends JpaRepository<PeerWeeklyRepo
 			Collection<PeerReportStatus> statuses);
 
 	List<PeerWeeklyReport> findByStatusInOrderBySubmittedAtAsc(Collection<PeerReportStatus> statuses);
+
+	long countByProgramIdAndStatusIn(UUID programId, Collection<PeerReportStatus> statuses);
 }

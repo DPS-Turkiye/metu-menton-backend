@@ -508,7 +508,8 @@ public class ProgramService {
 							program.getCreatedAt(),
 							program.getStatus(),
 							startups,
-							mentors);
+							mentors,
+							List.copyOf(program.features()));
 				})
 				.toList();
 	}

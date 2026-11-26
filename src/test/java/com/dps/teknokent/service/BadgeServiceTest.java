@@ -35,6 +35,7 @@ import com.dps.teknokent.domain.BadgeStatus;
 import com.dps.teknokent.domain.GateBadgeState;
 import com.dps.teknokent.domain.NotificationCategory;
 import com.dps.teknokent.domain.PermissionSource;
+import com.dps.teknokent.domain.ProgramFeature;
 import com.dps.teknokent.domain.ProgramMentorInvitedBy;
 import com.dps.teknokent.domain.ProgramMentorStatus;
 import com.dps.teknokent.domain.ProgramType;
@@ -452,7 +453,7 @@ class BadgeServiceTest {
 	void theAdminStudentListCarriesNoRosterProfile() {
 		AppUser admin = user("Arya Admin", UserRole.ADMIN);
 		when(domainLookupService.requireUser(admin.getId())).thenReturn(admin);
-		when(programs.findByProgramType(ProgramType.PEER_MENTORING)).thenReturn(List.of(iskur));
+		when(programs.findWithFeature(ProgramFeature.PEER_MENTORING)).thenReturn(List.of(iskur));
 		when(users.findByProgramIdAndPermissionAndStatusOrderByCreatedAtAsc(iskur.getId(), UserRole.MENTEE,
 				UserAccountStatus.APPROVED)).thenReturn(List.of(student));
 
@@ -542,7 +543,7 @@ class BadgeServiceTest {
 		AppUser admin = user("Arya Admin", UserRole.ADMIN);
 		when(domainLookupService.requireUser(admin.getId())).thenReturn(admin);
 		Program fall = program("İŞKUR 2026 Güz", ProgramType.PEER_MENTORING);
-		when(programs.findByProgramType(ProgramType.PEER_MENTORING)).thenReturn(List.of(iskur, fall));
+		when(programs.findWithFeature(ProgramFeature.PEER_MENTORING)).thenReturn(List.of(iskur, fall));
 		AppUser withoutBadge = student(iskur);
 		withoutBadge.setFullName("ali Yeni");
 		AppUser fallStudent = student(fall);
@@ -586,7 +587,7 @@ class BadgeServiceTest {
 	void theAdminsStudentListShowsHowFarEachStudentGotInTheirProgramsTraining() {
 		AppUser admin = user("Arya Admin", UserRole.ADMIN);
 		when(domainLookupService.requireUser(admin.getId())).thenReturn(admin);
-		when(programs.findByProgramType(ProgramType.PEER_MENTORING)).thenReturn(List.of(iskur));
+		when(programs.findWithFeature(ProgramFeature.PEER_MENTORING)).thenReturn(List.of(iskur));
 		when(users.findByProgramIdAndPermissionAndStatusOrderByCreatedAtAsc(iskur.getId(), UserRole.MENTEE,
 				UserAccountStatus.APPROVED)).thenReturn(List.of(student));
 		TrainingModule module = new TrainingModule();

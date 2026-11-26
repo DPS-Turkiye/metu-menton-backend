@@ -8,6 +8,7 @@ import java.util.UUID;
 import org.jspecify.annotations.Nullable;
 
 import com.dps.teknokent.domain.DocumentKind;
+import com.dps.teknokent.domain.ProgramFeature;
 import com.dps.teknokent.domain.ProgramLifecycle;
 import com.dps.teknokent.domain.ProgramStatus;
 import com.dps.teknokent.domain.ProgramType;
@@ -38,7 +39,11 @@ public record CoordinatorProgramResponse(
 		List<ProgramPhaseResponse> phases,
 		@Nullable Integer currentWeek,
 		@Nullable Integer totalWeeks,
-		ProgramCountsResponse counts) {
+		ProgramCountsResponse counts,
+		/* What the program runs; empty for a startup mentoring program. */
+		List<ProgramFeature> features,
+		/* The features the caller may open here: all of them for the admin. */
+		List<ProgramFeature> myFeatures) {
 
 	public record Detail(
 			CoordinatorProgramResponse program,

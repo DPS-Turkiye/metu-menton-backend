@@ -14,7 +14,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.dps.teknokent.domain.ProgramType;
+import com.dps.teknokent.domain.ProgramFeature;
 import com.dps.teknokent.dto.responses.AdminAcademicResponse;
 import com.dps.teknokent.entity.AppUser;
 import com.dps.teknokent.entity.AppUserIdentity;
@@ -77,7 +77,7 @@ public class AdminAcademicService {
 	 */
 	public List<AdminAcademicResponse> forProgram(UUID actorId, UUID programId) {
 		Program program = coordinatorProgramService.requireManagedProgram(actorId, programId);
-		if (program.getProgramType() != ProgramType.OFFICE_HOURS) {
+		if (!program.has(ProgramFeature.OFFICE_HOURS)) {
 			throw new InvalidRequestException("Academicians are listed for Office Hours programs only.");
 		}
 		return directory(false).stream().filter(AdminAcademicResponse::active).toList();

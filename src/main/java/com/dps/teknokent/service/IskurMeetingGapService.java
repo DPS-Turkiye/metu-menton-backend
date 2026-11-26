@@ -12,8 +12,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.dps.teknokent.domain.NotificationCategory;
+import com.dps.teknokent.domain.ProgramFeature;
 import com.dps.teknokent.domain.ProgramStatus;
-import com.dps.teknokent.domain.ProgramType;
 import com.dps.teknokent.dto.responses.CoordinatorProgramResponse;
 import com.dps.teknokent.entity.AppUser;
 import com.dps.teknokent.entity.IskurMeetingGapAlert;
@@ -57,7 +57,7 @@ public class IskurMeetingGapService {
 		LocalDate lastMonday = thisMonday.minusDays(7);
 		LocalDate firstMonday = lastMonday.minusDays(7);
 		int reported = 0;
-		for (Program program : programs.findByProgramType(ProgramType.PEER_MENTORING)) {
+		for (Program program : programs.findWithFeature(ProgramFeature.ISKUR)) {
 			if (program.getStatus() != ProgramStatus.ACTIVE || !units.existsByProgramId(program.getId())) {
 				continue;
 			}

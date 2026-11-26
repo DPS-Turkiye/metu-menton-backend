@@ -3,6 +3,7 @@ package com.dps.teknokent.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.startsWith;
@@ -30,7 +31,6 @@ import org.springframework.transaction.PlatformTransactionManager;
 
 import com.dps.teknokent.domain.InstitutionDataSource;
 import com.dps.teknokent.domain.ProgramStatus;
-import com.dps.teknokent.domain.ProgramType;
 import com.dps.teknokent.domain.UserAccountStatus;
 import com.dps.teknokent.domain.UserRole;
 import com.dps.teknokent.dto.responses.InstitutionLoginStartResponse;
@@ -84,7 +84,7 @@ class CasLoginLinkingTest {
 		when(identities.findByProviderAndPersistentId(anyString(), anyString())).thenReturn(Optional.empty());
 		when(people.findByInstitutionAndPersistentId(anyString(), anyString())).thenReturn(Optional.empty());
 		when(people.findFirstByUserIdAndSource(any(), any())).thenReturn(Optional.empty());
-		when(programs.findByProgramType(ProgramType.PEER_MENTORING)).thenReturn(List.of());
+		when(programs.findByProgramTypeIn(anyCollection())).thenReturn(List.of());
 		service = new InstitutionLoginService(providers, redis, users, identities, people,
 				mock(LoginProvisioner.class), new StudentProgramLookup(programs),
 				mock(PlatformTransactionManager.class), JsonMapper.builder().build());
@@ -151,7 +151,7 @@ class CasLoginLinkingTest {
 	@Test
 	void aNewStudentGetsAnAccountInTheOneRunningPeerProgram() {
 		Program peer = runningPeerProgram();
-		when(programs.findByProgramType(ProgramType.PEER_MENTORING)).thenReturn(List.of(peer));
+		when(programs.findByProgramTypeIn(anyCollection())).thenReturn(List.of(peer));
 
 		signInThroughCas("e200001", Map.of("mail", List.of("e200001@metu.edu.tr"), "cn", List.of("Ece Ak"),
 				"eduPersonAffiliation", List.of("student")));
@@ -172,7 +172,7 @@ class CasLoginLinkingTest {
 		assertThat(savedUser().getProgramId()).isNull();
 
 		List<Program> several = List.of(runningPeerProgram(), runningPeerProgram());
-		when(programs.findByProgramType(ProgramType.PEER_MENTORING)).thenReturn(several);
+		when(programs.findByProgramTypeIn(anyCollection())).thenReturn(several);
 		signInThroughCas("e200002", Map.of("mail", List.of("e200002@metu.edu.tr"),
 				"eduPersonAffiliation", List.of("student")));
 		assertThat(savedUser().getProgramId()).isNull();
@@ -181,7 +181,7 @@ class CasLoginLinkingTest {
 	@Test
 	void anAcademicBecomesAnAcademicianAndJoinsNoProgram() {
 		List<Program> one = List.of(runningPeerProgram());
-		when(programs.findByProgramType(ProgramType.PEER_MENTORING)).thenReturn(one);
+		when(programs.findByProgramTypeIn(anyCollection())).thenReturn(one);
 
 		signInThroughCas("akademik1", Map.of("mail", List.of("akademik1@metu.edu.tr"),
 				"eduPersonAffiliation", List.of("faculty")));

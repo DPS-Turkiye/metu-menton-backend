@@ -109,4 +109,16 @@ public interface OfficeHoursMeetingRepository extends JpaRepository<OfficeHoursM
 	}
 
 	List<OfficeHoursMeeting> findByScheduledAtGreaterThanEqualAndScheduledAtLessThan(Instant from, Instant to);
+
+	/**
+	 * Meetings not cancelled and not started yet whose student's account is in the program: the Office Hours work
+	 * a semester's students would stop seeing if the semester switched Office Hours off.
+	 */
+	@Query("""
+			select count(meeting) from OfficeHoursMeeting meeting
+			where meeting.cancelledAt is null and meeting.scheduledAt > :now
+			and meeting.studentId in (
+				select person.id from OfficeHoursUser person where person.appUserId in (
+					select account.id from AppUser account where account.programId = :programId))""")
+	long countUpcomingForStudentsOf(@Param("programId") UUID programId, @Param("now") Instant now);
 }

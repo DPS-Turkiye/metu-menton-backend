@@ -12,6 +12,7 @@ import com.dps.teknokent.domain.BottleneckStatus;
 import com.dps.teknokent.domain.MeetingStatus;
 import com.dps.teknokent.domain.MentorshipRequestStatus;
 import com.dps.teknokent.domain.MentorshipStatus;
+import com.dps.teknokent.domain.ProgramFeature;
 import com.dps.teknokent.domain.ProgramMentorStatus;
 import com.dps.teknokent.domain.ProgramStatus;
 import com.dps.teknokent.domain.ProgramType;
@@ -48,7 +49,9 @@ public record AdminOverviewResponse(
 			List<StartupRow> startups,
 			List<MentorMembershipRow> mentors,
 			/* A peer or Office Hours program's participants; both parts null for a startup program. */
-			ProgramCountsResponse counts) {
+			ProgramCountsResponse counts,
+			/* What the program runs; empty for a startup mentoring program. */
+			List<ProgramFeature> features) {
 	}
 
 	public record StartupRow(

@@ -23,7 +23,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import com.dps.teknokent.domain.IskurChannelKind;
 import com.dps.teknokent.domain.IskurTeamRole;
-import com.dps.teknokent.domain.ProgramType;
+import com.dps.teknokent.domain.ProgramFeature;
 import com.dps.teknokent.entity.IskurChannel;
 import com.dps.teknokent.entity.IskurChannelMember;
 import com.dps.teknokent.entity.IskurPlacement;
@@ -73,7 +73,7 @@ public class IskurChannelMembershipService {
 	 */
 	@EventListener(ApplicationReadyEvent.class)
 	public void reconcileAllOnStartup() {
-		for (Program program : programs.findByProgramType(ProgramType.PEER_MENTORING)) {
+		for (Program program : programs.findWithFeature(ProgramFeature.ISKUR)) {
 			reconcileOnItsOwn(program.getId());
 		}
 	}
