@@ -447,7 +447,9 @@ public class IskurChannelService {
 			String name = switch (channel.getKind()) {
 			case ANNOUNCEMENTS -> Texts.get(actor, "iskur.channel.announcements");
 			case UNIT -> unit == null ? "" : unit.getName();
-			case LEADERS -> Texts.get(actor, "iskur.channel.leaders");
+			// The unit is in the name: a coordinator can see several units' rooms side by side.
+			case LEADERS -> unit == null ? Texts.get(actor, "iskur.channel.leaders")
+					: Texts.get(actor, "iskur.channel.leadersOf", unit.getName());
 			case TEAM -> team == null ? "" : team.getName();
 			case LEADER_DIRECT -> counterpart == null ? "" : counterpart.fullName();
 			};
