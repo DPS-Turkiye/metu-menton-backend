@@ -36,7 +36,8 @@ import jakarta.persistence.EntityManager;
 // The pooled test database: H2 checks the stored_document.kind enum constraint against the session that created
 // it, which the unpooled embedded database has already closed.
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
-@Import({ CoordinatorProgramService.class, DomainLookupService.class, ProgramParticipantCounts.class })
+@Import({ CoordinatorProgramService.class, DomainLookupService.class, ProgramParticipantCounts.class,
+		ProgramWorkBlockers.class })
 class ProgramPhasePersistenceTest {
 
 	@Autowired

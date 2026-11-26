@@ -697,7 +697,7 @@ class InstitutionLoginServiceTest {
 		AppUser user = service.signIn(provider, student("e100001", "ayse@metu.edu.tr"));
 
 		assertThat(user.getProgramId()).isNull();
-		verify(programs, never()).findByProgramType(any());
+		verify(programs, never()).findByProgramTypeIn(any());
 	}
 
 	@Test

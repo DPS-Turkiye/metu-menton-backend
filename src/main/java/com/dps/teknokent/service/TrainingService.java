@@ -21,7 +21,7 @@ import com.dps.teknokent.config.PeerTrainingProperties;
 import com.dps.teknokent.domain.BadgeSource;
 import com.dps.teknokent.domain.BadgeStatus;
 import com.dps.teknokent.domain.NotificationCategory;
-import com.dps.teknokent.domain.ProgramType;
+import com.dps.teknokent.domain.ProgramFeature;
 import com.dps.teknokent.domain.TrainingState;
 import com.dps.teknokent.domain.UserAccountStatus;
 import com.dps.teknokent.domain.UserRole;
@@ -279,7 +279,7 @@ public class TrainingService {
 	private Context context(AppUser student) {
 		Program program = student.getProgramId() == null ? null
 				: programs.findById(student.getProgramId())
-						.filter(found -> found.getProgramType() == ProgramType.PEER_MENTORING)
+						.filter(found -> found.has(ProgramFeature.PEER_MENTORING))
 						.orElse(null);
 		if (!peerTraining.inAppQuiz()) {
 			return prismContext(student, program);

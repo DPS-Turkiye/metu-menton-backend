@@ -178,6 +178,7 @@ class ProgramControllerTest {
 				Instant.parse("2026-09-01T08:00:00Z"),
 				ProgramStatus.ACTIVE,
 				List.of(),
+				List.of(),
 				List.of());
 	}
 }

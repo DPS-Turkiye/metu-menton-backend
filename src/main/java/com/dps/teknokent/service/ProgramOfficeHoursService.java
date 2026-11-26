@@ -32,7 +32,7 @@ import org.springframework.transaction.annotation.Transactional;
 import com.dps.teknokent.domain.OfficeHoursHistoryStep;
 import com.dps.teknokent.domain.OfficeHoursMessageType;
 import com.dps.teknokent.domain.OfficeHoursRequestStatus;
-import com.dps.teknokent.domain.ProgramType;
+import com.dps.teknokent.domain.ProgramFeature;
 import com.dps.teknokent.domain.UserAccountStatus;
 import com.dps.teknokent.dto.requests.ProgramOfficeHoursAppointmentsQuery;
 import com.dps.teknokent.dto.requests.ProgramOfficeHoursStudentsQuery;
@@ -233,7 +233,7 @@ public class ProgramOfficeHoursService {
 			throw new InvalidRequestException("Only an approved coordinator or admin can see appointments.");
 		}
 		Program program = coordinatorProgramService.requireManagedProgram(actorId, programId);
-		if (program.getProgramType() != ProgramType.OFFICE_HOURS) {
+		if (!program.has(ProgramFeature.OFFICE_HOURS)) {
 			throw new InvalidRequestException("Appointments are listed for Office Hours programs only.");
 		}
 	}

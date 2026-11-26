@@ -33,8 +33,8 @@ import com.dps.teknokent.domain.IdentityKind;
 import com.dps.teknokent.domain.IskurDocumentSlot;
 import com.dps.teknokent.domain.PeerDocumentVisibility;
 import com.dps.teknokent.domain.PeerEvidenceType;
+import com.dps.teknokent.domain.ProgramFeature;
 import com.dps.teknokent.domain.ProgramMentorStatus;
-import com.dps.teknokent.domain.ProgramType;
 import com.dps.teknokent.domain.UserRole;
 import com.dps.teknokent.dto.responses.PeerMentorDocumentResponse;
 import com.dps.teknokent.dto.responses.PeerMentorFormDocumentResponse;
@@ -276,7 +276,7 @@ public class PeerMentorDocumentService {
 				.toList();
 		return ids.isEmpty() ? List.of()
 				: programRepository.findAllById(ids).stream()
-						.filter(program -> program.getProgramType() == ProgramType.PEER_MENTORING)
+						.filter(program -> program.has(ProgramFeature.PEER_MENTORING))
 						.toList();
 	}
 

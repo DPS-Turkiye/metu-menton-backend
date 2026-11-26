@@ -18,9 +18,9 @@ import com.dps.teknokent.domain.MeetingStatus;
 import com.dps.teknokent.domain.MentorshipRequestStatus;
 import com.dps.teknokent.domain.PeerReportStatus;
 import com.dps.teknokent.domain.PeerTopicCategory;
+import com.dps.teknokent.domain.ProgramFeature;
 import com.dps.teknokent.domain.ProgramMentorStatus;
 import com.dps.teknokent.domain.ProgramStatus;
-import com.dps.teknokent.domain.ProgramType;
 import com.dps.teknokent.domain.UserRole;
 import com.dps.teknokent.entity.AppUser;
 import com.dps.teknokent.entity.Meeting;
@@ -190,7 +190,7 @@ class PeerReportAccess {
 				.map(ProgramMentor::getProgramId)
 				.toList();
 		List<UUID> running = programRepository.findAllById(ids).stream()
-				.filter(program -> program.getProgramType() == ProgramType.PEER_MENTORING)
+				.filter(program -> program.has(ProgramFeature.PEER_MENTORING))
 				.filter(program -> program.getStatus() == ProgramStatus.ACTIVE)
 				.map(Program::getId)
 				.distinct()

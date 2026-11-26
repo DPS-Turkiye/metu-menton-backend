@@ -17,6 +17,8 @@ class EditionTest {
 		assertThat(Edition.ODTU.allows(ProgramType.PEER_MENTORING)).isTrue();
 		assertThat(Edition.ODTU.allows(ProgramType.OFFICE_HOURS)).isTrue();
 		assertThat(Edition.ODTU.allows(ProgramType.STARTUP_MENTORING)).isFalse();
+		assertThat(Edition.ODTU.allows(ProgramType.SEMESTER)).isTrue();
+		assertThat(Edition.TEKNOKENT.allows(ProgramType.SEMESTER)).isFalse();
 		assertThat(Edition.ODTU.allows(null)).isFalse();
 	}
 
@@ -52,5 +54,14 @@ class EditionTest {
 			assertThat(Edition.TEKNOKENT.allowsAi(feature)).isTrue();
 			assertThat(Edition.ODTU.allowsAi(feature)).isFalse();
 		}
+	}
+
+	@Test
+	void eachEditionCreatesOnlyItsOneProgramType() {
+		assertThat(Edition.TEKNOKENT.creates(ProgramType.STARTUP_MENTORING)).isTrue();
+		assertThat(Edition.TEKNOKENT.creates(ProgramType.SEMESTER)).isFalse();
+		assertThat(Edition.ODTU.creates(ProgramType.SEMESTER)).isTrue();
+		assertThat(Edition.ODTU.creates(ProgramType.PEER_MENTORING)).isFalse();
+		assertThat(Edition.ODTU.creates(ProgramType.OFFICE_HOURS)).isFalse();
 	}
 }

@@ -12,9 +12,9 @@ import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.dps.teknokent.domain.ProgramFeature;
 import com.dps.teknokent.domain.ProgramMentorStatus;
 import com.dps.teknokent.domain.ProgramStatus;
-import com.dps.teknokent.domain.ProgramType;
 import com.dps.teknokent.domain.UserAccountStatus;
 import com.dps.teknokent.domain.UserRole;
 import com.dps.teknokent.entity.AppUser;
@@ -116,7 +116,7 @@ public class IskurInternService {
 			return Optional.empty();
 		}
 		return programs.findAllById(candidates).stream()
-				.filter(program -> program.getProgramType() == ProgramType.PEER_MENTORING)
+				.filter(program -> program.has(ProgramFeature.ISKUR))
 				.filter(program -> program.getStatus() != ProgramStatus.COMPLETED)
 				.filter(program -> units.existsByProgramId(program.getId()))
 				.max(Comparator

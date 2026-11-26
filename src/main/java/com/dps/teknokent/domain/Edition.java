@@ -13,6 +13,7 @@ import java.util.Set;
 public enum Edition {
 
 	TEKNOKENT(
+			ProgramType.STARTUP_MENTORING,
 			EnumSet.of(ProgramType.STARTUP_MENTORING),
 			EnumSet.allOf(AiFeature.class),
 			List.of(
@@ -30,8 +31,10 @@ public enum Edition {
 
 	// No ODTÜ data goes to an AI provider: CV, syllabus and matching stay off by decision, and the meeting report
 	// and task handover too until ODTÜ agrees to an outside provider (and its prerequisites ship).
+	// New programs are semesters; programs of the older ODTÜ types are still served (V139 converts them).
 	ODTU(
-			EnumSet.of(ProgramType.PEER_MENTORING, ProgramType.OFFICE_HOURS),
+			ProgramType.SEMESTER,
+			EnumSet.of(ProgramType.SEMESTER, ProgramType.PEER_MENTORING, ProgramType.OFFICE_HOURS),
 			EnumSet.noneOf(AiFeature.class),
 			List.of(
 					"/api/peer-mentoring/**",
@@ -55,11 +58,14 @@ public enum Edition {
 					"/api/coordinator/programs/*/training/**",
 					"/api/users/*/badges/**"));
 
+	private final ProgramType newProgramType;
 	private final Set<ProgramType> programTypes;
 	private final Set<AiFeature> aiFeatures;
 	private final List<String> ownPaths;
 
-	Edition(Set<ProgramType> programTypes, Set<AiFeature> aiFeatures, List<String> ownPaths) {
+	Edition(ProgramType newProgramType, Set<ProgramType> programTypes, Set<AiFeature> aiFeatures,
+			List<String> ownPaths) {
+		this.newProgramType = newProgramType;
 		this.programTypes = programTypes;
 		this.aiFeatures = aiFeatures;
 		this.ownPaths = ownPaths;
@@ -67,6 +73,11 @@ public enum Edition {
 
 	public boolean allows(ProgramType type) {
 		return type != null && programTypes.contains(type);
+	}
+
+	/** The only type a new program of this edition may have. */
+	public boolean creates(ProgramType type) {
+		return type == newProgramType;
 	}
 
 	/** False for an AI feature this edition never runs, whatever its switch says. */

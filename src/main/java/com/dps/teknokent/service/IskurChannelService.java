@@ -29,7 +29,7 @@ import org.springframework.web.server.ResponseStatusException;
 import com.dps.teknokent.config.RateLimitingConfig;
 import com.dps.teknokent.domain.IskurChannelEventType;
 import com.dps.teknokent.domain.IskurChannelKind;
-import com.dps.teknokent.domain.ProgramType;
+import com.dps.teknokent.domain.ProgramFeature;
 import com.dps.teknokent.domain.UserAccountStatus;
 import com.dps.teknokent.domain.UserRole;
 import com.dps.teknokent.dto.requests.IskurChannelPreferencesRequest;
@@ -75,6 +75,8 @@ import lombok.RequiredArgsConstructor;
  * through their program role, checked on every call:
  * <ul>
  * <li>Genel Duyurular: every coordinator of the program and the admin read and post;</li>
+ * <li>a unit's Liderler odası: its team leaders as members, and the unit's coordinator, who posts there like in the
+ * unit channel (student handbook p.17, the weekly unit meeting); the admin reads it;</li>
  * <li>a unit's channel and its teams' channels: the unit's coordinator ("kendi birimindeki tüm kanalları görür"), or
  * every coordinator of the program while the unit has none. They post in the unit channel and only read the teams';
  * the admin reads both;</li>
@@ -354,6 +356,11 @@ public class IskurChannelService {
 		return reach == null ? null : new Reached(channel, reach);
 	}
 
+	/** A team's channel and a Liderler odası carry their unit's name beside their own. */
+	private static boolean showsUnit(IskurChannelKind kind) {
+		return kind == IskurChannelKind.TEAM || kind == IskurChannelKind.LEADERS;
+	}
+
 	private static ResourceNotFoundException channelNotFound() {
 		return new ResourceNotFoundException(Texts.forRequest("error.iskurChannelNotFound"));
 	}
@@ -370,11 +377,11 @@ public class IskurChannelService {
 			managed = program == null || !(admin || ProgramCoordination.coordinates(program, actor.getId(),
 					programCoordinators)) ? List.of() : List.of(program);
 		} else {
-			managed = admin ? programs.findByProgramType(ProgramType.PEER_MENTORING)
+			managed = admin ? programs.findWithFeature(ProgramFeature.ISKUR)
 					: ProgramCoordination.programsOf(actor.getId(), programs, programCoordinators);
 		}
 		return managed.stream()
-				.filter(program -> program.getProgramType() == ProgramType.PEER_MENTORING)
+				.filter(program -> program.has(ProgramFeature.ISKUR))
 				.map(program -> new StaffScope(program, admin,
 						units.findByProgramIdOrderBySortOrderAscCreatedAtAsc(program.getId()).stream()
 								.collect(Collectors.toMap(IskurUnit::getId, Function.identity())),
@@ -440,17 +447,20 @@ public class IskurChannelService {
 			String name = switch (channel.getKind()) {
 			case ANNOUNCEMENTS -> Texts.get(actor, "iskur.channel.announcements");
 			case UNIT -> unit == null ? "" : unit.getName();
+			// The unit is in the name: a coordinator can see several units' rooms side by side.
+			case LEADERS -> unit == null ? Texts.get(actor, "iskur.channel.leaders")
+					: Texts.get(actor, "iskur.channel.leadersOf", unit.getName());
 			case TEAM -> team == null ? "" : team.getName();
 			case LEADER_DIRECT -> counterpart == null ? "" : counterpart.fullName();
 			};
 			int staffCount = switch (channel.getKind()) {
 			case ANNOUNCEMENTS -> coordinatorCount.computeIfAbsent(program.getId(),
 					id -> ProgramCoordination.coordinatorIds(program, programCoordinators).size());
-			case UNIT -> unit != null && unit.getCoordinatorId() != null ? 1 : 0;
+			case UNIT, LEADERS -> unit != null && unit.getCoordinatorId() != null ? 1 : 0;
 			case TEAM, LEADER_DIRECT -> 0;
 			};
 			rows.add(new IskurChannelResponse(channel.getId(), program.getId(), program.getName(), channel.getKind(),
-					name, channel.getKind() == IskurChannelKind.TEAM && unit != null ? unit.getName() : null,
+					name, showsUnit(channel.getKind()) && unit != null ? unit.getName() : null,
 					counterpart, internCount.getOrDefault(channel.getId(), 0L).intValue() + staffCount,
 					access.canWrite(), access.staff(), unread.getOrDefault(channel.getId(), 0L),
 					!opened.contains(channel.getId()), channel.getLastMessageAt()));
@@ -529,7 +539,7 @@ public class IskurChannelService {
 			}
 			return switch (channel.getKind()) {
 			case ANNOUNCEMENTS -> new Reach(true, true);
-			case UNIT -> {
+			case UNIT, LEADERS -> {
 				IskurUnit unit = units.get(channel.getUnitId());
 				yield unit == null ? null : unitReach(actor, unit, true);
 			}

@@ -24,9 +24,9 @@ import com.dps.teknokent.domain.IskurPlacementStatus;
 import com.dps.teknokent.domain.IskurTeamRole;
 import com.dps.teknokent.domain.IskurWarning;
 import com.dps.teknokent.domain.IskurWeeklySplit;
+import com.dps.teknokent.domain.ProgramFeature;
 import com.dps.teknokent.domain.ProgramMentorStatus;
 import com.dps.teknokent.domain.ProgramStatus;
-import com.dps.teknokent.domain.ProgramType;
 import com.dps.teknokent.dto.requests.IskurFinalizeRequest;
 import com.dps.teknokent.dto.requests.IskurPlacementRequest;
 import com.dps.teknokent.dto.requests.IskurTeamRequest;
@@ -285,7 +285,7 @@ public class IskurWorkspaceService {
 	/** A peer program the caller coordinates (or the admin); others are refused as in {@code requireManagedProgram}. */
 	Program requireProgram(UUID actorId, UUID programId) {
 		Program program = coordinatorProgramService.requireManagedProgram(actorId, programId);
-		if (program.getProgramType() != ProgramType.PEER_MENTORING) {
+		if (!program.has(ProgramFeature.ISKUR)) {
 			throw new InvalidRequestException(Texts.forRequest("error.iskurPeerProgramsOnly"));
 		}
 		return program;

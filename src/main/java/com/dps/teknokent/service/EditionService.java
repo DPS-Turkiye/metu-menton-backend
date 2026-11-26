@@ -31,9 +31,9 @@ public class EditionService {
 		return current().allows(program.getProgramType());
 	}
 
-	/** Programs of the other edition's types can be neither created nor joined here. */
+	/** A new program has this edition's one type: a semester at ODTÜ, startup mentoring at Teknokent. */
 	public void requireProgramType(ProgramType type) {
-		if (!current().allows(type)) {
+		if (!current().creates(type)) {
 			throw new InvalidRequestException("This program type is not available here.");
 		}
 	}

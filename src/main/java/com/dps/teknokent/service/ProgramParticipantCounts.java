@@ -12,7 +12,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import com.dps.teknokent.domain.BadgeStatus;
-import com.dps.teknokent.domain.ProgramType;
+import com.dps.teknokent.domain.ProgramFeature;
 import com.dps.teknokent.domain.UserAccountStatus;
 import com.dps.teknokent.domain.UserRole;
 import com.dps.teknokent.dto.responses.ProgramCountsResponse;
@@ -67,7 +67,8 @@ public class ProgramParticipantCounts {
 	 */
 	public Map<UUID, ProgramCountsResponse> of(Collection<Program> programs) {
 		Map<UUID, ProgramCountsResponse> counts = new HashMap<>();
-		List<UUID> peer = idsOf(programs, ProgramType.PEER_MENTORING);
+		Map<UUID, ProgramCountsResponse.Peer> peerCounts = new HashMap<>();
+		List<UUID> peer = idsOf(programs, ProgramFeature.PEER_MENTORING);
 		if (!peer.isEmpty()) {
 			Map<UUID, Long> students = byProgram(users.countByProgramIdInAndPermissionAndStatus(peer, UserRole.MENTEE,
 					UserAccountStatus.APPROVED));
@@ -78,26 +79,34 @@ public class ProgramParticipantCounts {
 			Map<UUID, Long> active = categories.findByProgramIdIn(peer).stream()
 					.collect(Collectors.groupingBy(ProgramPeerCategory::getProgramId, Collectors.counting()));
 			for (UUID id : peer) {
-				counts.put(id, new ProgramCountsResponse(new ProgramCountsResponse.Peer(
-						count(students, id), count(mentors, id), count(open, id), count(active, id)), null));
+				peerCounts.put(id, new ProgramCountsResponse.Peer(
+						count(students, id), count(mentors, id), count(open, id), count(active, id)));
 			}
 		}
-		List<UUID> officeHours = idsOf(programs, ProgramType.OFFICE_HOURS);
+		List<UUID> officeHours = idsOf(programs, ProgramFeature.OFFICE_HOURS);
+		ProgramCountsResponse.OfficeHours university = null;
 		if (!officeHours.isEmpty()) {
-			// One university-wide set of numbers, the same for every Office Hours program.
-			ProgramCountsResponse university = new ProgramCountsResponse(null, new ProgramCountsResponse.OfficeHours(
+			// One university-wide set of numbers, the same for every program with Office Hours.
+			university = new ProgramCountsResponse.OfficeHours(
 					Math.toIntExact(institutionPeople.countByAcademicTrueAndActiveTrue()),
 					Math.toIntExact(institutionPeople.countActiveAcademicsWithWeeklyHours()),
 					Math.toIntExact(officeHoursRequests.countByStatusInAndCreatedAtGreaterThanEqual(
 							ProgramOfficeHoursService.AWAITING_DECISION,
-							clock.instant().minus(ProgramOfficeHoursService.RECENT_WINDOW)))));
-			officeHours.forEach(id -> counts.put(id, university));
+							clock.instant().minus(ProgramOfficeHoursService.RECENT_WINDOW))));
+		}
+		for (Program program : programs) {
+			ProgramCountsResponse.Peer peerPart = peerCounts.get(program.getId());
+			ProgramCountsResponse.OfficeHours officeHoursPart = officeHours.contains(program.getId()) ? university
+					: null;
+			if (peerPart != null || officeHoursPart != null) {
+				counts.put(program.getId(), new ProgramCountsResponse(peerPart, officeHoursPart));
+			}
 		}
 		return counts;
 	}
 
-	private static List<UUID> idsOf(Collection<Program> programs, ProgramType type) {
-		return programs.stream().filter(program -> program.getProgramType() == type).map(Program::getId).toList();
+	private static List<UUID> idsOf(Collection<Program> programs, ProgramFeature feature) {
+		return programs.stream().filter(program -> program.has(feature)).map(Program::getId).toList();
 	}
 
 	private static Map<UUID, Long> byProgram(List<ProgramTally> tallies) {
