@@ -71,14 +71,16 @@ public class AppUserService {
 
 	@Transactional(readOnly = true)
 	public UserResponse findById(UUID actorId, UUID id) {
-		return UserResponse.fromEntity(personAccessService.requireVisible(actorId, id));
+		AppUser user = personAccessService.requireVisible(actorId, id);
+		return UserResponse.fromEntity(user).withProgramFeatures(menteeProgramService.semesterFeaturesOf(user));
 	}
 
 	/** The signed-in user for /api/auth/me, with whether their program takes individual students. */
 	@Transactional(readOnly = true)
 	public UserResponse findSignedIn(UUID id) {
 		return appUserRepository.findById(id)
-				.map(user -> UserResponse.fromEntity(user, menteeProgramService.inIndividualProgram(user)))
+				.map(user -> UserResponse.fromEntity(user, menteeProgramService.inIndividualProgram(user))
+						.withProgramFeatures(menteeProgramService.semesterFeaturesOf(user)))
 				.orElseThrow(() -> new ResourceNotFoundException("User not found: " + id));
 	}
 

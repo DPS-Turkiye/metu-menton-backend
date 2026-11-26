@@ -30,7 +30,9 @@ import com.dps.teknokent.domain.DocumentKind;
 import com.dps.teknokent.domain.MeetingStatus;
 import com.dps.teknokent.domain.MentorshipRequestStatus;
 import com.dps.teknokent.domain.MentorshipStatus;
+import com.dps.teknokent.domain.ProgramBlocker;
 import com.dps.teknokent.domain.ProgramEventKind;
+import com.dps.teknokent.domain.ProgramFeature;
 import com.dps.teknokent.domain.ProgramMentorInvitedBy;
 import com.dps.teknokent.domain.ProgramMentorStatus;
 import com.dps.teknokent.domain.ProgramStatus;
@@ -59,6 +61,7 @@ import com.dps.teknokent.entity.ProgramMentor;
 import com.dps.teknokent.entity.ProgramPhase;
 import com.dps.teknokent.entity.ProgramStartup;
 import com.dps.teknokent.exception.InvalidRequestException;
+import com.dps.teknokent.exception.ProgramWorkOpenException;
 import com.dps.teknokent.exception.ResourceNotFoundException;
 import com.dps.teknokent.repository.ActionItemRepository;
 import com.dps.teknokent.repository.AppUserRepository;
@@ -87,12 +90,14 @@ import com.dps.teknokent.util.ProgramCoordination;
 import com.dps.teknokent.util.Texts;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * The coordinator's view of their programs: list cards, the overview tab, and the program's schedule
  * (details, phases, events). An admin sees and edits every program; a coordinator only their own.
  */
 @Service
+@Slf4j
 @RequiredArgsConstructor
 public class CoordinatorProgramService {
 
@@ -129,6 +134,7 @@ public class CoordinatorProgramService {
 	private final MentorshipRequestRepository mentorshipRequestRepository;
 	private final TeamChangeRequestRepository teamChangeRequestRepository;
 	private final ProgramParticipantCounts participantCounts;
+	private final ProgramWorkBlockers workBlockers;
 
 	public enum HealthBucket {
 		HEALTHY,
@@ -203,7 +209,7 @@ public class CoordinatorProgramService {
 		if (request.rosterOnly() != null) {
 			program.setRosterOnly(request.rosterOnly());
 		}
-		if (program.getProgramType() == ProgramType.PEER_MENTORING) {
+		if (program.has(ProgramFeature.PEER_MENTORING)) {
 			program.setIndividualMentees(true);
 		} else if (request.individualMentees() != null) {
 			program.setIndividualMentees(request.individualMentees());
@@ -295,6 +301,42 @@ public class CoordinatorProgramService {
 
 	private static boolean isProgramFile(DocumentKind kind) {
 		return kind == DocumentKind.WEEKLY_PROGRAM || kind == DocumentKind.SYLLABUS;
+	}
+
+	/**
+	 * Switches a semester's features to exactly {@code features}. The admin may do it until the semester is
+	 * completed, its coordinators only while it is a draft. Switching on is always allowed; switching off is refused
+	 * while that feature still has open work, which the refusal lists, so nobody's work ends without a word.
+	 */
+	@Transactional
+	public CoordinatorProgramResponse.Detail setFeatures(UUID actorId, UUID programId, Set<ProgramFeature> features) {
+		AppUser actor = requireCoordinatorOrAdmin(actorId);
+		Program program = requireEditableProgram(actorId, programId);
+		if (program.getProgramType() != ProgramType.SEMESTER) {
+			throw new InvalidRequestException(Texts.forRequest("error.programFeaturesSemesterOnly"));
+		}
+		if (!ProgramFeature.validSet(features)) {
+			throw new InvalidRequestException(Texts.forRequest("error.programFeaturesInvalid"),
+					ProgramFeature.INVALID_SET_CODE);
+		}
+		if (!actor.has(UserRole.ADMIN) && program.getStatus() != ProgramStatus.DRAFT) {
+			throw new ResponseStatusException(HttpStatus.FORBIDDEN, Texts.forRequest("error.programFeaturesDraftOnly"));
+		}
+		Set<ProgramFeature> before = program.features();
+		Set<ProgramFeature> switchedOff = EnumSet.noneOf(ProgramFeature.class);
+		switchedOff.addAll(before);
+		switchedOff.removeAll(features);
+		List<ProgramBlocker> blockers = workBlockers.forSwitchOff(program, switchedOff);
+		if (!blockers.isEmpty()) {
+			throw new ProgramWorkOpenException(Texts.forRequest("error.programFeatureWorkOpen"), blockers);
+		}
+		program.setFeatures(features);
+		if (program.has(ProgramFeature.PEER_MENTORING)) {
+			program.setIndividualMentees(true);
+		}
+		programRepository.save(program);
+		log.info("Program {} features changed from {} to {} by {}", programId, before, program.features(), actorId);
+		return detailOf(program);
 	}
 
 	/** Taslak → Aktif. Only an admin launches, and only a program with an approved coordinator to run it. */
@@ -754,7 +796,9 @@ public class CoordinatorProgramService {
 				phases.stream().map(CoordinatorProgramService::toPhase).toList(),
 				ProgramCalendar.currentWeek(program.getStartDate(), program.getEndDate(), snapshot.today()),
 				ProgramCalendar.totalWeeks(program.getStartDate(), program.getEndDate()),
-				counts.getOrDefault(program.getId(), ProgramCountsResponse.NONE));
+				counts.getOrDefault(program.getId(), ProgramCountsResponse.NONE),
+				List.copyOf(program.features()),
+				List.copyOf(program.features()));
 	}
 
 	private CoordinatorProgramResponse.Health health(Program program, Snapshot snapshot) {

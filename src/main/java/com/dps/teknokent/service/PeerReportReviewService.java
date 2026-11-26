@@ -20,7 +20,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import com.dps.teknokent.domain.PeerReportKind;
 import com.dps.teknokent.domain.PeerReportStatus;
-import com.dps.teknokent.domain.ProgramType;
+import com.dps.teknokent.domain.ProgramFeature;
 import com.dps.teknokent.domain.UserAccountStatus;
 import com.dps.teknokent.domain.UserRole;
 import com.dps.teknokent.dto.responses.PeerReviewQueueItemResponse;
@@ -300,7 +300,7 @@ public class PeerReportReviewService {
 		}
 		Set<UUID> programs = ProgramCoordination.programsOf(actor.getId(), programRepository,
 				programCoordinatorRepository).stream()
-				.filter(program -> program.getProgramType() == ProgramType.PEER_MENTORING)
+				.filter(program -> program.has(ProgramFeature.PEER_MENTORING))
 				.map(Program::getId)
 				.collect(Collectors.toSet());
 		if (programs.isEmpty()) {

@@ -469,6 +469,6 @@ class CoordinatorProgramControllerTest {
 				ProgramType.STARTUP_MENTORING,
 				null, null, null,
 				ACTOR_ID, "Elif Demir", 42, 28, 3, 64, 6, 5, 4, null, List.of(), null, null,
-				new ProgramCountsResponse(new ProgramCountsResponse.Peer(312, 38, 14, 2), null));
+				new ProgramCountsResponse(new ProgramCountsResponse.Peer(312, 38, 14, 2), null), List.of(), List.of());
 	}
 }

@@ -16,8 +16,10 @@ import static org.mockito.Mockito.when;
 
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
@@ -33,6 +35,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.web.server.ResponseStatusException;
 
 import com.dps.teknokent.domain.Edition;
+import com.dps.teknokent.domain.ProgramFeature;
 import com.dps.teknokent.domain.ProgramStatus;
 import com.dps.teknokent.domain.ProgramType;
 import com.dps.teknokent.domain.StartupSector;
@@ -143,21 +146,71 @@ class ProgramLaunchServiceTest {
 	}
 
 	@Test
-	void aPeerProgramTakesIndividualStudentsAndKeepsTheDefaultRules() {
+	void aSemesterKeepsItsFeaturesAndTakesIndividualStudentsWithPeerMentoring() {
 		doReturn(Edition.ODTU).when(editionService).current();
 		when(programService.requireCoordinatorOrAdmin(ADMIN)).thenReturn(user(ADMIN, UserRole.ADMIN));
 		when(appUserRepository.findById(ELIF)).thenReturn(Optional.of(user(ELIF, UserRole.COORDINATOR)));
 
-		service.create(ADMIN, new CreateCoordinatorProgramRequest(null, ProgramType.PEER_MENTORING, "ODTÜ Akran",
-				null, null, null, List.of(ELIF), null, null, null, null, null, null, null, null));
+		service.create(ADMIN, semester(EnumSet.of(ProgramFeature.PEER_MENTORING, ProgramFeature.OFFICE_HOURS)));
 
 		ArgumentCaptor<Program> program = ArgumentCaptor.forClass(Program.class);
 		verify(programRepository).save(program.capture());
-		assertThat(program.getValue().getProgramType()).isEqualTo(ProgramType.PEER_MENTORING);
+		assertThat(program.getValue().getProgramType()).isEqualTo(ProgramType.SEMESTER);
+		assertThat(program.getValue().features())
+				.containsExactlyInAnyOrder(ProgramFeature.PEER_MENTORING, ProgramFeature.OFFICE_HOURS);
 		assertThat(program.getValue().isIndividualMentees()).isTrue();
 		assertThat(program.getValue().getDefaultMentorCapacity()).isEqualTo(4);
 		assertThat(program.getValue().getMeetingFrequencyDays()).isEqualTo(14);
 		verify(inviteRepository, never()).save(any());
+	}
+
+	@Test
+	void anOfficeHoursOnlySemesterTakesNoIndividualStudents() {
+		doReturn(Edition.ODTU).when(editionService).current();
+		when(programService.requireCoordinatorOrAdmin(ADMIN)).thenReturn(user(ADMIN, UserRole.ADMIN));
+		when(appUserRepository.findById(ELIF)).thenReturn(Optional.of(user(ELIF, UserRole.COORDINATOR)));
+
+		service.create(ADMIN, semester(EnumSet.of(ProgramFeature.OFFICE_HOURS)));
+
+		ArgumentCaptor<Program> program = ArgumentCaptor.forClass(Program.class);
+		verify(programRepository).save(program.capture());
+		assertThat(program.getValue().features()).containsExactly(ProgramFeature.OFFICE_HOURS);
+		assertThat(program.getValue().isIndividualMentees()).isFalse();
+	}
+
+	@Test
+	void aSemesterNeedsAFeatureAndIskurOnlyNextToPeerMentoring() {
+		doReturn(Edition.ODTU).when(editionService).current();
+		when(programService.requireCoordinatorOrAdmin(ADMIN)).thenReturn(user(ADMIN, UserRole.ADMIN));
+
+		assertThatThrownBy(() -> service.create(ADMIN, semester(Set.of())))
+				.isInstanceOfSatisfying(InvalidRequestException.class,
+						refused -> assertThat(refused.code()).isEqualTo(ProgramFeature.INVALID_SET_CODE));
+		assertThatThrownBy(() -> service.create(ADMIN, semester(EnumSet.of(ProgramFeature.ISKUR))))
+				.isInstanceOfSatisfying(InvalidRequestException.class,
+						refused -> assertThat(refused.code()).isEqualTo(ProgramFeature.INVALID_SET_CODE));
+		assertThatThrownBy(() -> service.create(ADMIN, semester(null)))
+				.isInstanceOf(InvalidRequestException.class);
+		verify(programRepository, never()).save(any());
+	}
+
+	@Test
+	void theOdtuEditionNoLongerCreatesAPeerOrOfficeHoursProgram() {
+		doReturn(Edition.ODTU).when(editionService).current();
+		when(programService.requireCoordinatorOrAdmin(ADMIN)).thenReturn(user(ADMIN, UserRole.ADMIN));
+
+		for (ProgramType old : List.of(ProgramType.PEER_MENTORING, ProgramType.OFFICE_HOURS)) {
+			assertThatThrownBy(() -> service.create(ADMIN, new CreateCoordinatorProgramRequest(null, old,
+					"ODTÜ Akran", null, null, null, List.of(ELIF), null, null, null, null, null, null, null, null)))
+					.isInstanceOf(InvalidRequestException.class)
+					.hasMessageContaining("not available");
+		}
+		verify(programRepository, never()).save(any());
+	}
+
+	private static CreateCoordinatorProgramRequest semester(Set<ProgramFeature> features) {
+		return new CreateCoordinatorProgramRequest(null, ProgramType.SEMESTER, "2026 Güz", null, null, null,
+				List.of(ELIF), null, null, null, null, null, null, null, null, features);
 	}
 
 	@Test

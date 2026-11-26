@@ -8,6 +8,7 @@ import org.jspecify.annotations.Nullable;
 
 import com.dps.teknokent.domain.Edition;
 import com.dps.teknokent.domain.IdentityKind;
+import com.dps.teknokent.domain.ProgramFeature;
 import com.dps.teknokent.domain.UserAccountStatus;
 import com.dps.teknokent.domain.UserRole;
 import com.dps.teknokent.entity.AppUser;
@@ -37,14 +38,16 @@ public record UserResponse(
 		List<UserRole> permissions,
 		List<IdentityKind> institutionKinds,
 		boolean personalOrganization,
-		@JsonInclude(JsonInclude.Include.NON_NULL) @Nullable Edition edition) {
+		@JsonInclude(JsonInclude.Include.NON_NULL) @Nullable Edition edition,
+		/* The features of the semester the person is in; empty when they are in none (and at Teknokent). */
+		List<ProgramFeature> programFeatures) {
 
 	public UserResponse(UUID id, String email, String fullName, UserRole role, UserAccountStatus status,
 			@Nullable UUID organizationId, String organizationName, String jobTitle, Instant signInsRevokedAt,
 			boolean individualMentee, List<UserRole> permissions, List<IdentityKind> institutionKinds,
 			boolean personalOrganization) {
 		this(id, email, fullName, role, status, organizationId, organizationName, jobTitle, signInsRevokedAt,
-				individualMentee, permissions, institutionKinds, personalOrganization, null);
+				individualMentee, permissions, institutionKinds, personalOrganization, null, List.of());
 	}
 
 	public UserResponse(UUID id, String email, String fullName, UserRole role, UserAccountStatus status,
@@ -73,12 +76,20 @@ public record UserResponse(
 	 */
 	public UserResponse withInstitutionKinds(List<IdentityKind> kinds) {
 		return new UserResponse(id, email, fullName, role, status, organizationId, organizationName, jobTitle,
-				signInsRevokedAt, individualMentee, permissions, List.copyOf(kinds), personalOrganization, edition);
+				signInsRevokedAt, individualMentee, permissions, List.copyOf(kinds), personalOrganization, edition,
+				programFeatures);
 	}
 
 	public UserResponse withEdition(Edition value) {
 		return new UserResponse(id, email, fullName, role, status, organizationId, organizationName, jobTitle,
-				signInsRevokedAt, individualMentee, permissions, institutionKinds, personalOrganization, value);
+				signInsRevokedAt, individualMentee, permissions, institutionKinds, personalOrganization, value,
+				programFeatures);
+	}
+
+	public UserResponse withProgramFeatures(List<ProgramFeature> features) {
+		return new UserResponse(id, email, fullName, role, status, organizationId, organizationName, jobTitle,
+				signInsRevokedAt, individualMentee, permissions, institutionKinds, personalOrganization, edition,
+				List.copyOf(features));
 	}
 
 	public static UserResponse fromEntity(AppUser user) {

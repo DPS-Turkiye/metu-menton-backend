@@ -9,6 +9,7 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
 import com.dps.teknokent.domain.Edition;
 import com.dps.teknokent.domain.ProgramType;
+import com.dps.teknokent.entity.Program;
 import com.dps.teknokent.exception.InvalidRequestException;
 
 class EditionServiceTest {
@@ -47,12 +48,31 @@ class EditionServiceTest {
 	}
 
 	@Test
-	void theOdtuEditionTakesOnlyPeerAndOfficeHourPrograms() {
+	void theOdtuEditionCreatesOnlySemesters() {
 		EditionService service = new EditionService("ODTU");
 
-		assertThatCode(() -> service.requireProgramType(ProgramType.PEER_MENTORING)).doesNotThrowAnyException();
-		assertThatCode(() -> service.requireProgramType(ProgramType.OFFICE_HOURS)).doesNotThrowAnyException();
+		assertThatCode(() -> service.requireProgramType(ProgramType.SEMESTER)).doesNotThrowAnyException();
+		assertThatThrownBy(() -> service.requireProgramType(ProgramType.PEER_MENTORING))
+				.isInstanceOf(InvalidRequestException.class);
+		assertThatThrownBy(() -> service.requireProgramType(ProgramType.OFFICE_HOURS))
+				.isInstanceOf(InvalidRequestException.class);
 		assertThatThrownBy(() -> service.requireProgramType(ProgramType.STARTUP_MENTORING))
 				.isInstanceOf(InvalidRequestException.class);
+	}
+
+	@Test
+	void theOdtuEditionStillServesProgramsFromBeforeSemesters() {
+		EditionService service = new EditionService("ODTU");
+
+		assertThat(service.serves(programOf(ProgramType.SEMESTER))).isTrue();
+		assertThat(service.serves(programOf(ProgramType.PEER_MENTORING))).isTrue();
+		assertThat(service.serves(programOf(ProgramType.OFFICE_HOURS))).isTrue();
+		assertThat(service.serves(programOf(ProgramType.STARTUP_MENTORING))).isFalse();
+	}
+
+	private static Program programOf(ProgramType type) {
+		Program program = new Program();
+		program.setProgramType(type);
+		return program;
 	}
 }

@@ -19,9 +19,11 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.IntStream;
 
@@ -41,7 +43,10 @@ import com.dps.teknokent.domain.DocumentKind;
 import com.dps.teknokent.domain.MeetingStatus;
 import com.dps.teknokent.domain.MentorshipRequestStatus;
 import com.dps.teknokent.domain.MentorshipStatus;
+import com.dps.teknokent.domain.ProgramBlocker;
+import com.dps.teknokent.domain.ProgramBlockerKind;
 import com.dps.teknokent.domain.ProgramEventKind;
+import com.dps.teknokent.domain.ProgramFeature;
 import com.dps.teknokent.domain.ProgramLifecycle;
 import com.dps.teknokent.domain.ProgramMentorInvitedBy;
 import com.dps.teknokent.domain.ProgramMentorStatus;
@@ -74,6 +79,7 @@ import com.dps.teknokent.entity.ProgramPhase;
 import com.dps.teknokent.entity.ProgramStartup;
 import com.dps.teknokent.entity.StoredDocument;
 import com.dps.teknokent.exception.InvalidRequestException;
+import com.dps.teknokent.exception.ProgramWorkOpenException;
 import com.dps.teknokent.exception.ResourceNotFoundException;
 import com.dps.teknokent.repository.ActionItemRepository;
 import com.dps.teknokent.repository.AppUserRepository;
@@ -137,6 +143,8 @@ class CoordinatorProgramServiceTest {
 	private TeamChangeRequestRepository teamChangeRequestRepository;
 	@Mock
 	private ProgramParticipantCounts participantCounts;
+	@Mock
+	private ProgramWorkBlockers workBlockers;
 	@InjectMocks
 	private CoordinatorProgramService service;
 
@@ -457,6 +465,66 @@ class CoordinatorProgramServiceTest {
 				.isInstanceOf(InvalidRequestException.class)
 				.hasMessageContaining("Assign a coordinator");
 		assertThat(program.getStatus()).isEqualTo(ProgramStatus.DRAFT);
+	}
+
+	@Test
+	void aCoordinatorChangesASemestersFeaturesOnlyWhileItIsADraft() {
+		when(domainLookupService.requireUser(COORDINATOR_ID)).thenReturn(user(COORDINATOR_ID, UserRole.COORDINATOR));
+		Program semester = semester(COORDINATOR_ID, ProgramStatus.ACTIVE);
+		when(programRepository.findById(PROGRAM_ID)).thenReturn(Optional.of(semester));
+
+		assertThatThrownBy(() -> service.setFeatures(COORDINATOR_ID, PROGRAM_ID,
+				EnumSet.of(ProgramFeature.PEER_MENTORING)))
+				.isInstanceOfSatisfying(ResponseStatusException.class,
+						refused -> assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN));
+		assertThat(semester.features()).containsExactlyInAnyOrder(ProgramFeature.PEER_MENTORING,
+				ProgramFeature.ISKUR, ProgramFeature.OFFICE_HOURS);
+		verify(programRepository, never()).save(any());
+	}
+
+	@Test
+	void switchingAFeatureOffWithOpenWorkIsRefusedWithTheBlockersAndChangesNothing() {
+		when(domainLookupService.requireUser(ADMIN_ID)).thenReturn(user(ADMIN_ID, UserRole.ADMIN));
+		Program semester = semester(COORDINATOR_ID, ProgramStatus.ACTIVE);
+		when(programRepository.findById(PROGRAM_ID)).thenReturn(Optional.of(semester));
+		List<ProgramBlocker> open = List.of(
+				new ProgramBlocker(ProgramBlockerKind.ISKUR_PLACEMENT, ProgramFeature.ISKUR, 3));
+		when(workBlockers.forSwitchOff(semester, EnumSet.of(ProgramFeature.ISKUR))).thenReturn(open);
+
+		assertThatThrownBy(() -> service.setFeatures(ADMIN_ID, PROGRAM_ID,
+				EnumSet.of(ProgramFeature.PEER_MENTORING, ProgramFeature.OFFICE_HOURS)))
+				.isInstanceOfSatisfying(ProgramWorkOpenException.class, refused -> {
+					assertThat(refused.code()).isEqualTo(ProgramWorkOpenException.CODE);
+					assertThat(refused.blockers()).isEqualTo(open);
+				});
+		assertThat(semester.has(ProgramFeature.ISKUR)).isTrue();
+		verify(programRepository, never()).save(any());
+	}
+
+	@Test
+	void featuresAreAValidSetOnASemesterThatIsNotArchived() {
+		when(domainLookupService.requireUser(ADMIN_ID)).thenReturn(user(ADMIN_ID, UserRole.ADMIN));
+		Program semester = semester(COORDINATOR_ID, ProgramStatus.ACTIVE);
+		when(programRepository.findById(PROGRAM_ID)).thenReturn(Optional.of(semester));
+
+		assertThatThrownBy(() -> service.setFeatures(ADMIN_ID, PROGRAM_ID, EnumSet.of(ProgramFeature.ISKUR)))
+				.isInstanceOfSatisfying(InvalidRequestException.class,
+						refused -> assertThat(refused.code()).isEqualTo(ProgramFeature.INVALID_SET_CODE));
+		assertThatThrownBy(() -> service.setFeatures(ADMIN_ID, PROGRAM_ID, Set.of()))
+				.isInstanceOf(InvalidRequestException.class);
+
+		semester.setStatus(ProgramStatus.COMPLETED);
+		assertThatThrownBy(() -> service.setFeatures(ADMIN_ID, PROGRAM_ID,
+				EnumSet.of(ProgramFeature.OFFICE_HOURS)))
+				.isInstanceOf(InvalidRequestException.class)
+				.hasMessageContaining("archived");
+
+		Program startup = program(COORDINATOR_ID);
+		when(programRepository.findById(PROGRAM_ID)).thenReturn(Optional.of(startup));
+		assertThatThrownBy(() -> service.setFeatures(ADMIN_ID, PROGRAM_ID,
+				EnumSet.of(ProgramFeature.OFFICE_HOURS)))
+				.isInstanceOf(InvalidRequestException.class);
+		verify(programRepository, never()).save(any());
 	}
 
 	@Test
@@ -1397,6 +1465,14 @@ class CoordinatorProgramServiceTest {
 		when(actionItemRepository.findByOrganizationIdInAndStatusNotInAndDueDateBefore(
 				anyCollection(), anyCollection(), any()))
 				.thenReturn(overdue);
+	}
+
+	private Program semester(UUID coordinatorId, ProgramStatus status) {
+		Program semester = program(coordinatorId);
+		semester.setProgramType(ProgramType.SEMESTER);
+		semester.setStatus(status);
+		semester.setFeatures(EnumSet.allOf(ProgramFeature.class));
+		return semester;
 	}
 
 	private Program program(UUID coordinatorId) {

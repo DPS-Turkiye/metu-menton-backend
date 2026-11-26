@@ -2,8 +2,11 @@ package com.dps.teknokent.entity;
 
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.EnumSet;
+import java.util.Set;
 import java.util.UUID;
 
+import com.dps.teknokent.domain.ProgramFeature;
 import com.dps.teknokent.domain.ProgramStatus;
 import com.dps.teknokent.domain.ProgramType;
 
@@ -83,4 +86,48 @@ public class Program {
 	private boolean individualMentees;
 	@Column(name = "syllabus_document_id")
 	private UUID syllabusDocumentId;
+
+	/** The feature switches of a {@link ProgramType#SEMESTER}; the older types ignore them (see {@link #features}). */
+	@Column(name = "peer_mentoring_enabled", nullable = false)
+	private boolean peerMentoringEnabled;
+	@Column(name = "office_hours_enabled", nullable = false)
+	private boolean officeHoursEnabled;
+	@Column(name = "iskur_enabled", nullable = false)
+	private boolean iskurEnabled;
+
+	/**
+	 * What this program runs. A semester has its switches; the single-purpose types keep what they always ran, so a
+	 * peer mentoring program still has İŞKUR and a startup mentoring program has none of these.
+	 */
+	public Set<ProgramFeature> features() {
+		return switch (programType) {
+		case SEMESTER -> {
+			Set<ProgramFeature> on = EnumSet.noneOf(ProgramFeature.class);
+			if (peerMentoringEnabled) {
+				on.add(ProgramFeature.PEER_MENTORING);
+			}
+			if (officeHoursEnabled) {
+				on.add(ProgramFeature.OFFICE_HOURS);
+			}
+			if (iskurEnabled) {
+				on.add(ProgramFeature.ISKUR);
+			}
+			yield on;
+		}
+		case PEER_MENTORING -> EnumSet.of(ProgramFeature.PEER_MENTORING, ProgramFeature.ISKUR);
+		case OFFICE_HOURS -> EnumSet.of(ProgramFeature.OFFICE_HOURS);
+		case STARTUP_MENTORING -> EnumSet.noneOf(ProgramFeature.class);
+		};
+	}
+
+	public boolean has(ProgramFeature feature) {
+		return features().contains(feature);
+	}
+
+	/** Sets a semester's switches; the caller has checked the set with {@link ProgramFeature#validSet}. */
+	public void setFeatures(Set<ProgramFeature> features) {
+		peerMentoringEnabled = features.contains(ProgramFeature.PEER_MENTORING);
+		officeHoursEnabled = features.contains(ProgramFeature.OFFICE_HOURS);
+		iskurEnabled = features.contains(ProgramFeature.ISKUR);
+	}
 }

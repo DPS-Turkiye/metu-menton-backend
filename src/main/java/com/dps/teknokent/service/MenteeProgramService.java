@@ -1,16 +1,21 @@
 package com.dps.teknokent.service;
 
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.dps.teknokent.domain.ProgramFeature;
 import com.dps.teknokent.domain.ProgramMentorStatus;
+import com.dps.teknokent.domain.ProgramStatus;
 import com.dps.teknokent.domain.UserRole;
 import com.dps.teknokent.entity.AppUser;
 import com.dps.teknokent.entity.Organization;
@@ -58,6 +63,31 @@ public class MenteeProgramService {
 			return programOf(mentee.getOrganization());
 		}
 		return Optional.ofNullable(mentee.getProgramId());
+	}
+
+	/**
+	 * The features of the running semester the person is in: as a student ({@code program_id}), else as an accepted
+	 * Akran mentor of a running program; empty when they are in none. The web shows the ODTÜ screens by it.
+	 */
+	public List<ProgramFeature> semesterFeaturesOf(AppUser user) {
+		UUID programId = user.getProgramId();
+		// A completed semester's features are no longer anyone's to see; a draft's are not yet.
+		Optional<Program> program = programId == null ? Optional.empty()
+				: programRepository.findById(programId)
+						.filter(candidate -> candidate.getStatus() == ProgramStatus.ACTIVE);
+		if (program.isEmpty()) {
+			// The newest accepted row first, so a mentor in two running programs always gets the same one.
+			List<UUID> mentored = programMentorRepository
+					.findByMentorIdAndStatusOrderByCreatedAtDesc(user.getId(), ProgramMentorStatus.ACCEPTED).stream()
+					.map(ProgramMentor::getProgramId)
+					.toList();
+			Map<UUID, Program> running = mentored.isEmpty() ? Map.of()
+					: programRepository.findAllById(mentored).stream()
+							.filter(candidate -> candidate.getStatus() == ProgramStatus.ACTIVE)
+							.collect(Collectors.toMap(Program::getId, Function.identity()));
+			program = mentored.stream().map(running::get).filter(Objects::nonNull).findFirst();
+		}
+		return program.map(found -> List.copyOf(found.features())).orElse(List.of());
 	}
 
 	/** Whether the mentee's program takes students as teams of one (İŞKUR-style). */

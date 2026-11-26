@@ -2,6 +2,7 @@ package com.dps.teknokent.exception;
 
 import java.time.Instant;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import org.jspecify.annotations.Nullable;
@@ -56,7 +57,8 @@ public class GlobalExceptionHandler {
 				exception.getMessage(),
 				RequestPaths.redacted(request.getRequestURI()),
 				Map.of(),
-				exception.code());
+				exception.code(),
+				exception instanceof ProgramWorkOpenException open ? open.blockers() : List.of());
 	}
 
 	/**

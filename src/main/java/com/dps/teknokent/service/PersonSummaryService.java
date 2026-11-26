@@ -2,7 +2,6 @@ package com.dps.teknokent.service;
 
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -17,6 +16,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.dps.teknokent.domain.PersonProgramRelation;
+import com.dps.teknokent.domain.ProgramFeature;
 import com.dps.teknokent.domain.ProgramMentorInvitedBy;
 import com.dps.teknokent.domain.ProgramMentorStatus;
 import com.dps.teknokent.domain.ProgramType;
@@ -48,10 +48,6 @@ import lombok.RequiredArgsConstructor;
 @Service
 @RequiredArgsConstructor
 public class PersonSummaryService {
-
-	/** The programs with mentors and mentees; office hours have neither. */
-	private static final Set<ProgramType> MENTORING = EnumSet.of(ProgramType.STARTUP_MENTORING,
-			ProgramType.PEER_MENTORING);
 
 	private final DomainLookupService domainLookupService;
 	private final MentorProfileService mentorProfileService;
@@ -90,7 +86,9 @@ public class PersonSummaryService {
 		Set<UUID> ids = new LinkedHashSet<>(pools.keySet());
 		ids.addAll(menteeAccess);
 		List<Program> programs = programRepository.findAllById(ids).stream()
-				.filter(program -> MENTORING.contains(program.getProgramType()))
+				// The programs with mentors and mentees; office hours have neither.
+				.filter(program -> program.getProgramType() == ProgramType.STARTUP_MENTORING
+						|| program.has(ProgramFeature.PEER_MENTORING))
 				.filter(program -> admin
 						|| ProgramCoordination.coordinates(program, actorId, programCoordinatorRepository))
 				.toList();
