@@ -31,6 +31,14 @@ public final class MeetingSlotTimes {
 	private MeetingSlotTimes() {
 	}
 
+	/**
+	 * The last moment an office-hours time may be asked for or offered: a year from {@code now} on Istanbul's
+	 * calendar. Without it a time typed by hand could be any year at all.
+	 */
+	public static Instant latestBookable(Instant now) {
+		return now.atZone(APP_ZONE).plusYears(1).toInstant();
+	}
+
 	public static Instant earliestBookable() {
 		return Instant.now().plus(MIN_BOOKING_LEAD);
 	}
