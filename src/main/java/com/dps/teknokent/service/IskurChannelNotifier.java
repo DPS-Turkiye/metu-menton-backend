@@ -181,7 +181,8 @@ public class IskurChannelNotifier {
 	}
 
 	private @Nullable UUID unitCoordinator(IskurChannel channel) {
-		if (channel.getKind() != IskurChannelKind.UNIT || channel.getUnitId() == null) {
+		boolean unitLevel = channel.getKind() == IskurChannelKind.UNIT || channel.getKind() == IskurChannelKind.LEADERS;
+		if (!unitLevel || channel.getUnitId() == null) {
 			return null;
 		}
 		UUID coordinatorId = repositories.units().findById(channel.getUnitId())
@@ -226,6 +227,8 @@ public class IskurChannelNotifier {
 		case ANNOUNCEMENTS -> Texts.get(recipient, "iskur.channel.announcements");
 		case LEADER_DIRECT -> sender.getFullName();
 		case UNIT, TEAM -> placeName == null ? "" : placeName;
+		case LEADERS -> placeName == null ? Texts.get(recipient, "iskur.channel.leaders")
+				: Texts.get(recipient, "iskur.channel.leadersOf", placeName);
 		};
 	}
 }

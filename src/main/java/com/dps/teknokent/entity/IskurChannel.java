@@ -11,6 +11,7 @@ import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
@@ -20,7 +21,8 @@ import lombok.Setter;
  * so a rename shows at once.
  */
 @Entity
-@Table(name = "iskur_channel")
+@Table(name = "iskur_channel", uniqueConstraints = @UniqueConstraint(name = "uq_iskur_channel_unit_kind", columnNames = {
+		"unit_id", "kind" }))
 @Getter
 @Setter
 @NoArgsConstructor
@@ -36,7 +38,7 @@ public class IskurChannel {
 	@Column(nullable = false, length = 16)
 	private IskurChannelKind kind;
 
-	@Column(name = "unit_id", unique = true)
+	@Column(name = "unit_id")
 	private UUID unitId;
 
 	@Column(name = "team_id", unique = true)

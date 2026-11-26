@@ -167,6 +167,9 @@ public class IskurChannelMembershipService {
 			join(wanted, ChannelKey.announcements(), userId, false);
 			join(wanted, new ChannelKey(IskurChannelKind.UNIT, team.getUnitId(), null), userId, true);
 			join(wanted, new ChannelKey(IskurChannelKind.TEAM, team.getId(), null), userId, true);
+			if (placement.getTeamRole() == IskurTeamRole.LEADER) {
+				join(wanted, new ChannelKey(IskurChannelKind.LEADERS, team.getUnitId(), null), userId, true);
+			}
 			IskurPlacement leader = placement.getLeaderId() == null ? null : byUser.get(placement.getLeaderId());
 			if (placement.getTeamRole() == IskurTeamRole.MEMBER && leader != null
 					&& leader.getTeamRole() == IskurTeamRole.LEADER
@@ -198,6 +201,7 @@ public class IskurChannelMembershipService {
 			return switch (channel.getKind()) {
 			case ANNOUNCEMENTS -> announcements();
 			case UNIT -> new ChannelKey(IskurChannelKind.UNIT, channel.getUnitId(), null);
+			case LEADERS -> new ChannelKey(IskurChannelKind.LEADERS, channel.getUnitId(), null);
 			case TEAM -> new ChannelKey(IskurChannelKind.TEAM, channel.getTeamId(), null);
 			case LEADER_DIRECT -> new ChannelKey(IskurChannelKind.LEADER_DIRECT, channel.getLeaderId(),
 					channel.getMemberId());
@@ -207,7 +211,7 @@ public class IskurChannelMembershipService {
 		IskurChannel open(UUID programId, Instant now) {
 			IskurChannel channel = new IskurChannel(programId, kind, now);
 			switch (kind) {
-			case UNIT -> channel.setUnitId(ref);
+			case UNIT, LEADERS -> channel.setUnitId(ref);
 			case TEAM -> channel.setTeamId(ref);
 			case LEADER_DIRECT -> {
 				channel.setLeaderId(ref);
