@@ -11,6 +11,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.UUID;
 
 import org.hamcrest.Matchers;
@@ -26,6 +27,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.dps.teknokent.domain.IskurTaskKind;
 import com.dps.teknokent.domain.IskurTeamRole;
+import com.dps.teknokent.domain.ProgramFeature;
 import com.dps.teknokent.domain.ProgramStatus;
 import com.dps.teknokent.domain.ProgramType;
 import com.dps.teknokent.domain.UserRole;
@@ -194,6 +196,19 @@ class IskurTeamSupportIntegrationTest {
 		open(ayse, digital, poster.getId(), "Görev için destek").andExpect(status().isOk());
 		answer(deniz, id, "accept", null).andExpect(status().isForbidden());
 		taskSupport(deniz, poster.getId()).andExpect(status().isNotFound());
+	}
+
+	@Test
+	void aSemesterWithoutIskurHasNoSupportRequests() throws Exception {
+		String id = idOf(open(ayse, digital, poster.getId(), "Görsel desteği"));
+		program.setProgramType(ProgramType.SEMESTER);
+		program.setFeatures(Set.of(ProgramFeature.PEER_MENTORING));
+		programRepository.saveAndFlush(program);
+
+		mine(ayse).andExpect(status().isNotFound());
+		open(ayse, digital, null, "Destek").andExpect(status().isNotFound());
+		answer(ceren, id, "accept", null).andExpect(status().isNotFound());
+		taskSupport(burak, poster.getId()).andExpect(status().isNotFound());
 	}
 
 	private ResultActions mine(AppUser actor) throws Exception {

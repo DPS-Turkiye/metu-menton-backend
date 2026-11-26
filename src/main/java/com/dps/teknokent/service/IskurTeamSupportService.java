@@ -21,6 +21,7 @@ import org.springframework.web.server.ResponseStatusException;
 import com.dps.teknokent.domain.IskurTeamRole;
 import com.dps.teknokent.domain.IskurTeamSupportStatus;
 import com.dps.teknokent.domain.NotificationCategory;
+import com.dps.teknokent.domain.ProgramFeature;
 import com.dps.teknokent.dto.requests.IskurTeamSupportAnswerRequest;
 import com.dps.teknokent.dto.requests.IskurTeamSupportOpenRequest;
 import com.dps.teknokent.dto.responses.IskurTeamSupportResponse;
@@ -157,6 +158,9 @@ public class IskurTeamSupportService {
 	@Transactional(readOnly = true)
 	public List<IskurTeamSupportResponse> forTask(UUID actorId, UUID taskId) {
 		IskurTask task = tasks.findById(taskId)
+				.filter(found -> programs.findById(found.getProgramId())
+						.filter(program -> program.has(ProgramFeature.ISKUR))
+						.isPresent())
 				.orElseThrow(() -> new ResourceNotFoundException(Texts.forRequest("error.iskurTaskNotFound")));
 		IskurPlacement mine = placements.findByProgramIdAndUserId(task.getProgramId(), actorId)
 				.filter(placement -> placement.getTeamId().equals(task.getTeamId()))
