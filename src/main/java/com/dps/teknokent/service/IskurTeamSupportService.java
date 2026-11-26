@@ -98,8 +98,7 @@ public class IskurTeamSupportService {
 
 	@Transactional
 	public IskurTeamSupportsResponse open(UUID actorId, IskurTeamSupportOpenRequest request) {
-		IskurPlacement leader = requireLeader(actorId);
-		programs.findByIdForUpdate(leader.getProgramId());
+		IskurPlacement leader = lockedLeader(actorId);
 		IskurTeam target = teams.findById(request.toTeamId())
 				.filter(team -> team.getProgramId().equals(leader.getProgramId()))
 				.orElseThrow(() -> new ResourceNotFoundException(Texts.forRequest("error.iskurTeamSupportNoTeam")));
@@ -138,8 +137,7 @@ public class IskurTeamSupportService {
 	@Transactional
 	public IskurTeamSupportsResponse answer(UUID actorId, UUID requestId, boolean accept,
 			IskurTeamSupportAnswerRequest body) {
-		IskurPlacement leader = requireLeader(actorId);
-		programs.findByIdForUpdate(leader.getProgramId());
+		IskurPlacement leader = lockedLeader(actorId);
 		IskurTeamSupportRequest request = requests.findById(requestId)
 				.filter(row -> row.getToTeamId().equals(leader.getTeamId()))
 				.orElseThrow(() -> new ResourceNotFoundException(Texts.forRequest("error.iskurTeamSupportNotFound")));
@@ -253,6 +251,15 @@ public class IskurTeamSupportService {
 				.filter(placement -> placement.getTeamRole() == IskurTeamRole.LEADER)
 				.map(IskurPlacement::getUserId)
 				.toList();
+	}
+
+	/**
+	 * The leader, checked again once the program row is locked: placement changes take the same lock, so a leader
+	 * demoted or moved meanwhile is not let through on what was read before it.
+	 */
+	private IskurPlacement lockedLeader(UUID actorId) {
+		programs.findByIdForUpdate(requireLeader(actorId).getProgramId());
+		return requireLeader(actorId);
 	}
 
 	/** Only a team leader opens and answers requests ("talebi lider açar"). */
