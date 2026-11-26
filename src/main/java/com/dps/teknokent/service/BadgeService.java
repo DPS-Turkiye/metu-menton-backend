@@ -34,6 +34,7 @@ import com.dps.teknokent.domain.PermissionSource;
 import com.dps.teknokent.domain.ProgramFeature;
 import com.dps.teknokent.domain.ProgramMentorInvitedBy;
 import com.dps.teknokent.domain.ProgramMentorStatus;
+import com.dps.teknokent.domain.ProgramStatus;
 import com.dps.teknokent.domain.ProgramType;
 import com.dps.teknokent.domain.UserAccountStatus;
 import com.dps.teknokent.domain.UserRole;
@@ -169,13 +170,18 @@ public class BadgeService {
 	@Transactional(readOnly = true)
 	public List<GateBadgeRowResponse> students(UUID actorId, GateBadgeState state) {
 		AdminAccess.requireAdmin(domainLookupService.requireUser(actorId), "error.badgeAdminOnly");
-		// One row per approved student, in their semester or (programId null) in none; the gate state is their
-		// latest gate award in any semester, because the badge carries over from one semester to the next.
+		// One row per approved student, in their semester or (programId null) in none, with their latest gate award
+		// in that semester: the one a coordinator or admin can revoke there (a carried badge is awarded again in the
+		// new semester, so it shows).
 		Map<UUID, Program> studentPrograms = programs.findByProgramTypeIn(EnumSet.of(ProgramType.SEMESTER,
 				ProgramType.PEER_MENTORING)).stream()
 				.collect(Collectors.toMap(Program::getId, Function.identity()));
 		Map<UUID, UserBadge> latest = new LinkedHashMap<>();
-		awards.findByBadgeCodeOrderByAwardedAtDesc(GATE).forEach(award -> latest.putIfAbsent(award.getUserId(), award));
+		Map<String, UserBadge> latestIn = new LinkedHashMap<>();
+		awards.findByBadgeCodeOrderByAwardedAtDesc(GATE).forEach(award -> {
+			latest.putIfAbsent(award.getUserId(), award);
+			latestIn.putIfAbsent(award.getUserId() + "|" + award.getProgramId(), award);
+		});
 		List<AppUser> students = users.findByPermissionAndStatusOrderByFullNameAsc(UserRole.MENTEE,
 				UserAccountStatus.APPROVED);
 		Map<UUID, List<AppUser>> byProgram = new LinkedHashMap<>();
@@ -183,7 +189,8 @@ public class BadgeService {
 		for (AppUser student : students) {
 			Program program = student.getProgramId() == null ? null : studentPrograms.get(student.getProgramId());
 			if (program == null) {
-				rows.add(row(student, null, latest.get(student.getId())));
+				// In no semester: no award to show or revoke here.
+				rows.add(row(student, null, null));
 			} else {
 				byProgram.computeIfAbsent(program.getId(), id -> new ArrayList<>()).add(student);
 			}
@@ -200,7 +207,7 @@ public class BadgeService {
 			UserBadge award = latest.get(holder.getId());
 			Program program = award == null || award.getProgramId() == null ? null
 					: studentPrograms.get(award.getProgramId());
-			if (program != null) {
+			if (program != null && program.getStatus() != ProgramStatus.COMPLETED) {
 				byProgram.computeIfAbsent(program.getId(), id -> new ArrayList<>()).add(holder);
 			}
 		});
@@ -208,7 +215,7 @@ public class BadgeService {
 			Program program = studentPrograms.get(programId);
 			Map<UUID, GateBadgeRowResponse.Training> training = trainingOf(programId,
 					members.stream().map(AppUser::getId).toList());
-			members.forEach(student -> rows.add(row(student, program, latest.get(student.getId()),
+			members.forEach(student -> rows.add(row(student, program, latestIn.get(student.getId() + "|" + programId),
 					training.getOrDefault(student.getId(), GateBadgeRowResponse.Training.NONE), null, null)));
 		});
 		return rows.stream()
@@ -467,7 +474,7 @@ public class BadgeService {
 		Instant now = Instant.now();
 		Map<UUID, @Nullable UserBadge> carried = carriedMentors(from.getId(), now);
 		boolean mentor = carried.containsKey(person.getId());
-		if (to != null && mentor) {
+		if (to != null && mentor && to.has(ProgramFeature.PEER_MENTORING)) {
 			UserBadge gate = carried.get(person.getId());
 			if (gate != null && activeGate(person.getId(), to.getId()) == null) {
 				UserBadge copy = award(person, GATE, to, BadgeSource.ADMIN, actorId, false);

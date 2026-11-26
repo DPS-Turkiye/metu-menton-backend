@@ -108,7 +108,8 @@ public class ProgramWorkBlockers {
 		UUID personId = person.getId();
 		List<ProgramBlocker> blockers = new ArrayList<>();
 		long live = mentorships.countByProgramIdAndMentorIdAndStatusIn(programId, personId, LIVE_MENTORSHIPS)
-				+ (person.getOrganization() == null ? 0
+				// A student's own team of one; a shared team's mentorships are not this person's to finish.
+				+ (person.getOrganization() == null || !person.getOrganization().isPersonal() ? 0
 						: mentorships.countByProgramIdAndOrganizationIdAndStatusIn(programId,
 								person.getOrganization().getId(), LIVE_MENTORSHIPS));
 		add(blockers, ProgramBlockerKind.ACTIVE_MENTORSHIP, ProgramFeature.PEER_MENTORING, live);

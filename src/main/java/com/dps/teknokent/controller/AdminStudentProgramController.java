@@ -35,15 +35,15 @@ public class AdminStudentProgramController {
 		return adminStudentProgramService.overview(CurrentActor.resolve(actorId), userId);
 	}
 
+	/** A change revokes badges and permissions, so it takes the admin's own sign-in, as deleting a user does. */
 	@PutMapping
 	public StudentProgramChangeResponse move(@PathVariable UUID userId,
 			@Valid @RequestBody SetStudentProgramRequest request) {
-		return adminStudentProgramService.move(CurrentActor.resolve(request.actorId()), userId, request.programId());
+		return adminStudentProgramService.move(CurrentActor.requireSignedIn(), userId, request.programId());
 	}
 
 	@DeleteMapping
-	public StudentProgramChangeResponse remove(@PathVariable UUID userId,
-			@RequestParam(required = false) UUID actorId) {
-		return adminStudentProgramService.remove(CurrentActor.resolve(actorId), userId);
+	public StudentProgramChangeResponse remove(@PathVariable UUID userId) {
+		return adminStudentProgramService.remove(CurrentActor.requireSignedIn(), userId);
 	}
 }

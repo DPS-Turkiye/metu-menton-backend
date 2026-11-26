@@ -1,6 +1,7 @@
 package com.dps.teknokent.integration;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -10,6 +11,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import java.time.Instant;
 import java.util.EnumSet;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -19,6 +21,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
@@ -48,6 +51,7 @@ import com.dps.teknokent.repository.ProgramMentorRemovalRepository;
 import com.dps.teknokent.repository.ProgramMentorRepository;
 import com.dps.teknokent.repository.ProgramRepository;
 import com.dps.teknokent.repository.UserBadgeRepository;
+import com.dps.teknokent.security.AppUserPrincipal;
 
 import tools.jackson.databind.json.JsonMapper;
 
@@ -106,9 +110,42 @@ class AdminStudentProgramIntegrationTest {
 		call(get("/api/admin/users/{id}/program", student.getId()), coordinator).andExpect(status().isForbidden());
 		send(put("/api/admin/users/{id}/program", student.getId()), coordinator, spring.getId())
 				.andExpect(status().isForbidden());
-		call(delete("/api/admin/users/{id}/program", student.getId()), coordinator).andExpect(status().isForbidden());
+		remove(coordinator).andExpect(status().isForbidden());
 
 		assertThat(users.findById(student.getId()).orElseThrow().getProgramId()).isEqualTo(fall.getId());
+	}
+
+	@Test
+	void aChangeTakesTheAdminsOwnSignInNotTheSharedServiceCredentials() throws Exception {
+		mockMvc.perform(put("/api/admin/users/{id}/program", student.getId())
+				.param("actorId", admin.getId().toString())
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(jsonMapper.writeValueAsString(Map.of("programId", spring.getId())))
+				.with(user("frontend").roles("SERVICE")))
+				.andExpect(status().isForbidden());
+		mockMvc.perform(delete("/api/admin/users/{id}/program", student.getId())
+				.param("actorId", admin.getId().toString())
+				.with(user("frontend").roles("SERVICE")))
+				.andExpect(status().isForbidden());
+
+		assertThat(users.findById(student.getId()).orElseThrow().getProgramId()).isEqualTo(fall.getId());
+	}
+
+	@Test
+	void aStudentInNoSemesterShowsNoAwardAndAMoveIntoASemesterWithoutPeerMentoringCarriesNoMentoring()
+			throws Exception {
+		gate(student, fall);
+		acceptedRow(student, fall);
+		Program officeHoursOnly = semester("2027 Yaz", ProgramStatus.DRAFT);
+		officeHoursOnly.setFeatures(EnumSet.of(ProgramFeature.OFFICE_HOURS));
+		programs.saveAndFlush(officeHoursOnly);
+
+		send(put("/api/admin/users/{id}/program", student.getId()), admin, officeHoursOnly.getId())
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.movedMentorRow").value(true));
+
+		assertThat(programMentors.findByProgramIdAndMentorId(officeHoursOnly.getId(), student.getId())).isEmpty();
+		assertThat(users.findById(student.getId()).orElseThrow().getProgramId()).isEqualTo(officeHoursOnly.getId());
 	}
 
 	@Test
@@ -148,12 +185,12 @@ class AdminStudentProgramIntegrationTest {
 
 	@Test
 	void removingAStudentLeavesThemInNoSemester() throws Exception {
-		call(delete("/api/admin/users/{id}/program", student.getId()), admin)
+		remove(admin)
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.toProgramId").isEmpty());
 
 		assertThat(users.findById(student.getId()).orElseThrow().getProgramId()).isNull();
-		call(delete("/api/admin/users/{id}/program", student.getId()), admin)
+		remove(admin)
 				.andExpect(status().isConflict())
 				.andExpect(jsonPath("$.code").value("NOT_IN_PROGRAM"));
 	}
@@ -171,7 +208,7 @@ class AdminStudentProgramIntegrationTest {
 				.andExpect(jsonPath("$.blockers[0].kind").value("ISKUR_PLACEMENT"))
 				.andExpect(jsonPath("$.blockers[0].count").value(1))
 				.andReturn().getResponse().getContentAsString();
-		call(delete("/api/admin/users/{id}/program", student.getId()), admin).andExpect(status().isConflict());
+		remove(admin).andExpect(status().isConflict());
 		call(get("/api/admin/users/{id}/program", student.getId()), admin)
 				.andExpect(jsonPath("$.blockers[0].kind").value("ISKUR_PLACEMENT"));
 
@@ -207,8 +244,18 @@ class AdminStudentProgramIntegrationTest {
 	private ResultActions send(MockHttpServletRequestBuilder builder, AppUser actor, UUID programId)
 			throws Exception {
 		return mockMvc.perform(builder.contentType(MediaType.APPLICATION_JSON)
-				.content(jsonMapper.writeValueAsString(Map.of("actorId", actor.getId(), "programId", programId)))
-				.with(user("frontend").roles("SERVICE")));
+				.content(jsonMapper.writeValueAsString(Map.of("programId", programId)))
+				.with(authentication(signedIn(actor))));
+	}
+
+	private ResultActions remove(AppUser actor) throws Exception {
+		return mockMvc.perform(delete("/api/admin/users/{id}/program", student.getId())
+				.with(authentication(signedIn(actor))));
+	}
+
+	private static UsernamePasswordAuthenticationToken signedIn(AppUser user) {
+		return new UsernamePasswordAuthenticationToken(new AppUserPrincipal(
+				user.getId(), user.getEmail(), user.getRole(), user.getStatus(), "signed-in-uid"), null, List.of());
 	}
 
 	private ResultActions call(MockHttpServletRequestBuilder builder, AppUser actor) throws Exception {
