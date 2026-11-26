@@ -27,6 +27,7 @@ import com.dps.teknokent.dto.requests.AnswerOfficeHoursAlternativeRequest;
 import com.dps.teknokent.dto.requests.CreateMentonOfficeHoursRequest;
 import com.dps.teknokent.dto.requests.CreateOfficeHoursRequest;
 import com.dps.teknokent.dto.responses.OfficeHoursAcademicianResponse;
+import com.dps.teknokent.dto.responses.OfficeHoursProfileResponse;
 import com.dps.teknokent.dto.responses.OfficeHoursStudentRequestResponse;
 import com.dps.teknokent.dto.responses.OfficeHoursTimeResponse;
 import com.dps.teknokent.entity.InstitutionPerson;
@@ -266,10 +267,12 @@ public class OfficeHoursStudentMeService {
 		}
 
 		OfficeHoursAcademicianResponse response() {
+			OfficeHoursProfileResponse.Details details = OfficeHoursMeService.detailsOf(settings);
 			return new OfficeHoursAcademicianResponse(person.getId(), person.getAppUserId(), record.getFullName(),
 					record.getAcademicTitle(),
 					record.getDepartmentName(), record.getFaculty(), settings.getContactEmail(),
-					settings.getDefaultMeetingDurationMinutes());
+					settings.getDefaultMeetingDurationMinutes(), details.about(), details.topics(), details.courses(),
+					details.expertise(), details.responseDays());
 		}
 	}
 }

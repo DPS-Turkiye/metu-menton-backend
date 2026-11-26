@@ -10,6 +10,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
@@ -204,6 +205,110 @@ class OfficeHoursMeIntegrationTest {
 		java.time.OffsetDateTime endsAt = java.time.OffsetDateTime
 				.parse(com.jayway.jsonpath.JsonPath.<String>read(inbox, "$[0].requestedTimes[0].endsAt"));
 		assertThat(java.time.Duration.between(startsAt, endsAt)).isEqualTo(java.time.Duration.ofMinutes(20));
+	}
+
+	private static final String DETAILS = """
+			{"listed":true,"defaultPlace":"A-204",
+			 "details":{"about":"  Yapay zeka ve veri bilimi üzerine çalışıyorum.  ",
+			   "topics":[{"title":"Araştırma projeleri","body":"Lisans araştırması"},{"title":"Staj","body":" "}],
+			   "courses":[{"code":"CENG 465","name":"Yapay Zeka"}],
+			   "expertise":["Yapay Zeka"," Veri Bilimi ","Yapay Zeka"],"responseDays":1},
+			 "emails":{"newRequest":false,"cancellation":true}}
+			""";
+
+	private void saveProfile(String body) throws Exception {
+		mockMvc.perform(put("/api/office-hours/me/profile").param("actorId", as(academician))
+				.with(frontendServer()).contentType(MediaType.APPLICATION_JSON).content(body))
+				.andExpect(status().isOk());
+	}
+
+	@Test
+	void anAcademicianSavesWhatStudentsReadAndWhichEmailsTheyWant() throws Exception {
+		saveProfile(DETAILS);
+
+		mockMvc.perform(get("/api/office-hours/me/profile").param("actorId", as(academician)).with(frontendServer()))
+				.andExpect(jsonPath("$.details.about").value("Yapay zeka ve veri bilimi üzerine çalışıyorum."))
+				.andExpect(jsonPath("$.details.topics[0].title").value("Araştırma projeleri"))
+				.andExpect(jsonPath("$.details.topics[1].title").value("Staj"))
+				.andExpect(jsonPath("$.details.topics[1].body").doesNotExist())
+				.andExpect(jsonPath("$.details.courses[0].code").value("CENG 465"))
+				.andExpect(jsonPath("$.details.expertise.length()").value(2))
+				.andExpect(jsonPath("$.details.expertise[1]").value("Veri Bilimi"))
+				.andExpect(jsonPath("$.details.responseDays").value(1))
+				.andExpect(jsonPath("$.emails.newRequest").value(false))
+				.andExpect(jsonPath("$.emails.cancellation").value(true));
+	}
+
+	@Test
+	void aSaveThatLeavesOutTheDetailsAndEmailsKeepsThem() throws Exception {
+		saveProfile(DETAILS);
+
+		// What today's screen and the "listed" switch send: only the four top fields.
+		saveProfile("{\"listed\":false,\"defaultPlace\":\"B-101\"}");
+
+		mockMvc.perform(get("/api/office-hours/me/profile").param("actorId", as(academician)).with(frontendServer()))
+				.andExpect(jsonPath("$.listed").value(false))
+				.andExpect(jsonPath("$.defaultPlace").value("B-101"))
+				.andExpect(jsonPath("$.details.topics.length()").value(2))
+				.andExpect(jsonPath("$.details.responseDays").value(1))
+				.andExpect(jsonPath("$.emails.newRequest").value(false));
+	}
+
+	@Test
+	void detailsSentWithEmptyFieldsClearThem() throws Exception {
+		saveProfile(DETAILS);
+
+		saveProfile("""
+				{"listed":true,"details":{"about":"","topics":[],"courses":[],"expertise":[],"responseDays":null}}
+				""");
+
+		mockMvc.perform(get("/api/office-hours/me/profile").param("actorId", as(academician)).with(frontendServer()))
+				.andExpect(jsonPath("$.details.about").doesNotExist())
+				.andExpect(jsonPath("$.details.topics.length()").value(0))
+				.andExpect(jsonPath("$.details.courses.length()").value(0))
+				.andExpect(jsonPath("$.details.expertise.length()").value(0))
+				.andExpect(jsonPath("$.details.responseDays").doesNotExist())
+				.andExpect(jsonPath("$.emails.newRequest").value(false));
+	}
+
+	@Test
+	void refusesDetailsOverTheLimitsOrWithMarkup() throws Exception {
+		String sevenTopics = String.join(",", java.util.Collections.nCopies(7, "{\"title\":\"Staj\"}"));
+		for (String details : List.of("{\"topics\":[" + sevenTopics + "]}",
+				"{\"expertise\":[\"a\",\"b\",\"c\",\"d\",\"e\",\"f\"]}",
+				"{\"expertise\":[\"" + "x".repeat(41) + "\"]}",
+				"{\"about\":\"" + "x".repeat(1001) + "\"}",
+				"{\"about\":\"<b>merhaba</b>\"}",
+				"{\"topics\":[{\"title\":\"Staj\",\"body\":\"<script>x</script>\"}]}",
+				"{\"topics\":[{\"title\":\" \"}]}",
+				"{\"courses\":[{\"code\":\"CENG 465\"}]}",
+				"{\"responseDays\":0}", "{\"responseDays\":15}")) {
+			mockMvc.perform(put("/api/office-hours/me/profile").param("actorId", as(academician))
+					.with(frontendServer()).contentType(MediaType.APPLICATION_JSON)
+					.content("{\"listed\":true,\"details\":" + details + "}"))
+					.andExpect(status().isBadRequest());
+		}
+		// A lone "<" is ordinary text.
+		saveProfile("{\"listed\":true,\"details\":{\"about\":\"Not ortalaması < 2 olanlar da gelebilir.\"}}");
+	}
+
+	@Test
+	void aStudentReadsTheDetailsButNotTheEmailChoices() throws Exception {
+		saveProfile(DETAILS);
+		UUID academicianId = officeHoursUsers.findByAppUserId(academician.getId()).orElseThrow().getId();
+
+		mockMvc.perform(get("/api/office-hours/me/academicians").param("actorId", as(student)).with(frontendServer()))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$[0].expertise[0]").value("Yapay Zeka"))
+				.andExpect(jsonPath("$[0].responseDays").value(1));
+		mockMvc.perform(get("/api/office-hours/me/academicians/{id}", academicianId).param("actorId", as(student))
+				.with(frontendServer()))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.about").value("Yapay zeka ve veri bilimi üzerine çalışıyorum."))
+				.andExpect(jsonPath("$.topics[0].body").value("Lisans araştırması"))
+				.andExpect(jsonPath("$.courses[0].name").value("Yapay Zeka"))
+				.andExpect(jsonPath("$.emails").doesNotExist())
+				.andExpect(jsonPath("$.newRequest").doesNotExist());
 	}
 
 	@Test

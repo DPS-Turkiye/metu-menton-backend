@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -28,11 +29,13 @@ import com.dps.teknokent.entity.AppUser;
 import com.dps.teknokent.entity.OfficeHoursCourse;
 import com.dps.teknokent.entity.OfficeHoursMeeting;
 import com.dps.teknokent.entity.OfficeHoursRequest;
+import com.dps.teknokent.entity.OfficeHoursSettings;
 import com.dps.teknokent.entity.OfficeHoursUser;
 import com.dps.teknokent.repository.AppUserRepository;
 import com.dps.teknokent.repository.OfficeHoursCourseRepository;
 import com.dps.teknokent.repository.OfficeHoursMeetingRepository;
 import com.dps.teknokent.repository.OfficeHoursRequestRepository;
+import com.dps.teknokent.repository.OfficeHoursSettingsRepository;
 import com.dps.teknokent.repository.OfficeHoursUserRepository;
 import com.dps.teknokent.service.OfficeHoursMailService.Delivery;
 import com.dps.teknokent.service.OfficeHoursMailService.Event;
@@ -61,6 +64,8 @@ class OfficeHoursMailServiceTest {
 	private AppUserRepository appUserRepository;
 	@Mock
 	private OfficeHoursInAppNotifications inAppNotifications;
+	@Mock
+	private OfficeHoursSettingsRepository settingsRepository;
 	@InjectMocks
 	private OfficeHoursMailService service;
 
@@ -121,6 +126,64 @@ class OfficeHoursMailServiceTest {
 
 		verify(inAppNotifications).requestChanged(student, academic, "meetingCancelled", "Ödev 2", false);
 		verify(inAppNotifications).requestChanged(academic, student, "newRequest", "Ödev 2", true);
+	}
+
+	private void academicTurnedOff(boolean newRequestEmails, boolean cancellationEmails) {
+		OfficeHoursSettings settings = new OfficeHoursSettings();
+		settings.setInstructorId(academic.getId());
+		settings.setNewRequestEmails(newRequestEmails);
+		settings.setCancellationEmails(cancellationEmails);
+		when(settingsRepository.findById(academic.getId())).thenReturn(Optional.of(settings));
+	}
+
+	@Test
+	void anAcademicWhoTurnedOffNewRequestEmailsStillHearsInMentonAndStillGetsTheOtherSteps() {
+		academicTurnedOff(false, true);
+
+		service.requestChanged(request, Event.NEW_REQUEST, null);
+		verify(outbox, never()).enqueue(any(), any(), any());
+		verify(inAppNotifications).requestChanged(academic, student, "newRequest", "Ödev 2", true);
+
+		service.requestChanged(request, Event.CANCELLED_BY_STUDENT, null);
+		service.requestChanged(request, Event.SLOT_CHOSEN, null);
+		verify(outbox, times(2)).enqueue(eq("ali@metu.edu.tr"), any(), any());
+	}
+
+	@Test
+	void anAcademicWhoTurnedOffCancellationEmailsGetsNoneWhenAStudentCancels() {
+		academicTurnedOff(true, false);
+
+		service.requestChanged(request, Event.CANCELLED_BY_STUDENT, null);
+
+		verify(outbox, never()).enqueue(any(), any(), any());
+		verify(inAppNotifications).requestChanged(academic, student, "meetingCancelled", "Ödev 2", true);
+	}
+
+	@Test
+	void theAcademicsSwitchesNeverStopTheStudentsEmails() {
+		service.requestChanged(request, Event.CANCELLED_BY_INSTRUCTOR, null);
+		service.requestChanged(request, Event.DECLINED, null);
+
+		verify(outbox, times(2)).enqueue(eq("ayse@metu.edu.tr"), any(), any());
+		verify(settingsRepository, never()).findById(any());
+	}
+
+	@Test
+	void anAcademicWithNoSettingsYetGetsBothEmails() {
+		when(settingsRepository.findById(academic.getId())).thenReturn(Optional.empty());
+
+		service.requestChanged(request, Event.NEW_REQUEST, null);
+		service.requestChanged(request, Event.CANCELLED_BY_STUDENT, null);
+
+		verify(outbox, times(2)).enqueue(eq("ali@metu.edu.tr"), any(), any());
+	}
+
+	@Test
+	void theReminderGoesWhateverTheSwitchesSay() {
+		when(mailService.sendNow(eq("ali@metu.edu.tr"), any(), any())).thenReturn(true);
+
+		assertThat(service.meetingSoon(meeting(), Side.INSTRUCTOR)).isEqualTo(Delivery.SENT);
+		verify(settingsRepository, never()).findById(any());
 	}
 
 	@Test
