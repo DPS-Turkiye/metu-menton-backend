@@ -43,7 +43,10 @@ public record UpdateOfficeHoursProfileRequest(
 			@NotBlank @Size(max = 120) @Pattern(regexp = PlainText.PATTERN, message = PlainText.MESSAGE) String name) {
 	}
 
-	/** The academician's own Office Hours e-mails; meeting reminders always go. */
-	public record Emails(boolean newRequest, boolean cancellation) {
+	/**
+	 * The academician's own Office Hours e-mails; meeting reminders always go. Both are required, so a key left out is
+	 * a 400 rather than a switch turned off.
+	 */
+	public record Emails(@NotNull Boolean newRequest, @NotNull Boolean cancellation) {
 	}
 }

@@ -7,6 +7,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -72,6 +73,7 @@ import com.dps.teknokent.util.TextUtils;
 public class OfficeHoursMeService {
 
 	/** How far back the academician's calendar reaches. */
+	private static final Locale TURKISH = Locale.forLanguageTag("tr");
 	private static final Duration MEETING_HISTORY = Duration.ofDays(180);
 
 	private final OfficeHoursPeople people;
@@ -464,8 +466,16 @@ public class OfficeHoursMeService {
 				.map(course -> new OfficeHoursProfileCourse(course.code().trim(), course.name().trim()))
 				.toList());
 		settings.getExpertise().clear();
-		settings.getExpertise().addAll(TextUtils.normalizedList(details.expertise()));
+		settings.getExpertise().addAll(distinctIgnoringCase(TextUtils.normalizedList(details.expertise())));
 		settings.setResponseDays(details.responseDays());
+	}
+
+	/**
+	 * "Java" and "java" are one tag; the first spelling stays. Turkish rules, so "İstatistik" and "istatistik" match.
+	 */
+	private static List<String> distinctIgnoringCase(List<String> tags) {
+		Set<String> seen = new HashSet<>();
+		return tags.stream().filter(tag -> seen.add(tag.toLowerCase(TURKISH))).toList();
 	}
 
 	private static <T> List<T> orEmpty(@Nullable List<T> values) {

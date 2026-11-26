@@ -212,7 +212,7 @@ class OfficeHoursMeIntegrationTest {
 			 "details":{"about":"  Yapay zeka ve veri bilimi üzerine çalışıyorum.  ",
 			   "topics":[{"title":"Araştırma projeleri","body":"Lisans araştırması"},{"title":"Staj","body":" "}],
 			   "courses":[{"code":"CENG 465","name":"Yapay Zeka"}],
-			   "expertise":["Yapay Zeka"," Veri Bilimi ","Yapay Zeka"],"responseDays":1},
+			   "expertise":["Yapay Zeka"," Veri Bilimi ","yapay zeka"],"responseDays":1},
 			 "emails":{"newRequest":false,"cancellation":true}}
 			""";
 
@@ -269,6 +269,37 @@ class OfficeHoursMeIntegrationTest {
 				.andExpect(jsonPath("$.details.expertise.length()").value(0))
 				.andExpect(jsonPath("$.details.responseDays").doesNotExist())
 				.andExpect(jsonPath("$.emails.newRequest").value(false));
+	}
+
+	@Test
+	void aSaveCanReorderTheLists() throws Exception {
+		saveProfile(DETAILS);
+
+		saveProfile("""
+				{"listed":true,"details":{"topics":[{"title":"Staj"},{"title":"Araştırma projeleri"}],
+				 "expertise":["Veri Bilimi","Yapay Zeka"]}}
+				""");
+
+		mockMvc.perform(get("/api/office-hours/me/profile").param("actorId", as(academician)).with(frontendServer()))
+				.andExpect(jsonPath("$.details.topics[0].title").value("Staj"))
+				.andExpect(jsonPath("$.details.topics[1].title").value("Araştırma projeleri"))
+				.andExpect(jsonPath("$.details.expertise[0]").value("Veri Bilimi"))
+				.andExpect(jsonPath("$.details.expertise[1]").value("Yapay Zeka"));
+	}
+
+	@Test
+	void refusesEmailChoicesWithAKeyLeftOut() throws Exception {
+		saveProfile(DETAILS);
+
+		for (String emails : List.of("{}", "{\"newRequest\":true}", "{\"cancellation\":false}")) {
+			mockMvc.perform(put("/api/office-hours/me/profile").param("actorId", as(academician))
+					.with(frontendServer()).contentType(MediaType.APPLICATION_JSON)
+					.content("{\"listed\":true,\"emails\":" + emails + "}"))
+					.andExpect(status().isBadRequest());
+		}
+		mockMvc.perform(get("/api/office-hours/me/profile").param("actorId", as(academician)).with(frontendServer()))
+				.andExpect(jsonPath("$.emails.newRequest").value(false))
+				.andExpect(jsonPath("$.emails.cancellation").value(true));
 	}
 
 	@Test
