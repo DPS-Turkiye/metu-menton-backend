@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -55,6 +56,7 @@ import com.dps.teknokent.repository.MentorAvailabilityExceptionRepository;
 import com.dps.teknokent.repository.MentorAvailabilityRuleRepository;
 import com.dps.teknokent.repository.MentorAvailabilitySlotRepository;
 import com.dps.teknokent.repository.MentorProfileRepository;
+import com.dps.teknokent.repository.ProgramCoordinatorFeatureRepository;
 import com.dps.teknokent.repository.ProgramCoordinatorRepository;
 import com.dps.teknokent.repository.ProgramMentorRepository;
 import com.dps.teknokent.repository.ProgramRepository;
@@ -121,7 +123,9 @@ class PersonSummaryServiceTest {
 				new MentorAvailabilitySummaryService(mentorAvailabilityRuleRepository,
 						mentorAvailabilityExceptionRepository, mentorAvailabilitySlotRepository, meetingRepository,
 						CLOCK),
-				programRepository, programCoordinatorRepository);
+				programRepository, programCoordinatorRepository,
+				new ProgramFeatureAccess(programCoordinatorRepository, mock(ProgramCoordinatorFeatureRepository.class),
+						domainLookupService));
 		when(programStartupRepository.findByOrganizationIdIn(anyCollection())).thenAnswer(invocation -> {
 			Collection<UUID> ids = invocation.getArgument(0);
 			return links.stream().filter(link -> ids.contains(link.getOrganizationId())).toList();

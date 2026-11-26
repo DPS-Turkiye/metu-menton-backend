@@ -76,12 +76,17 @@ public class CoordinatorMentorshipService {
 	private final AppUserRepository appUserRepository;
 	private final ProgramStartupRepository programStartupRepository;
 	private final NotificationService notificationService;
+	private final ProgramFeatureAccess featureAccess;
 
 	/** Riskiest first; within a bucket, the longest silence first. */
 	@Transactional(readOnly = true)
 	public List<CoordinatorMentorshipResponse> list(UUID actorId, UUID programId) {
-		List<Program> managed = programService.managedPrograms(programService.requireCoordinatorOrAdmin(actorId));
-		List<Program> scope = programService.scopeOf(actorId, managed, programId);
+		AppUser actor = programService.requireCoordinatorOrAdmin(actorId);
+		List<Program> managed = programService.managedPrograms(actor);
+		// Mentorships are peer-mentoring work: a semester shows them only to coordinators who run it there.
+		List<Program> scope = programService.scopeOf(actorId, managed, programId).stream()
+				.filter(program -> featureAccess.opens(actor, program, ProgramFeature.PEER_MENTORING))
+				.toList();
 		Snapshot snapshot = programService.snapshot(scope);
 		Context context = context(scope, snapshot);
 		// Each mentorship is listed once, under the program it was made in, also after its team left that program.

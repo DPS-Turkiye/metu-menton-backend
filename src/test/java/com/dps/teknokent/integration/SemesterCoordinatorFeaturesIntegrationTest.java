@@ -203,6 +203,20 @@ class SemesterCoordinatorFeaturesIntegrationTest {
 		}
 	}
 
+	@Test
+	void aSemesterWithPeerMentoringSwitchedOffRefusesItsPeerScreensToEveryCoordinator() throws Exception {
+		Program officeHoursOnly = semester(EnumSet.of(ProgramFeature.OFFICE_HOURS));
+		coordinatorOf(officeHoursOnly, officeHoursCoordinator, ProgramFeature.OFFICE_HOURS);
+
+		for (String path : List.of("/api/coordinator/programs/{id}/mentors",
+				"/api/coordinator/programs/{id}/eligible-emails", "/api/coordinator/programs/{id}/teams")) {
+			call(get(path, officeHoursOnly.getId()), officeHoursCoordinator).andExpect(status().isBadRequest());
+			call(get(path, officeHoursOnly.getId()), admin).andExpect(status().isBadRequest());
+		}
+		call(get("/api/coordinator/programs/{id}/office-hours/appointments", officeHoursOnly.getId()),
+				officeHoursCoordinator).andExpect(status().isOk());
+	}
+
 	private void switchFeatures(ProgramFeature... features) throws Exception {
 		mockMvc.perform(put("/api/coordinator/programs/{id}/features", semester.getId())
 				.contentType(MediaType.APPLICATION_JSON)

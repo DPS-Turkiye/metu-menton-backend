@@ -62,6 +62,15 @@ public class ProgramFeatureAccess {
 	}
 
 	/**
+	 * Whether a list of one feature's work may include {@code program} for the caller, who runs it: a semester only
+	 * when its feature is on and theirs; a program of another type as before semesters (Teknokent included).
+	 */
+	@Transactional(readOnly = true)
+	public boolean opens(AppUser actor, Program program, ProgramFeature feature) {
+		return program.getProgramType() != ProgramType.SEMESTER || of(actor, program).contains(feature);
+	}
+
+	/**
 	 * For a screen of one feature, once the caller is known to run the program and the program to run the feature:
 	 * a coordinator who was not given that feature gets a 403.
 	 */
