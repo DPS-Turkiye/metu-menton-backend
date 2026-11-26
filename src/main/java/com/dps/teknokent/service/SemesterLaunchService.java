@@ -2,6 +2,8 @@ package com.dps.teknokent.service;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.EnumSet;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -13,6 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 import com.dps.teknokent.domain.ProgramStatus;
 import com.dps.teknokent.domain.ProgramType;
 import com.dps.teknokent.domain.UserAccountStatus;
+import com.dps.teknokent.domain.UserRole;
 import com.dps.teknokent.dto.responses.CoordinatorProgramResponse;
 import com.dps.teknokent.dto.responses.LaunchPreviewResponse;
 import com.dps.teknokent.entity.AppUser;
@@ -56,6 +59,9 @@ public class SemesterLaunchService {
 
 	public static final String SEVERAL_RUNNING = "SEVERAL_RUNNING_SEMESTERS";
 
+	private static final Set<UserAccountStatus> MOVING = EnumSet.of(UserAccountStatus.APPROVED,
+			UserAccountStatus.PENDING);
+
 	private final CoordinatorProgramService coordinatorProgramService;
 	private final ProgramRepository programs;
 	private final AppUserRepository users;
@@ -77,10 +83,11 @@ public class SemesterLaunchService {
 		if (next.getProgramType() != ProgramType.SEMESTER || next.getStatus() != ProgramStatus.DRAFT) {
 			throw new InvalidRequestException("Only a semester draft has a launch preview.");
 		}
-		return runningBefore(next)
+		return runningBefore(next, programs.findByProgramType(ProgramType.SEMESTER))
 				.map(previous -> new LaunchPreviewResponse(
 						new LaunchPreviewResponse.ProgramRef(previous.getId(), previous.getName()),
-						movingAccounts(previous).size(),
+						Math.toIntExact(users.countByProgramIdAndPermissionAndStatusIn(previous.getId(),
+								UserRole.MENTEE, MOVING)),
 						badges.peerMentorIds(previous.getId()).size()))
 				.orElseGet(() -> new LaunchPreviewResponse(null, 0, 0));
 	}
@@ -91,23 +98,20 @@ public class SemesterLaunchService {
 	@Transactional
 	public CoordinatorProgramResponse.Detail launch(UUID actorId, UUID programId) {
 		AdminAccess.requireAdmin(domainLookupService.requireUser(actorId));
+		// Every semester row is locked before any of them is read here: two launches run one after the other, and
+		// the second sees what the first committed (the semester it completed, the one it started).
+		List<Program> semesters = programs.lockAllOfType(ProgramType.SEMESTER);
 		Program next = programs.findById(programId)
 				.orElseThrow(() -> new ResourceNotFoundException("Program not found: " + programId));
 		boolean semester = next.getProgramType() == ProgramType.SEMESTER;
 		Optional<Program> previous = semester && next.getStatus() == ProgramStatus.DRAFT
-				? runningBefore(next)
+				? runningBefore(next, semesters)
 				: Optional.empty();
 		CoordinatorProgramResponse.Detail launched = coordinatorProgramService.launch(actorId, programId);
 		if (previous.isEmpty()) {
 			return launched;
 		}
-		// Locked and checked again: a second admin launching another draft at the same moment waits here, and then
-		// finds this semester completed instead of rolling it over twice.
-		Program from = programs.findByIdForUpdate(previous.get().getId())
-				.filter(locked -> locked.getStatus() == ProgramStatus.ACTIVE)
-				.orElseThrow(() -> new ConflictException(Texts.forRequest("error.severalRunningSemesters"),
-						SEVERAL_RUNNING));
-		rollOver(actorId, from, next);
+		rollOver(actorId, previous.get(), next);
 		return coordinatorProgramService.detail(actorId, programId);
 	}
 
@@ -115,8 +119,10 @@ public class SemesterLaunchService {
 		List<AppUser> moving = movingAccounts(from);
 		moving.forEach(account -> account.setProgramId(to.getId()));
 		users.saveAll(moving);
+		Set<UUID> movers = new HashSet<>(badges.peerMentorIds(from.getId()));
+		moving.forEach(account -> movers.add(account.getId()));
 		int mentors = badges.carryOverPeerMentors(from, to, actorId);
-		int reviews = carryOverTrainingReviews(from, to);
+		int reviews = carryOverTrainingReviews(from, to, movers);
 		String setup = carryOverSetup(from, to, actorId);
 		from.setStatus(ProgramStatus.COMPLETED);
 		programs.save(from);
@@ -125,8 +131,8 @@ public class SemesterLaunchService {
 	}
 
 	/** The one running semester the draft follows; several running is a state to sort out first, not to guess. */
-	private Optional<Program> runningBefore(Program next) {
-		List<Program> running = programs.findByProgramType(ProgramType.SEMESTER).stream()
+	private static Optional<Program> runningBefore(Program next, List<Program> semesters) {
+		List<Program> running = semesters.stream()
 				.filter(program -> program.getStatus() == ProgramStatus.ACTIVE)
 				.filter(program -> !program.getId().equals(next.getId()))
 				.toList();
@@ -136,9 +142,9 @@ public class SemesterLaunchService {
 		return running.stream().findFirst();
 	}
 
-	/** Every account of the semester that still exists, pending ones too, so nobody is left in a closed semester. */
+	/** The semester's students, approved and still waiting for approval; rejected and deleted accounts stay. */
 	private List<AppUser> movingAccounts(Program from) {
-		return users.findByProgramIdAndStatusNot(from.getId(), UserAccountStatus.DELETED);
+		return users.findByProgramIdAndPermissionAndStatusIn(from.getId(), UserRole.MENTEE, MOVING);
 	}
 
 	/**
@@ -175,7 +181,7 @@ public class SemesterLaunchService {
 					.map(question -> copyOf(question, module.getId()))
 					.toList();
 			trainingQuestions.saveAll(questions);
-			carryOverTrainingProgress(source.getId(), module.getId());
+			carryOverTrainingProgress(source.getId(), source.getCurrentVersion(), module.getId());
 			carried.add("training");
 		}
 		Optional<PrismTrainingLink> oldLink = prismLinks.findById(from.getId());
@@ -192,28 +198,32 @@ public class SemesterLaunchService {
 	}
 
 	/** The same training in the new semester: a watched video and the quiz attempts so far still count. */
-	private void carryOverTrainingProgress(UUID fromModule, UUID toModule) {
-		trainingProgress.saveAll(trainingProgress.findByModuleId(fromModule).stream().map(progress -> {
-			TrainingProgress copy = new TrainingProgress();
-			copy.setId(UUID.randomUUID());
-			copy.setModuleId(toModule);
-			copy.setUserId(progress.getUserId());
-			copy.setVersion(progress.getVersion());
-			copy.setVideoCompletedAt(progress.getVideoCompletedAt());
-			return copy;
-		}).toList());
-		trainingAttempts.saveAll(trainingAttempts.findByModuleId(fromModule).stream().map(attempt -> {
-			TrainingAttempt copy = new TrainingAttempt();
-			copy.setId(UUID.randomUUID());
-			copy.setModuleId(toModule);
-			copy.setUserId(attempt.getUserId());
-			copy.setVersion(attempt.getVersion());
-			copy.setScore(attempt.getScore());
-			copy.setPassed(attempt.isPassed());
-			copy.setAnswers(attempt.getAnswers());
-			copy.setSubmittedAt(attempt.getSubmittedAt());
-			return copy;
-		}).toList());
+	private void carryOverTrainingProgress(UUID fromModule, int version, UUID toModule) {
+		trainingProgress.saveAll(trainingProgress.findByModuleId(fromModule).stream()
+				.filter(progress -> progress.getVersion() == version)
+				.map(progress -> {
+					TrainingProgress copy = new TrainingProgress();
+					copy.setId(UUID.randomUUID());
+					copy.setModuleId(toModule);
+					copy.setUserId(progress.getUserId());
+					copy.setVersion(progress.getVersion());
+					copy.setVideoCompletedAt(progress.getVideoCompletedAt());
+					return copy;
+				}).toList());
+		trainingAttempts.saveAll(trainingAttempts.findByModuleId(fromModule).stream()
+				.filter(attempt -> attempt.getVersion() == version)
+				.map(attempt -> {
+					TrainingAttempt copy = new TrainingAttempt();
+					copy.setId(UUID.randomUUID());
+					copy.setModuleId(toModule);
+					copy.setUserId(attempt.getUserId());
+					copy.setVersion(attempt.getVersion());
+					copy.setScore(attempt.getScore());
+					copy.setPassed(attempt.isPassed());
+					copy.setAnswers(attempt.getAnswers());
+					copy.setSubmittedAt(attempt.getSubmittedAt());
+					return copy;
+				}).toList());
 	}
 
 	private static TrainingQuestion copyOf(TrainingQuestion question, UUID moduleId) {
@@ -231,9 +241,11 @@ public class SemesterLaunchService {
 		return copy;
 	}
 
-	/** A training reviewed in the old semester counts in the new one; a review already there is kept. */
-	private int carryOverTrainingReviews(Program from, Program to) {
-		List<PrismTrainingReview> old = prismReviews.findByProgramId(from.getId());
+	/** A mover's training reviewed in the old semester counts in the new one; a review already there is kept. */
+	private int carryOverTrainingReviews(Program from, Program to, Set<UUID> movers) {
+		List<PrismTrainingReview> old = prismReviews.findByProgramId(from.getId()).stream()
+				.filter(review -> movers.contains(review.getUserId()))
+				.toList();
 		if (old.isEmpty()) {
 			return 0;
 		}
