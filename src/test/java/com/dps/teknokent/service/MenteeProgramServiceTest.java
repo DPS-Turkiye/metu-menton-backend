@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.when;
 
 import java.time.Instant;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -14,7 +15,10 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import com.dps.teknokent.domain.ProgramFeature;
 import com.dps.teknokent.domain.ProgramMentorStatus;
+import com.dps.teknokent.domain.ProgramStatus;
+import com.dps.teknokent.domain.ProgramType;
 import com.dps.teknokent.domain.UserRole;
 import com.dps.teknokent.entity.AppUser;
 import com.dps.teknokent.entity.Organization;
@@ -178,5 +182,56 @@ class MenteeProgramServiceTest {
 		user.setId(UUID.randomUUID());
 		user.setRole(role);
 		return user;
+	}
+
+	@Test
+	void aStudentSeesTheFeaturesOfTheSemesterTheyAreIn() {
+		AppUser student = new AppUser();
+		student.setId(UUID.randomUUID());
+		student.setProgramId(FIRST_PROGRAM);
+		when(programRepository.findById(FIRST_PROGRAM))
+				.thenReturn(Optional.of(semester(FIRST_PROGRAM, ProgramStatus.ACTIVE, ProgramFeature.OFFICE_HOURS)));
+
+		assertThat(service.semesterFeaturesOf(student)).containsExactly(ProgramFeature.OFFICE_HOURS);
+	}
+
+	@Test
+	void aMentorOutsideAnySemesterAsAStudentSeesTheirNewestRunningProgram() {
+		AppUser mentor = new AppUser();
+		mentor.setId(UUID.randomUUID());
+		UUID completed = UUID.randomUUID();
+		when(programMentorRepository.findByMentorIdAndStatusOrderByCreatedAtDesc(mentor.getId(),
+				ProgramMentorStatus.ACCEPTED))
+				.thenReturn(List.of(mentorRow(completed), mentorRow(SECOND_PROGRAM), mentorRow(FIRST_PROGRAM)));
+		when(programRepository.findAllById(List.of(completed, SECOND_PROGRAM, FIRST_PROGRAM))).thenReturn(List.of(
+				semester(FIRST_PROGRAM, ProgramStatus.ACTIVE, ProgramFeature.OFFICE_HOURS),
+				semester(completed, ProgramStatus.COMPLETED, ProgramFeature.OFFICE_HOURS),
+				semester(SECOND_PROGRAM, ProgramStatus.ACTIVE, ProgramFeature.PEER_MENTORING)));
+
+		assertThat(service.semesterFeaturesOf(mentor)).containsExactly(ProgramFeature.PEER_MENTORING);
+	}
+
+	@Test
+	void someoneInNoSemesterSeesNoFeatures() {
+		AppUser outside = new AppUser();
+		outside.setId(UUID.randomUUID());
+
+		assertThat(service.semesterFeaturesOf(outside)).isEmpty();
+	}
+
+	private static Program semester(UUID id, ProgramStatus status, ProgramFeature feature) {
+		Program program = new Program();
+		program.setId(id);
+		program.setProgramType(ProgramType.SEMESTER);
+		program.setStatus(status);
+		program.setFeatures(EnumSet.of(feature));
+		return program;
+	}
+
+	private static ProgramMentor mentorRow(UUID programId) {
+		ProgramMentor row = new ProgramMentor();
+		row.setProgramId(programId);
+		row.setStatus(ProgramMentorStatus.ACCEPTED);
+		return row;
 	}
 }

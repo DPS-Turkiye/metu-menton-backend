@@ -1,9 +1,12 @@
 package com.dps.teknokent.service;
 
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import org.jspecify.annotations.Nullable;
@@ -70,14 +73,16 @@ public class MenteeProgramService {
 		UUID programId = user.getProgramId();
 		Optional<Program> program = programId == null ? Optional.empty() : programRepository.findById(programId);
 		if (program.isEmpty()) {
+			// The newest accepted row first, so a mentor in two running programs always gets the same one.
 			List<UUID> mentored = programMentorRepository
 					.findByMentorIdAndStatusOrderByCreatedAtDesc(user.getId(), ProgramMentorStatus.ACCEPTED).stream()
 					.map(ProgramMentor::getProgramId)
 					.toList();
-			program = mentored.isEmpty() ? Optional.empty()
+			Map<UUID, Program> running = mentored.isEmpty() ? Map.of()
 					: programRepository.findAllById(mentored).stream()
 							.filter(candidate -> candidate.getStatus() == ProgramStatus.ACTIVE)
-							.findFirst();
+							.collect(Collectors.toMap(Program::getId, Function.identity()));
+			program = mentored.stream().map(running::get).filter(Objects::nonNull).findFirst();
 		}
 		return program.map(found -> List.copyOf(found.features())).orElse(List.of());
 	}
