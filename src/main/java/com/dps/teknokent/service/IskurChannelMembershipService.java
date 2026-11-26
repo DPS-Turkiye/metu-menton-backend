@@ -42,8 +42,8 @@ import lombok.extern.slf4j.Slf4j;
  * Keeps the İŞKUR channels in step with the placements. The student handbook (p.04, p.13) wins over Figma 5.1 here:
  * "kanalların atamayla otomatik açılır; ekip değişirse erişimin de otomatik güncellenir", so the channels open with
  * the coordinator's provisional placement, not only once it is final. Every change rebuilds the whole program's
- * membership from the
- * placements, so it does not matter which field an event carries or in what order events arrive: a finalize, a move,
+ * membership from the placements, so it does not matter which field an event carries or in what order events arrive: a
+ * finalize, a move,
  * a new leader and a removal all come out right, and running it twice changes nothing.
  */
 @Slf4j

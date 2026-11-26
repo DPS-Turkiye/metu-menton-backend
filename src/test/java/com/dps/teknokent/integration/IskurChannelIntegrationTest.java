@@ -101,11 +101,13 @@ class IskurChannelIntegrationTest {
 	private IskurUnit events;
 	private IskurTeam media;
 	private IskurTeam digital;
+	private IskurTeam community;
 	private AppUser ayse;
 	private AppUser burak;
 	private AppUser ceren;
 	private AppUser deniz;
 	private AppUser unplaced;
+	private AppUser emre;
 
 	@BeforeEach
 	void setUp() {
@@ -123,13 +125,13 @@ class IskurChannelIntegrationTest {
 		events = unit("Etkinlik ve Topluluk", null);
 		media = team(creative, "Medya ve Kreatif Üretim");
 		digital = team(creative, "Dijital Dönüşüm ve Teknoloji");
-		IskurTeam community = team(events, "Etkinlik ve Topluluk Yönetimi");
+		community = team(events, "Etkinlik ve Topluluk Yönetimi");
 
 		ayse = user("Ayşe Yıldız", UserRole.MENTEE, program);
 		burak = user("Burak Tan", UserRole.MENTEE, program);
 		ceren = user("Ceren Su", UserRole.MENTEE, program);
 		deniz = user("Deniz Arslan", UserRole.MENTEE, program);
-		AppUser emre = user("Emre Kurt", UserRole.MENTEE, program);
+		emre = user("Emre Kurt", UserRole.MENTEE, program);
 		unplaced = user("Fatma Ak", UserRole.MENTEE, program);
 		place(ayse, media, IskurTeamRole.LEADER, null, true);
 		place(burak, media, IskurTeamRole.MEMBER, ayse, true);
@@ -183,6 +185,22 @@ class IskurChannelIntegrationTest {
 
 		assertThat(channelRepository.count()).isEqualTo(before);
 		channels(deniz).andExpect(jsonPath("$.channels.length()").value(4));
+	}
+
+	@Test
+	void aProvisionalLeaderGetsTheirOneToOneAndLosesItWhenUnplaced() throws Exception {
+		place(unplaced, community, IskurTeamRole.LEADER, null, false);
+		move(emre, community, unplaced);
+		channels(emre)
+				.andExpect(jsonPath("$.channels[*].kind").value(Matchers.contains(
+						"ANNOUNCEMENTS", "UNIT", "TEAM", "LEADER_DIRECT")))
+				.andExpect(jsonPath("$.channels[3].name").value("Fatma Ak"));
+
+		placementRepository.delete(placementRepository.findByProgramIdAndUserId(program.getId(), unplaced.getId())
+				.orElseThrow());
+		membership.reconcile(program.getId());
+		channels(unplaced).andExpect(jsonPath("$.channels").isEmpty());
+		channels(emre).andExpect(jsonPath("$.channels.length()").value(3));
 	}
 
 	@Test
