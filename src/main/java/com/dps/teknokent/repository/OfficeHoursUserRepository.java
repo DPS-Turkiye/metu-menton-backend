@@ -1,6 +1,8 @@
 package com.dps.teknokent.repository;
 
 import java.time.Instant;
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -19,6 +21,31 @@ public interface OfficeHoursUserRepository extends JpaRepository<OfficeHoursUser
 	Optional<OfficeHoursUser> findByIssuerAndSubject(String issuer, String subject);
 
 	Optional<OfficeHoursUser> findByAppUserId(UUID appUserId);
+
+	/**
+	 * Each account's office-hours person, and whether it has hours: a weekly range, or one-off hours that are not over
+	 * at {@code now}. One query for any number of accounts.
+	 */
+	@Query("""
+			select person.appUserId as accountId, person.id as personId,
+			  (case when exists (select 1 from OfficeHoursRule rule where rule.instructorId = person.id)
+			      or exists (select 1 from OfficeHoursOneOff oneOff
+			                 where oneOff.instructorId = person.id and oneOff.endsAt > :now)
+			    then true else false end) as hoursDefined
+			from OfficeHoursUser person
+			where person.appUserId in :accountIds
+			""")
+	List<PersonHours> findHoursByAccountIdIn(@Param("accountIds") Collection<UUID> accountIds,
+			@Param("now") Instant now);
+
+	interface PersonHours {
+
+		UUID getAccountId();
+
+		UUID getPersonId();
+
+		boolean isHoursDefined();
+	}
 
 	/** The person, locked until the transaction ends: one request of theirs is checked and saved at a time. */
 	@Lock(LockModeType.PESSIMISTIC_WRITE)
