@@ -20,7 +20,9 @@ import com.dps.teknokent.entity.PrismTrainingLink;
 import com.dps.teknokent.entity.PrismTrainingReview;
 import com.dps.teknokent.entity.Program;
 import com.dps.teknokent.entity.ProgramPeerCategory;
+import com.dps.teknokent.entity.TrainingAttempt;
 import com.dps.teknokent.entity.TrainingModule;
+import com.dps.teknokent.entity.TrainingProgress;
 import com.dps.teknokent.entity.TrainingQuestion;
 import com.dps.teknokent.exception.ConflictException;
 import com.dps.teknokent.exception.InvalidRequestException;
@@ -30,7 +32,9 @@ import com.dps.teknokent.repository.PrismTrainingLinkRepository;
 import com.dps.teknokent.repository.PrismTrainingReviewRepository;
 import com.dps.teknokent.repository.ProgramPeerCategoryRepository;
 import com.dps.teknokent.repository.ProgramRepository;
+import com.dps.teknokent.repository.TrainingAttemptRepository;
 import com.dps.teknokent.repository.TrainingModuleRepository;
+import com.dps.teknokent.repository.TrainingProgressRepository;
 import com.dps.teknokent.repository.TrainingQuestionRepository;
 import com.dps.teknokent.security.AdminAccess;
 import com.dps.teknokent.util.Texts;
@@ -62,6 +66,8 @@ public class SemesterLaunchService {
 	private final TrainingModuleRepository trainingModules;
 	private final TrainingQuestionRepository trainingQuestions;
 	private final PrismTrainingLinkRepository prismLinks;
+	private final TrainingProgressRepository trainingProgress;
+	private final TrainingAttemptRepository trainingAttempts;
 
 	@Transactional(readOnly = true)
 	public LaunchPreviewResponse preview(UUID actorId, UUID programId) {
@@ -95,7 +101,13 @@ public class SemesterLaunchService {
 		if (previous.isEmpty()) {
 			return launched;
 		}
-		rollOver(actorId, previous.get(), next);
+		// Locked and checked again: a second admin launching another draft at the same moment waits here, and then
+		// finds this semester completed instead of rolling it over twice.
+		Program from = programs.findByIdForUpdate(previous.get().getId())
+				.filter(locked -> locked.getStatus() == ProgramStatus.ACTIVE)
+				.orElseThrow(() -> new ConflictException(Texts.forRequest("error.severalRunningSemesters"),
+						SEVERAL_RUNNING));
+		rollOver(actorId, from, next);
 		return coordinatorProgramService.detail(actorId, programId);
 	}
 
@@ -163,6 +175,7 @@ public class SemesterLaunchService {
 					.map(question -> copyOf(question, module.getId()))
 					.toList();
 			trainingQuestions.saveAll(questions);
+			carryOverTrainingProgress(source.getId(), module.getId());
 			carried.add("training");
 		}
 		Optional<PrismTrainingLink> oldLink = prismLinks.findById(from.getId());
@@ -176,6 +189,31 @@ public class SemesterLaunchService {
 			carried.add("prism");
 		}
 		return carried.isEmpty() ? "none" : String.join(", ", carried);
+	}
+
+	/** The same training in the new semester: a watched video and the quiz attempts so far still count. */
+	private void carryOverTrainingProgress(UUID fromModule, UUID toModule) {
+		trainingProgress.saveAll(trainingProgress.findByModuleId(fromModule).stream().map(progress -> {
+			TrainingProgress copy = new TrainingProgress();
+			copy.setId(UUID.randomUUID());
+			copy.setModuleId(toModule);
+			copy.setUserId(progress.getUserId());
+			copy.setVersion(progress.getVersion());
+			copy.setVideoCompletedAt(progress.getVideoCompletedAt());
+			return copy;
+		}).toList());
+		trainingAttempts.saveAll(trainingAttempts.findByModuleId(fromModule).stream().map(attempt -> {
+			TrainingAttempt copy = new TrainingAttempt();
+			copy.setId(UUID.randomUUID());
+			copy.setModuleId(toModule);
+			copy.setUserId(attempt.getUserId());
+			copy.setVersion(attempt.getVersion());
+			copy.setScore(attempt.getScore());
+			copy.setPassed(attempt.isPassed());
+			copy.setAnswers(attempt.getAnswers());
+			copy.setSubmittedAt(attempt.getSubmittedAt());
+			return copy;
+		}).toList());
 	}
 
 	private static TrainingQuestion copyOf(TrainingQuestion question, UUID moduleId) {
@@ -196,6 +234,9 @@ public class SemesterLaunchService {
 	/** A training reviewed in the old semester counts in the new one; a review already there is kept. */
 	private int carryOverTrainingReviews(Program from, Program to) {
 		List<PrismTrainingReview> old = prismReviews.findByProgramId(from.getId());
+		if (old.isEmpty()) {
+			return 0;
+		}
 		Set<UUID> present = Set.copyOf(prismReviews.findByProgramIdAndUserIdIn(to.getId(),
 				old.stream().map(PrismTrainingReview::getUserId).toList()).stream()
 				.map(PrismTrainingReview::getUserId)
@@ -209,7 +250,7 @@ public class SemesterLaunchService {
 			copy.setId(UUID.randomUUID());
 			copy.setProgramId(to.getId());
 			copy.setUserId(review.getUserId());
-			copy.setCompletedAt(review.getCompletedAt() == null ? Instant.now() : review.getCompletedAt());
+			copy.setCompletedAt(review.getCompletedAt());
 			copy.setDecision(review.getDecision());
 			copy.setDecidedAt(review.getDecidedAt());
 			copy.setDecidedBy(review.getDecidedBy());

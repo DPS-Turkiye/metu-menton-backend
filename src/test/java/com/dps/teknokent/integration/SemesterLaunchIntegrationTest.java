@@ -44,7 +44,9 @@ import com.dps.teknokent.entity.Program;
 import com.dps.teknokent.entity.ProgramCoordinator;
 import com.dps.teknokent.entity.ProgramMentor;
 import com.dps.teknokent.entity.ProgramPeerCategory;
+import com.dps.teknokent.entity.TrainingAttempt;
 import com.dps.teknokent.entity.TrainingModule;
+import com.dps.teknokent.entity.TrainingProgress;
 import com.dps.teknokent.entity.TrainingQuestion;
 import com.dps.teknokent.entity.UserBadge;
 import com.dps.teknokent.repository.AppUserRepository;
@@ -55,7 +57,9 @@ import com.dps.teknokent.repository.ProgramCoordinatorRepository;
 import com.dps.teknokent.repository.ProgramMentorRepository;
 import com.dps.teknokent.repository.ProgramPeerCategoryRepository;
 import com.dps.teknokent.repository.ProgramRepository;
+import com.dps.teknokent.repository.TrainingAttemptRepository;
 import com.dps.teknokent.repository.TrainingModuleRepository;
+import com.dps.teknokent.repository.TrainingProgressRepository;
 import com.dps.teknokent.repository.TrainingQuestionRepository;
 import com.dps.teknokent.repository.UserBadgeRepository;
 import com.dps.teknokent.service.ProgramPeerCategoryService;
@@ -95,6 +99,10 @@ class SemesterLaunchIntegrationTest {
 	private PrismTrainingLinkRepository prismLinks;
 	@Autowired
 	private MentorProfileRepository mentorProfiles;
+	@Autowired
+	private TrainingProgressRepository trainingProgress;
+	@Autowired
+	private TrainingAttemptRepository trainingAttempts;
 
 	private AppUser admin;
 	private AppUser coordinator;
@@ -197,6 +205,63 @@ class SemesterLaunchIntegrationTest {
 	}
 
 	@Test
+	void aMentorWhoseGateWasRevokedOrRanOutOrWhoIsNotApprovedStaysBehind() throws Exception {
+		AppUser revoked = account(UserRole.MENTEE, "Geri Alınan", UserAccountStatus.APPROVED, null);
+		UserBadge revokedGate = gate(revoked, fall);
+		revokedGate.setStatus(BadgeStatus.REVOKED);
+		revokedGate.setRevokedAt(Instant.now());
+		badges.saveAndFlush(revokedGate);
+		AppUser expired = account(UserRole.MENTEE, "Süresi Dolan", UserAccountStatus.APPROVED, null);
+		UserBadge expiredGate = gate(expired, fall);
+		expiredGate.setExpiresAt(Instant.now().minusSeconds(60));
+		badges.saveAndFlush(expiredGate);
+		AppUser pending = account(UserRole.MENTEE, "Bekleyen", UserAccountStatus.PENDING, null);
+		gate(pending, fall);
+		AppUser live = account(UserRole.MENTEE, "Deniz Ak", UserAccountStatus.APPROVED, null);
+		gate(live, fall);
+
+		call(get("/api/coordinator/programs/{id}/launch-preview", spring.getId()), admin)
+				.andExpect(jsonPath("$.peerMentors").value(1));
+		call(post("/api/coordinator/programs/{id}/launch", spring.getId()), admin).andExpect(status().isOk());
+
+		assertThat(programMentors.findByProgramIdAndMentorId(spring.getId(), live.getId())).isPresent();
+		for (AppUser left : List.of(revoked, expired, pending)) {
+			assertThat(programMentors.findByProgramIdAndMentorId(spring.getId(), left.getId())).isEmpty();
+			assertThat(badges.findFirstByUserIdAndBadgeCodeAndProgramIdAndStatus(left.getId(), BadgeCode.PEER_MENTOR,
+					spring.getId(), BadgeStatus.ACTIVE)).isEmpty();
+		}
+	}
+
+	@Test
+	void aCopiedTrainingKeepsTheVideoWatchedAndTheQuizTries() throws Exception {
+		AppUser student = account(UserRole.MENTEE, "Ayşe Yılmaz", UserAccountStatus.APPROVED, fall);
+		TrainingModule module = trainingModule(fall, 1);
+		TrainingProgress watched = new TrainingProgress();
+		watched.setId(UUID.randomUUID());
+		watched.setModuleId(module.getId());
+		watched.setUserId(student.getId());
+		watched.setVersion(1);
+		watched.setVideoCompletedAt(Instant.now());
+		trainingProgress.saveAndFlush(watched);
+		TrainingAttempt attempt = new TrainingAttempt();
+		attempt.setId(UUID.randomUUID());
+		attempt.setModuleId(module.getId());
+		attempt.setUserId(student.getId());
+		attempt.setVersion(1);
+		attempt.setScore(3);
+		attempt.setAnswers("[1,2,3]");
+		attempt.setSubmittedAt(Instant.now());
+		trainingAttempts.saveAndFlush(attempt);
+
+		call(post("/api/coordinator/programs/{id}/launch", spring.getId()), admin).andExpect(status().isOk());
+
+		UUID copied = trainingModules.findByProgramId(spring.getId()).orElseThrow().getId();
+		assertThat(trainingProgress.findByModuleId(copied)).singleElement()
+				.satisfies(progress -> assertThat(progress.getUserId()).isEqualTo(student.getId()));
+		assertThat(trainingAttempts.findByModuleId(copied)).hasSize(1);
+	}
+
+	@Test
 	void whatTheCoordinatorAlreadySetInTheDraftIsKept() throws Exception {
 		peerCategories.saveAndFlush(new ProgramPeerCategory(fall.getId(), PeerTopicCategory.CAREER_INTERNSHIP,
 				coordinator.getId(), Instant.now()));
@@ -287,7 +352,7 @@ class SemesterLaunchIntegrationTest {
 		programCoordinators.saveAndFlush(link);
 	}
 
-	private void gate(AppUser holder, Program program) {
+	private UserBadge gate(AppUser holder, Program program) {
 		UserBadge award = new UserBadge();
 		award.setId(UUID.randomUUID());
 		award.setUserId(holder.getId());
@@ -297,8 +362,9 @@ class SemesterLaunchIntegrationTest {
 		award.setSource(BadgeSource.COORDINATOR);
 		award.setAwardedAt(Instant.now());
 		award.setAwardedBy(coordinator.getId());
-		badges.saveAndFlush(award);
+		UserBadge saved = badges.saveAndFlush(award);
 		acceptedRow(holder, program);
+		return saved;
 	}
 
 	private void acceptedRow(AppUser mentor, Program program) {

@@ -4,6 +4,7 @@ import java.time.Instant;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.EnumSet;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -405,17 +406,40 @@ public class BadgeService {
 				.collect(Collectors.toCollection(() -> EnumSet.noneOf(UserRole.class)));
 	}
 
-	/** A semester's Akran mentors: active gate badge holders, and accepted mentors from before gate badges. */
+	/**
+	 * A semester's Akran mentors who carry over to the next one: approved accounts with a live gate badge there (active
+	 * and not past its expiry), and accepted mentors from before gate badges. Someone whose gate was revoked or ran
+	 * out stays behind, even with an accepted row.
+	 */
 	@Transactional(readOnly = true)
 	public Set<UUID> peerMentorIds(UUID programId) {
-		Set<UUID> mentors = new LinkedHashSet<>();
-		awards.findByProgramIdAndBadgeCodeOrderByAwardedAtDesc(programId, GATE).stream()
-				.filter(award -> award.getStatus() == BadgeStatus.ACTIVE)
-				.forEach(award -> mentors.add(award.getUserId()));
-		programMentors.findByProgramIdOrderByCreatedAtAsc(programId).stream()
-				.filter(row -> row.getStatus() == ProgramMentorStatus.ACCEPTED)
-				.forEach(row -> mentors.add(row.getMentorId()));
-		return mentors;
+		return carriedMentors(programId, Instant.now()).keySet();
+	}
+
+	/** Each carried mentor with their live gate badge, or {@code null} for an accepted mentor without one. */
+	private Map<UUID, @Nullable UserBadge> carriedMentors(UUID programId, Instant now) {
+		List<UserBadge> gates = awards.findByProgramIdAndBadgeCodeOrderByAwardedAtDesc(programId, GATE);
+		Set<UUID> heldAGate = new HashSet<>();
+		Map<UUID, @Nullable UserBadge> live = new LinkedHashMap<>();
+		for (UserBadge gate : gates) {
+			heldAGate.add(gate.getUserId());
+			boolean active = gate.getStatus() == BadgeStatus.ACTIVE
+					&& (gate.getExpiresAt() == null || gate.getExpiresAt().isAfter(now));
+			if (active) {
+				live.putIfAbsent(gate.getUserId(), gate);
+			}
+		}
+		for (ProgramMentor row : programMentors.findByProgramIdOrderByCreatedAtAsc(programId)) {
+			if (row.getStatus() == ProgramMentorStatus.ACCEPTED && !heldAGate.contains(row.getMentorId())) {
+				live.putIfAbsent(row.getMentorId(), null);
+			}
+		}
+		Set<UUID> approved = users.findAllById(live.keySet()).stream()
+				.filter(account -> account.getStatus() == UserAccountStatus.APPROVED)
+				.map(AppUser::getId)
+				.collect(Collectors.toSet());
+		live.keySet().retainAll(approved);
+		return live;
 	}
 
 	/**
@@ -426,23 +450,21 @@ public class BadgeService {
 	@Transactional
 	public int carryOverPeerMentors(Program from, Program to, UUID actorId) {
 		Instant now = Instant.now();
-		Set<UUID> carried = new LinkedHashSet<>();
-		for (UserBadge gate : awards.findByProgramIdAndBadgeCodeOrderByAwardedAtDesc(from.getId(), GATE)) {
-			if (gate.getStatus() != BadgeStatus.ACTIVE || !carried.add(gate.getUserId())) {
-				continue;
-			}
-			AppUser holder = users.findById(gate.getUserId()).orElse(null);
-			if (holder != null && activeGate(holder.getId(), to.getId()) == null) {
+		Map<UUID, @Nullable UserBadge> carried = carriedMentors(from.getId(), now);
+		Map<UUID, AppUser> holders = users.findAllById(carried.keySet()).stream()
+				.collect(Collectors.toMap(AppUser::getId, Function.identity()));
+		carried.forEach((mentorId, gate) -> {
+			AppUser holder = holders.get(mentorId);
+			if (gate == null || holder == null) {
+				acceptMembership(to, mentorId, now);
+			} else if (activeGate(mentorId, to.getId()) == null) {
 				UserBadge copy = award(holder, GATE, to, BadgeSource.RULE, actorId, false);
 				copy.setExpiresAt(gate.getExpiresAt());
 				awards.save(copy);
+			} else {
+				acceptMembership(to, mentorId, now);
 			}
-		}
-		for (ProgramMentor row : programMentors.findByProgramIdOrderByCreatedAtAsc(from.getId())) {
-			if (row.getStatus() == ProgramMentorStatus.ACCEPTED && carried.add(row.getMentorId())) {
-				acceptMembership(to, row.getMentorId(), now);
-			}
-		}
+		});
 		return carried.size();
 	}
 

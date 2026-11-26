@@ -13,4 +13,6 @@ public interface TrainingProgressRepository extends JpaRepository<TrainingProgre
 	boolean existsByModuleIdAndUserIdAndVersion(UUID moduleId, UUID userId, int version);
 
 	List<TrainingProgress> findByModuleIdAndVersionAndUserIdIn(UUID moduleId, int version, Collection<UUID> userIds);
+
+	List<TrainingProgress> findByModuleId(UUID moduleId);
 }
