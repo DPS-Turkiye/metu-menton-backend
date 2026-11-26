@@ -14,4 +14,6 @@ public interface PrismTrainingReviewRepository extends JpaRepository<PrismTraini
 	Optional<PrismTrainingReview> findByProgramIdAndUserId(UUID programId, UUID userId);
 
 	List<PrismTrainingReview> findByProgramIdAndUserIdIn(UUID programId, Collection<UUID> userIds);
+
+	List<PrismTrainingReview> findByProgramId(UUID programId);
 }

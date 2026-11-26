@@ -405,6 +405,47 @@ public class BadgeService {
 				.collect(Collectors.toCollection(() -> EnumSet.noneOf(UserRole.class)));
 	}
 
+	/** A semester's Akran mentors: active gate badge holders, and accepted mentors from before gate badges. */
+	@Transactional(readOnly = true)
+	public Set<UUID> peerMentorIds(UUID programId) {
+		Set<UUID> mentors = new LinkedHashSet<>();
+		awards.findByProgramIdAndBadgeCodeOrderByAwardedAtDesc(programId, GATE).stream()
+				.filter(award -> award.getStatus() == BadgeStatus.ACTIVE)
+				.forEach(award -> mentors.add(award.getUserId()));
+		programMentors.findByProgramIdOrderByCreatedAtAsc(programId).stream()
+				.filter(row -> row.getStatus() == ProgramMentorStatus.ACCEPTED)
+				.forEach(row -> mentors.add(row.getMentorId()));
+		return mentors;
+	}
+
+	/**
+	 * At a semester roll-over the Akran mentors of {@code from} keep mentoring in {@code to} without retraining: each
+	 * active gate badge is awarded again there, silently and with the same expiry, which also accepts them in the new
+	 * pool; an accepted mentor without one gets an accepted row. The old awards and rows stay as history.
+	 */
+	@Transactional
+	public int carryOverPeerMentors(Program from, Program to, UUID actorId) {
+		Instant now = Instant.now();
+		Set<UUID> carried = new LinkedHashSet<>();
+		for (UserBadge gate : awards.findByProgramIdAndBadgeCodeOrderByAwardedAtDesc(from.getId(), GATE)) {
+			if (gate.getStatus() != BadgeStatus.ACTIVE || !carried.add(gate.getUserId())) {
+				continue;
+			}
+			AppUser holder = users.findById(gate.getUserId()).orElse(null);
+			if (holder != null && activeGate(holder.getId(), to.getId()) == null) {
+				UserBadge copy = award(holder, GATE, to, BadgeSource.RULE, actorId, false);
+				copy.setExpiresAt(gate.getExpiresAt());
+				awards.save(copy);
+			}
+		}
+		for (ProgramMentor row : programMentors.findByProgramIdOrderByCreatedAtAsc(from.getId())) {
+			if (row.getStatus() == ProgramMentorStatus.ACCEPTED && carried.add(row.getMentorId())) {
+				acceptMembership(to, row.getMentorId(), now);
+			}
+		}
+		return carried.size();
+	}
+
 	private void acceptMembership(Program program, UUID mentorId, Instant now) {
 		ProgramMentor membership = programMentors.findByProgramIdAndMentorId(program.getId(), mentorId)
 				.orElseGet(() -> {

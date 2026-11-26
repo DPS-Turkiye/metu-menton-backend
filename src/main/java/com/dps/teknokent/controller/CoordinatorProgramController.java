@@ -31,6 +31,7 @@ import com.dps.teknokent.dto.requests.SetProgramFeaturesRequest;
 import com.dps.teknokent.dto.requests.TeamInviteInput;
 import com.dps.teknokent.dto.requests.UpdateProgramDetailsRequest;
 import com.dps.teknokent.dto.responses.CoordinatorProgramResponse;
+import com.dps.teknokent.dto.responses.LaunchPreviewResponse;
 import com.dps.teknokent.dto.responses.MentorPoolResponse;
 import com.dps.teknokent.dto.responses.ProgramApprovalsResponse;
 import com.dps.teknokent.dto.responses.ProgramEligibleEmailResponse;
@@ -47,6 +48,7 @@ import com.dps.teknokent.service.ProgramCoordinatorService;
 import com.dps.teknokent.service.ProgramLaunchService;
 import com.dps.teknokent.service.ProgramMatchingService;
 import com.dps.teknokent.service.ProgramRosterService;
+import com.dps.teknokent.service.SemesterLaunchService;
 import com.dps.teknokent.service.SyllabusPhaseService;
 
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -60,6 +62,7 @@ import lombok.RequiredArgsConstructor;
 public class CoordinatorProgramController {
 
 	private final CoordinatorProgramService coordinatorProgramService;
+	private final SemesterLaunchService semesterLaunchService;
 	private final ProgramCoordinatorService programCoordinatorService;
 	private final ProgramLaunchService programLaunchService;
 	private final MentorPoolService mentorPoolService;
@@ -204,12 +207,20 @@ public class CoordinatorProgramController {
 		return programLaunchService.create(CurrentActor.resolve(request.actorId()), request);
 	}
 
-	/** Taslak → Aktif, admin only. */
+	/** What launching this semester draft will do: the semester it completes and who moves; admin only. */
+	@GetMapping("/{id}/launch-preview")
+	public LaunchPreviewResponse launchPreview(
+			@PathVariable UUID id,
+			@RequestParam(required = false) UUID actorId) {
+		return semesterLaunchService.preview(CurrentActor.resolve(actorId), id);
+	}
+
+	/** Taslak → Aktif, admin only; a semester rolls the running one over (SemesterLaunchService). */
 	@PostMapping("/{id}/launch")
 	public CoordinatorProgramResponse.Detail launch(
 			@PathVariable UUID id,
 			@RequestParam(required = false) UUID actorId) {
-		return coordinatorProgramService.launch(CurrentActor.resolve(actorId), id);
+		return semesterLaunchService.launch(CurrentActor.resolve(actorId), id);
 	}
 
 	@GetMapping("/{id}/teams")

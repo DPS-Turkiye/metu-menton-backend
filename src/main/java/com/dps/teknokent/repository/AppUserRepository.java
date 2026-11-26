@@ -96,4 +96,7 @@ public interface AppUserRepository extends JpaRepository<AppUser, UUID> {
 	@Modifying
 	@Query("update AppUser u set u.signInsRevokedAt = :at where u.id = :id")
 	int recordSignInsRevokedAt(@Param("id") UUID id, @Param("at") Instant at);
+
+	/** Every account in a program but the deleted tombstones: who moves when a semester rolls over. */
+	List<AppUser> findByProgramIdAndStatusNot(UUID programId, UserAccountStatus status);
 }
