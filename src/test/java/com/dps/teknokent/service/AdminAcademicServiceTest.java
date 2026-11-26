@@ -7,13 +7,15 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpStatus;
@@ -33,6 +35,8 @@ import com.dps.teknokent.repository.AppUserIdentityRepository;
 import com.dps.teknokent.repository.InstitutionAdvisingRepository;
 import com.dps.teknokent.repository.InstitutionAdvisingRepository.AdvisorLoad;
 import com.dps.teknokent.repository.InstitutionPersonRepository;
+import com.dps.teknokent.repository.OfficeHoursMeetingRepository;
+import com.dps.teknokent.repository.OfficeHoursUserRepository;
 
 @ExtendWith(MockitoExtension.class)
 class AdminAcademicServiceTest {
@@ -50,8 +54,54 @@ class AdminAcademicServiceTest {
 	private AppUserIdentityRepository identities;
 	@Mock
 	private CoordinatorProgramService coordinatorProgramService;
-	@InjectMocks
+	@Mock
+	private OfficeHoursUserRepository officeHoursPeople;
+	@Mock
+	private OfficeHoursMeetingRepository meetings;
+
+	/** 15 November 2026, so this month in Istanbul runs from 31 October 21:00 UTC to 30 November 21:00 UTC. */
+	private static final Instant NOW = Instant.parse("2026-11-15T09:00:00Z");
+
 	private AdminAcademicService service;
+
+	@BeforeEach
+	void setUp() {
+		service = new AdminAcademicService(domainLookupService, people, advising, identities,
+				coordinatorProgramService, officeHoursPeople, meetings, Clock.fixed(NOW, ZoneOffset.UTC));
+	}
+
+	private record Hours(UUID accountId, UUID personId, boolean hoursDefined)
+			implements OfficeHoursUserRepository.PersonHours {
+
+		@Override
+		public UUID getAccountId() {
+			return accountId;
+		}
+
+		@Override
+		public UUID getPersonId() {
+			return personId;
+		}
+
+		@Override
+		public boolean isHoursDefined() {
+			return hoursDefined;
+		}
+	}
+
+	private record Meetings(UUID instructorId, long meetings)
+			implements OfficeHoursMeetingRepository.InstructorMeetings {
+
+		@Override
+		public UUID getInstructorId() {
+			return instructorId;
+		}
+
+		@Override
+		public long getMeetings() {
+			return meetings;
+		}
+	}
 
 	@Test
 	void listsAcademiciansWithTheirAdviseesAndLastSignIn() {
@@ -95,6 +145,35 @@ class AdminAcademicServiceTest {
 	}
 
 	@Test
+	void givesTheAdminEachAcademiciansOfficeHoursAndThisMonthsMeetings() {
+		when(domainLookupService.requireUser(ADMIN)).thenReturn(user(ADMIN, UserRole.ADMIN));
+		UUID ayse = UUID.fromString("00000000-0000-0000-0000-0000000000b2");
+		UUID aliPerson = UUID.fromString("00000000-0000-0000-0000-0000000000c1");
+		UUID aysePerson = UUID.fromString("00000000-0000-0000-0000-0000000000c2");
+		UUID can = UUID.fromString("00000000-0000-0000-0000-0000000000b3");
+		when(people.findByAcademicTrueOrderByFullNameAsc()).thenReturn(List.of(
+				academic("A-1", "Ali Demir", user(ALI, UserRole.MENTOR)),
+				academic("A-2", "Ayşe Kaya", user(ayse, UserRole.MENTOR)),
+				academic("A-3", "Can Er", user(can, UserRole.MENTOR)),
+				academic("A-4", "Zeynep Kara", null)));
+		when(advising.countAdviseesByAdvisor()).thenReturn(List.of());
+		when(officeHoursPeople.findHoursByAccountIdIn(List.of(ALI, ayse, can), NOW))
+				.thenReturn(List.of(new Hours(ALI, aliPerson, true), new Hours(ayse, aysePerson, false)));
+		when(meetings.countLiveByInstructorBetween(List.of(aliPerson, aysePerson),
+				Instant.parse("2026-10-31T21:00:00Z"), Instant.parse("2026-11-30T21:00:00Z")))
+				.thenReturn(List.of(new Meetings(aliPerson, 14)));
+
+		List<AdminAcademicResponse> rows = service.list(ADMIN);
+
+		assertThat(rows).extracting(AdminAcademicResponse::officeHours).containsExactly(
+				new AdminAcademicResponse.OfficeHours(true, 14),
+				new AdminAcademicResponse.OfficeHours(false, 0),
+				// Signed in but never opened Office Hours, and never signed in at all: none set, no meetings.
+				new AdminAcademicResponse.OfficeHours(false, 0),
+				new AdminAcademicResponse.OfficeHours(false, 0));
+	}
+
+	@Test
 	void onlyAnAdminListsAcademicians() {
 		UUID coordinator = UUID.randomUUID();
 		when(domainLookupService.requireUser(coordinator)).thenReturn(user(coordinator, UserRole.COORDINATOR));
@@ -131,7 +210,9 @@ class AdminAcademicServiceTest {
 
 		List<AdminAcademicResponse> rows = service.forProgram(coordinator, programId);
 
+		verify(officeHoursPeople, never()).findHoursByAccountIdIn(any(), any());
 		assertThat(rows).singleElement().satisfies(row -> {
+			assertThat(row.officeHours()).isNull();
 			assertThat(row.fullName()).isEqualTo("Ali Demir");
 			assertThat(row.email()).isNull();
 			assertThat(row.lastLoginAt()).isNull();

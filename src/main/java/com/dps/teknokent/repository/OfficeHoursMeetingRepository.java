@@ -90,5 +90,23 @@ public interface OfficeHoursMeetingRepository extends JpaRepository<OfficeHoursM
 
 	long countByScheduledAtGreaterThanEqualAndScheduledAtLessThan(Instant from, Instant to);
 
+	/** Each academic's live meetings starting in [from, to), cancelled ones left out. One query for any number. */
+	@Query("""
+			select meeting.instructorId as instructorId, count(meeting) as meetings
+			from OfficeHoursMeeting meeting
+			where meeting.instructorId in :instructorIds and meeting.cancelledAt is null
+			  and meeting.scheduledAt >= :from and meeting.scheduledAt < :to
+			group by meeting.instructorId
+			""")
+	List<InstructorMeetings> countLiveByInstructorBetween(@Param("instructorIds") Collection<UUID> instructorIds,
+			@Param("from") Instant from, @Param("to") Instant to);
+
+	interface InstructorMeetings {
+
+		UUID getInstructorId();
+
+		long getMeetings();
+	}
+
 	List<OfficeHoursMeeting> findByScheduledAtGreaterThanEqualAndScheduledAtLessThan(Instant from, Instant to);
 }
