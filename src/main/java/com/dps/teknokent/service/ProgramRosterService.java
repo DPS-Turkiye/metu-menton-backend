@@ -10,6 +10,7 @@ import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.dps.teknokent.domain.ProgramFeature;
 import com.dps.teknokent.dto.requests.AddProgramEligibleEmailsRequest;
 import com.dps.teknokent.dto.responses.ProgramEligibleEmailResponse;
 import com.dps.teknokent.entity.Program;
@@ -37,7 +38,7 @@ public class ProgramRosterService {
 
 	@Transactional(readOnly = true)
 	public List<ProgramEligibleEmailResponse> list(UUID actorId, UUID programId) {
-		coordinatorProgramService.requireManagedProgram(actorId, programId);
+		peerProgram(actorId, programId);
 		return rows(programId);
 	}
 
@@ -45,7 +46,7 @@ public class ProgramRosterService {
 	@Transactional
 	public List<ProgramEligibleEmailResponse> add(UUID actorId, UUID programId,
 			AddProgramEligibleEmailsRequest request) {
-		Program program = coordinatorProgramService.requireSettingsEditor(actorId, programId);
+		Program program = peerSettings(actorId, programId);
 		Set<String> emails = request.emails().stream()
 				.map(EmailDomains::normalizeEmail)
 				.filter(email -> !email.isEmpty())
@@ -75,7 +76,7 @@ public class ProgramRosterService {
 
 	@Transactional
 	public List<ProgramEligibleEmailResponse> remove(UUID actorId, UUID programId, UUID entryId) {
-		coordinatorProgramService.requireSettingsEditor(actorId, programId);
+		peerSettings(actorId, programId);
 		ProgramEligibleEmail row = eligibleEmailRepository.findByIdAndProgramId(entryId, programId)
 				.orElseThrow(() -> new ResourceNotFoundException("List entry not found: " + entryId));
 		eligibleEmailRepository.delete(row);
@@ -89,5 +90,19 @@ public class ProgramRosterService {
 						.findRegisteredEmails(rows.stream().map(ProgramEligibleEmail::getEmail).toList()));
 		return rows.stream().map(row -> ProgramEligibleEmailResponse.of(row, registered.contains(row.getEmail())))
 				.toList();
+	}
+
+	/** A peer-mentoring screen: a semester coordinator who does not run Akran Mentörlüğü gets a 403. */
+	private Program peerProgram(UUID actorId, UUID programId) {
+		Program program = coordinatorProgramService.requireManagedProgram(actorId, programId);
+		coordinatorProgramService.requireAssigned(actorId, program, ProgramFeature.PEER_MENTORING);
+		return program;
+	}
+
+	/** Changing a peer-mentoring list: the same rule, for a program's settings editors. */
+	private Program peerSettings(UUID actorId, UUID programId) {
+		Program program = coordinatorProgramService.requireSettingsEditor(actorId, programId);
+		coordinatorProgramService.requireAssigned(actorId, program, ProgramFeature.PEER_MENTORING);
+		return program;
 	}
 }

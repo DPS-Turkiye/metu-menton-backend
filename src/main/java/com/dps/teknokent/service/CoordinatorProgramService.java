@@ -335,7 +335,6 @@ public class CoordinatorProgramService {
 			throw new ProgramWorkOpenException(Texts.forRequest("error.programFeatureWorkOpen"), blockers);
 		}
 		program.setFeatures(features);
-		featureAccess.dropSwitchedOff(programId, switchedOff);
 		if (program.has(ProgramFeature.PEER_MENTORING)) {
 			program.setIndividualMentees(true);
 		}

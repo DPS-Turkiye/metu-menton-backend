@@ -169,21 +169,46 @@ class SemesterCoordinatorFeaturesIntegrationTest {
 	}
 
 	@Test
-	void switchingAFeatureOffOrRemovingACoordinatorLeavesNoAssignment() throws Exception {
-		mockMvc.perform(put("/api/coordinator/programs/{id}/features", semester.getId())
-				.contentType(MediaType.APPLICATION_JSON)
-				.content(body(admin, List.of(ProgramFeature.PEER_MENTORING, ProgramFeature.ISKUR)))
-				.with(user("frontend").roles("SERVICE")))
-				.andExpect(status().isOk());
+	void aFeatureSwitchedOffIsNobodysUntilItIsSwitchedBackOn() throws Exception {
+		switchFeatures(ProgramFeature.PEER_MENTORING, ProgramFeature.ISKUR);
 
-		assertThat(featuresOf(officeHoursCoordinator)).isEmpty();
 		call(get("/api/coordinator/programs/{id}", semester.getId()), officeHoursCoordinator)
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.program.myFeatures.length()").value(0));
+		call(get("/api/coordinator/programs/{id}/coordinators", semester.getId()), admin)
+				.andExpect(jsonPath("$[?(@.id == '" + officeHoursCoordinator.getId() + "')].features[*]").isEmpty());
 
+		switchFeatures(ProgramFeature.values());
+
+		call(get("/api/coordinator/programs/{id}", semester.getId()), officeHoursCoordinator)
+				.andExpect(jsonPath("$.program.myFeatures[0]").value("OFFICE_HOURS"));
+	}
+
+	@Test
+	void removingACoordinatorRemovesTheirFeatures() throws Exception {
 		call(delete("/api/coordinator/programs/{id}/coordinators/{userId}", semester.getId(),
 				peerCoordinator.getId()), admin).andExpect(status().isOk());
+
 		assertThat(featuresOf(peerCoordinator)).isEmpty();
+	}
+
+	@Test
+	void theSharedPeerScreensAreClosedToAnOfficeHoursCoordinator() throws Exception {
+		for (String path : List.of("/api/coordinator/programs/{id}/mentors",
+				"/api/coordinator/programs/{id}/approvals", "/api/coordinator/programs/{id}/eligible-emails",
+				"/api/coordinator/programs/{id}/teams", "/api/coordinator/programs/{id}/matching",
+				"/api/coordinator/programs/{id}/report")) {
+			call(get(path, semester.getId()), officeHoursCoordinator).andExpect(status().isForbidden());
+			call(get(path, semester.getId()), peerCoordinator).andExpect(status().is2xxSuccessful());
+		}
+	}
+
+	private void switchFeatures(ProgramFeature... features) throws Exception {
+		mockMvc.perform(put("/api/coordinator/programs/{id}/features", semester.getId())
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(body(admin, List.of(features)))
+				.with(user("frontend").roles("SERVICE")))
+				.andExpect(status().isOk());
 	}
 
 	private ResultActions setCoordinatorFeatures(AppUser coordinator, AppUser actor, ProgramFeature... features)

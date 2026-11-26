@@ -133,12 +133,4 @@ public class ProgramFeatureAccess {
 	public void unassign(UUID programId, UUID userId) {
 		assignments.deleteByProgramIdAndUserId(programId, userId);
 	}
-
-	/** Features the semester no longer runs are nobody's there any more. */
-	@Transactional
-	public void dropSwitchedOff(UUID programId, Set<ProgramFeature> switchedOff) {
-		if (!switchedOff.isEmpty()) {
-			assignments.deleteByProgramIdAndFeatureIn(programId, switchedOff);
-		}
-	}
 }

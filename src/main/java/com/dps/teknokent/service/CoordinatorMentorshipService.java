@@ -22,6 +22,7 @@ import com.dps.teknokent.domain.MeetingStatus;
 import com.dps.teknokent.domain.MentorshipRequestStatus;
 import com.dps.teknokent.domain.MentorshipStatus;
 import com.dps.teknokent.domain.NotificationCategory;
+import com.dps.teknokent.domain.ProgramFeature;
 import com.dps.teknokent.dto.responses.CoordinatorMentorshipResponse;
 import com.dps.teknokent.entity.ActionItem;
 import com.dps.teknokent.entity.AppUser;
@@ -289,6 +290,7 @@ public class CoordinatorMentorshipService {
 			if (program == null) {
 				throw new InvalidRequestException("This mentorship is not in one of your programs.");
 			}
+			programService.requireAssigned(actorId, program, ProgramFeature.PEER_MENTORING);
 			return new Scoped(mentorship, program);
 		}
 		UUID organizationId = mentorship.getOrganization().getId();
@@ -302,6 +304,7 @@ public class CoordinatorMentorshipService {
 		if (program == null) {
 			throw new InvalidRequestException("This mentorship is not in one of your programs.");
 		}
+		programService.requireAssigned(actorId, program, ProgramFeature.PEER_MENTORING);
 		return new Scoped(mentorship, program);
 	}
 
