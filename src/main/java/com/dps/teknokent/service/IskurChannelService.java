@@ -105,6 +105,7 @@ public class IskurChannelService {
 	private final AppUserRepository users;
 	private final ApplicationEventPublisher events;
 	private final RateLimitingConfig rateLimiting;
+	private final ProgramFeatureAccess featureAccess;
 
 	/** Every channel the caller can open, Genel Duyurular first; a coordinator can narrow it to one program. */
 	@Transactional(readOnly = true)
@@ -374,7 +375,7 @@ public class IskurChannelService {
 					: ProgramCoordination.programsOf(actor.getId(), programs, programCoordinators);
 		}
 		return managed.stream()
-				.filter(program -> program.has(ProgramFeature.ISKUR))
+				.filter(program -> featureAccess.of(actor, program).contains(ProgramFeature.ISKUR))
 				.map(program -> new StaffScope(program, admin,
 						units.findByProgramIdOrderBySortOrderAscCreatedAtAsc(program.getId()).stream()
 								.collect(Collectors.toMap(IskurUnit::getId, Function.identity())),

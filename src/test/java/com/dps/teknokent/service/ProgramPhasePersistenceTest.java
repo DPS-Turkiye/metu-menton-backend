@@ -37,7 +37,7 @@ import jakarta.persistence.EntityManager;
 // it, which the unpooled embedded database has already closed.
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @Import({ CoordinatorProgramService.class, DomainLookupService.class, ProgramParticipantCounts.class,
-		ProgramWorkBlockers.class })
+		ProgramWorkBlockers.class, ProgramFeatureAccess.class })
 class ProgramPhasePersistenceTest {
 
 	@Autowired

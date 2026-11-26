@@ -236,6 +236,7 @@ public class ProgramOfficeHoursService {
 		if (!program.has(ProgramFeature.OFFICE_HOURS)) {
 			throw new InvalidRequestException("Appointments are listed for Office Hours programs only.");
 		}
+		coordinatorProgramService.requireAssigned(actorId, program, ProgramFeature.OFFICE_HOURS);
 	}
 
 	private List<OfficeHoursRequest> recent(@Nullable OfficeHoursRequestStatus status, Instant now) {

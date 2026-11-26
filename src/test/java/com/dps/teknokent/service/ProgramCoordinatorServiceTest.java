@@ -48,6 +48,8 @@ class ProgramCoordinatorServiceTest {
 	private NotificationService notificationService;
 	@Mock
 	private AdminCoordinatorService adminCoordinatorService;
+	@Mock
+	private ProgramFeatureAccess featureAccess;
 	@InjectMocks
 	private ProgramCoordinatorService service;
 
@@ -64,9 +66,10 @@ class ProgramCoordinatorServiceTest {
 		when(programService.requireManagedProgram(ADMIN, PROGRAM_ID)).thenReturn(program);
 		when(appUserRepository.findById(BURCU)).thenReturn(Optional.of(user(BURCU, "Burcu Şen", UserRole.COORDINATOR)));
 		when(programService.coordinatorsOf(program)).thenReturn(List.of(
-				new CoordinatorRef(ELIF, "Elif Demir", true), new CoordinatorRef(BURCU, "Burcu Şen", false)));
+				new CoordinatorRef(ELIF, "Elif Demir", true, List.of()),
+				new CoordinatorRef(BURCU, "Burcu Şen", false, List.of())));
 
-		var result = service.add(ADMIN, PROGRAM_ID, BURCU);
+		var result = service.add(ADMIN, PROGRAM_ID, BURCU, null);
 
 		ArgumentCaptor<ProgramCoordinator> saved = ArgumentCaptor.forClass(ProgramCoordinator.class);
 		verify(programCoordinatorRepository).save(saved.capture());
@@ -87,7 +90,7 @@ class ProgramCoordinatorServiceTest {
 		when(adminCoordinatorService.coordinatorForNewProgram(ADMIN, checked, program.getName()))
 				.thenReturn(user(invited, "Yeni Kişi", UserRole.COORDINATOR));
 
-		service.invite(ADMIN, PROGRAM_ID, new NewCoordinatorInput("Yeni Kişi", "yeni@x.org"));
+		service.invite(ADMIN, PROGRAM_ID, new NewCoordinatorInput("Yeni Kişi", "yeni@x.org"), null);
 
 		ArgumentCaptor<ProgramCoordinator> saved = ArgumentCaptor.forClass(ProgramCoordinator.class);
 		verify(programCoordinatorRepository).save(saved.capture());
@@ -98,7 +101,7 @@ class ProgramCoordinatorServiceTest {
 	@Test
 	void onlyAnAdminInvitesAndAnEmailAlreadyRunningTheProgramIsRefused() {
 		when(appUserRepository.findById(ELIF)).thenReturn(Optional.of(user(ELIF, "Elif", UserRole.COORDINATOR)));
-		assertThatThrownBy(() -> service.invite(ELIF, PROGRAM_ID, new NewCoordinatorInput("Yeni", "yeni@x.org")))
+		assertThatThrownBy(() -> service.invite(ELIF, PROGRAM_ID, new NewCoordinatorInput("Yeni", "yeni@x.org"), null))
 				.isInstanceOfSatisfying(ResponseStatusException.class,
 						refused -> assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN));
 		verify(adminCoordinatorService, never()).checkNewProgramCoordinator(any(), any(), any());
@@ -109,7 +112,8 @@ class ProgramCoordinatorServiceTest {
 				.thenReturn(
 						new CheckedInvite("burcu@x.org", "Burcu Şen", user(BURCU, "Burcu Şen", UserRole.COORDINATOR)));
 		when(programCoordinatorRepository.existsByProgramIdAndUserId(PROGRAM_ID, BURCU)).thenReturn(true);
-		assertThatThrownBy(() -> service.invite(ADMIN, PROGRAM_ID, new NewCoordinatorInput("Burcu", "burcu@x.org")))
+		assertThatThrownBy(
+				() -> service.invite(ADMIN, PROGRAM_ID, new NewCoordinatorInput("Burcu", "burcu@x.org"), null))
 				.isInstanceOf(InvalidRequestException.class);
 		verify(adminCoordinatorService, never()).coordinatorForNewProgram(any(), any(), any());
 		verify(programCoordinatorRepository, never()).save(any());
@@ -124,8 +128,10 @@ class ProgramCoordinatorServiceTest {
 		when(appUserRepository.findById(BURCU)).thenReturn(Optional.of(user(BURCU, "Burcu Şen", UserRole.COORDINATOR)));
 		when(programCoordinatorRepository.existsByProgramIdAndUserId(PROGRAM_ID, BURCU)).thenReturn(true);
 
-		assertThatThrownBy(() -> service.add(ADMIN, PROGRAM_ID, mentorId)).isInstanceOf(InvalidRequestException.class);
-		assertThatThrownBy(() -> service.add(ADMIN, PROGRAM_ID, BURCU)).isInstanceOf(InvalidRequestException.class);
+		assertThatThrownBy(() -> service.add(ADMIN, PROGRAM_ID, mentorId, null))
+				.isInstanceOf(InvalidRequestException.class);
+		assertThatThrownBy(() -> service.add(ADMIN, PROGRAM_ID, BURCU, null))
+				.isInstanceOf(InvalidRequestException.class);
 		verify(programCoordinatorRepository, never()).save(any());
 	}
 
@@ -137,7 +143,8 @@ class ProgramCoordinatorServiceTest {
 		row.setUserId(BURCU);
 		when(programCoordinatorRepository.findByProgramIdAndUserId(PROGRAM_ID, BURCU)).thenReturn(Optional.of(row));
 		when(programService.coordinatorsOf(program)).thenReturn(List.of(
-				new CoordinatorRef(ELIF, "Elif Demir", true), new CoordinatorRef(BURCU, "Burcu Şen", false)));
+				new CoordinatorRef(ELIF, "Elif Demir", true, List.of()),
+				new CoordinatorRef(BURCU, "Burcu Şen", false, List.of())));
 
 		assertThatThrownBy(() -> service.remove(ADMIN, PROGRAM_ID, ELIF)).isInstanceOf(InvalidRequestException.class);
 		service.remove(ADMIN, PROGRAM_ID, BURCU);
@@ -149,7 +156,7 @@ class ProgramCoordinatorServiceTest {
 	void onlyTheAdminChangesAProgramsCoordinators() {
 		when(appUserRepository.findById(ELIF)).thenReturn(Optional.of(user(ELIF, "Elif Demir", UserRole.COORDINATOR)));
 
-		assertThatThrownBy(() -> service.add(ELIF, PROGRAM_ID, BURCU))
+		assertThatThrownBy(() -> service.add(ELIF, PROGRAM_ID, BURCU, null))
 				.isInstanceOfSatisfying(ResponseStatusException.class,
 						refused -> assertThat(refused.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN));
 		assertThatThrownBy(() -> service.remove(ELIF, PROGRAM_ID, BURCU)).isInstanceOf(ResponseStatusException.class);
@@ -166,7 +173,8 @@ class ProgramCoordinatorServiceTest {
 		ProgramCoordinator row = new ProgramCoordinator();
 		row.setUserId(BURCU);
 		when(programCoordinatorRepository.findByProgramIdAndUserId(PROGRAM_ID, BURCU)).thenReturn(Optional.of(row));
-		when(programService.coordinatorsOf(byAdmin)).thenReturn(List.of(new CoordinatorRef(BURCU, "Burcu Şen", false)));
+		when(programService.coordinatorsOf(byAdmin))
+				.thenReturn(List.of(new CoordinatorRef(BURCU, "Burcu Şen", false, List.of())));
 
 		assertThatThrownBy(() -> service.remove(ADMIN, PROGRAM_ID, BURCU))
 				.isInstanceOf(InvalidRequestException.class)

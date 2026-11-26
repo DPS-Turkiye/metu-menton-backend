@@ -175,8 +175,18 @@ public class CoordinatorProgramController {
 			@Valid @RequestBody AddProgramCoordinatorRequest request) {
 		UUID actorId = CurrentActor.resolve(request.actorId());
 		return request.userId() != null
-				? programCoordinatorService.add(actorId, id, request.userId())
-				: programCoordinatorService.invite(actorId, id, request.invite());
+				? programCoordinatorService.add(actorId, id, request.userId(), request.features())
+				: programCoordinatorService.invite(actorId, id, request.invite(), request.features());
+	}
+
+	/** The features one coordinator runs in a semester; admin only. */
+	@PutMapping("/{id}/coordinators/{userId}/features")
+	public List<CoordinatorProgramResponse.CoordinatorRef> setCoordinatorFeatures(
+			@PathVariable UUID id,
+			@PathVariable UUID userId,
+			@Valid @RequestBody SetProgramFeaturesRequest request) {
+		return programCoordinatorService.setFeatures(CurrentActor.resolve(request.actorId()), id, userId,
+				request.features());
 	}
 
 	@DeleteMapping("/{id}/coordinators/{userId}")

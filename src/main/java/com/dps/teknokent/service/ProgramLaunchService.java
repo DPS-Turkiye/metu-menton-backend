@@ -76,6 +76,7 @@ public class ProgramLaunchService {
 	private final NotificationService notificationService;
 	private final AdminCoordinatorService adminCoordinatorService;
 	private final EditionService editionService;
+	private final ProgramFeatureAccess featureAccess;
 
 	/** A semester's switches, checked; the other types take none (their features follow from the type). */
 	private static Set<ProgramFeature> featuresOf(CreateCoordinatorProgramRequest request) {
@@ -129,6 +130,7 @@ public class ProgramLaunchService {
 			program.setBottleneckFlagDays(request.bottleneckFlagDays());
 		}
 		programRepository.save(program);
+		Map<UUID, Set<ProgramFeature>> assigned = checkCoordinatorFeatures(program, request);
 
 		if (request.phases() != null) {
 			programService.writePhases(program.getId(), request.phases());
@@ -146,6 +148,8 @@ public class ProgramLaunchService {
 			row.setAddedBy(actor.getId());
 			row.setCreatedAt(Instant.now());
 			programCoordinatorRepository.save(row);
+			featureAccess.assign(program, coordinator.getId(),
+					assigned.getOrDefault(coordinator.getId(), featureAccess.checkAssignment(program, null)));
 			notificationService.create(
 					coordinator,
 					Texts.get(coordinator, "notification.addedAsCoordinator.title"),
@@ -153,6 +157,23 @@ public class ProgramLaunchService {
 					"/coordinator/programs/" + program.getId());
 		}
 		return programService.detail(actorId, program.getId());
+	}
+
+	/** What each named coordinator runs, checked before anything is invited; only existing coordinators by id. */
+	private Map<UUID, Set<ProgramFeature>> checkCoordinatorFeatures(Program program,
+			CreateCoordinatorProgramRequest request) {
+		if (request.coordinatorFeatures() == null || request.coordinatorFeatures().isEmpty()) {
+			return Map.of();
+		}
+		List<UUID> ids = request.coordinatorIds() == null ? List.of() : request.coordinatorIds();
+		Map<UUID, Set<ProgramFeature>> assigned = new LinkedHashMap<>();
+		request.coordinatorFeatures().forEach((userId, features) -> {
+			if (!ids.contains(userId)) {
+				throw new InvalidRequestException("Features are given only to the coordinators the program names.");
+			}
+			assigned.put(userId, featureAccess.checkAssignment(program, features));
+		});
+		return assigned;
 	}
 
 	/** The coordinators a request names, all checked before the program is saved or anyone is invited. */

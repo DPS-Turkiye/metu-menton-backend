@@ -2,11 +2,15 @@ package com.dps.teknokent.service;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
+import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.dps.teknokent.domain.ProgramFeature;
+import com.dps.teknokent.domain.ProgramType;
 import com.dps.teknokent.domain.UserAccountStatus;
 import com.dps.teknokent.domain.UserRole;
 import com.dps.teknokent.dto.requests.NewCoordinatorInput;
@@ -23,8 +27,10 @@ import com.dps.teknokent.util.ProgramCoordination;
 import com.dps.teknokent.util.Texts;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 /** Who runs a program: its creator plus the coordinators added in Program Ayarları → Koordinatörler. */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class ProgramCoordinatorService {
@@ -34,6 +40,7 @@ public class ProgramCoordinatorService {
 	private final AppUserRepository appUserRepository;
 	private final NotificationService notificationService;
 	private final AdminCoordinatorService adminCoordinatorService;
+	private final ProgramFeatureAccess featureAccess;
 
 	@Transactional(readOnly = true)
 	public List<CoordinatorProgramResponse.CoordinatorRef> list(UUID actorId, UUID programId) {
@@ -41,15 +48,17 @@ public class ProgramCoordinatorService {
 	}
 
 	@Transactional
-	public List<CoordinatorProgramResponse.CoordinatorRef> add(UUID actorId, UUID programId, UUID userId) {
+	public List<CoordinatorProgramResponse.CoordinatorRef> add(UUID actorId, UUID programId, UUID userId,
+			@Nullable Set<ProgramFeature> features) {
 		requireAdmin(actorId);
 		Program program = programService.requireManagedProgram(actorId, programId);
+		Set<ProgramFeature> chosen = featureAccess.checkAssignment(program, features);
 		AppUser user = appUserRepository.findById(userId)
 				.orElseThrow(() -> new ResourceNotFoundException("User not found: " + userId));
 		if (!user.has(UserRole.COORDINATOR) || user.getStatus() != UserAccountStatus.APPROVED) {
 			throw new InvalidRequestException("Only an approved coordinator can run a program.");
 		}
-		return attach(actorId, program, user);
+		return attach(actorId, program, user, chosen);
 	}
 
 	/**
@@ -58,9 +67,10 @@ public class ProgramCoordinatorService {
 	 */
 	@Transactional
 	public List<CoordinatorProgramResponse.CoordinatorRef> invite(UUID actorId, UUID programId,
-			NewCoordinatorInput invite) {
+			NewCoordinatorInput invite, @Nullable Set<ProgramFeature> features) {
 		requireAdmin(actorId);
 		Program program = programService.requireManagedProgram(actorId, programId);
+		Set<ProgramFeature> chosen = featureAccess.checkAssignment(program, features);
 		AdminCoordinatorService.CheckedInvite checked = adminCoordinatorService.checkNewProgramCoordinator(actorId,
 				invite.email(), invite.fullName());
 		if (checked.existing() != null
@@ -68,10 +78,11 @@ public class ProgramCoordinatorService {
 			throw new InvalidRequestException("This coordinator already runs the program.");
 		}
 		return attach(actorId, program,
-				adminCoordinatorService.coordinatorForNewProgram(actorId, checked, program.getName()));
+				adminCoordinatorService.coordinatorForNewProgram(actorId, checked, program.getName()), chosen);
 	}
 
-	private List<CoordinatorProgramResponse.CoordinatorRef> attach(UUID actorId, Program program, AppUser user) {
+	private List<CoordinatorProgramResponse.CoordinatorRef> attach(UUID actorId, Program program, AppUser user,
+			Set<ProgramFeature> features) {
 		if (ProgramCoordination.coordinates(program, user.getId(), programCoordinatorRepository)) {
 			throw new InvalidRequestException("This coordinator already runs the program.");
 		}
@@ -82,6 +93,7 @@ public class ProgramCoordinatorService {
 		row.setAddedBy(actorId);
 		row.setCreatedAt(Instant.now());
 		programCoordinatorRepository.save(row);
+		featureAccess.assign(program, user.getId(), features);
 		notificationService.create(
 				user,
 				Texts.get(user, "notification.addedAsCoordinator.title"),
@@ -104,6 +116,31 @@ public class ProgramCoordinatorService {
 			throw new InvalidRequestException("A program keeps at least one coordinator.");
 		}
 		programCoordinatorRepository.delete(row);
+		featureAccess.unassign(programId, userId);
+		return refs(program);
+	}
+
+	/**
+	 * Which of a semester's features one of its added coordinators runs (Hocam: an Akran mentörlüğü koordinatörü,
+	 * an Office Hours koordinatörü). The admin decides; the creator runs all of it and is not changed here.
+	 */
+	@Transactional
+	public List<CoordinatorProgramResponse.CoordinatorRef> setFeatures(UUID actorId, UUID programId, UUID userId,
+			Set<ProgramFeature> features) {
+		requireAdmin(actorId);
+		Program program = programService.requireManagedProgram(actorId, programId);
+		if (program.getProgramType() != ProgramType.SEMESTER) {
+			throw new InvalidRequestException(Texts.forRequest("error.programFeaturesSemesterOnly"));
+		}
+		if (program.getCreatedBy().equals(userId)) {
+			throw new InvalidRequestException("The coordinator who created the program runs all of it.");
+		}
+		if (programCoordinatorRepository.findByProgramIdAndUserId(programId, userId).isEmpty()) {
+			throw new InvalidRequestException("This coordinator does not run the program.");
+		}
+		Set<ProgramFeature> chosen = featureAccess.checkAssignment(program, features);
+		featureAccess.assign(program, userId, chosen);
+		log.info("Coordinator {} of program {} now runs {}, set by {}", userId, programId, chosen, actorId);
 		return refs(program);
 	}
 
