@@ -146,6 +146,10 @@ public class IskurTeamChangeService {
 			IskurTeamChangeDeclineRequest body) {
 		Program program = requirePeerProgram(actorId, programId);
 		programs.findByIdForUpdate(program.getId());
+		// Like asking: an archived program's requests stay as they were.
+		if (program.getStatus() == ProgramStatus.COMPLETED) {
+			throw new InvalidRequestException(Texts.forRequest("error.iskurProgramArchived"));
+		}
 		IskurTeamChangeRequest request = requests.findById(requestId)
 				.filter(row -> row.getProgramId().equals(program.getId()))
 				.orElseThrow(() -> new ResourceNotFoundException(Texts.forRequest("error.iskurTeamChangeNotFound")));

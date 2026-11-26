@@ -187,6 +187,25 @@ class IskurTeamChangeIntegrationTest {
 	}
 
 	@Test
+	void theAdminReadsAndAnswersLikeTheProgramsCoordinators() throws Exception {
+		AppUser admin = user("Yönetici Test", UserRole.ADMIN, null);
+		String id = idOf(ask(ayse, "Dijital ekibe geçmek istiyorum."));
+		list(admin).andExpect(status().isOk()).andExpect(jsonPath("$.requests[0].fullName").value("Ayşe Yıldız"));
+		decline(admin, id, "Bu dönem Medya ekibinde kalsın.")
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.requests[0].decidedByName").value("Yönetici Test"));
+	}
+
+	@Test
+	void anArchivedProgramsRequestsCannotBeAnswered() throws Exception {
+		String id = idOf(ask(ayse, "Dijital ekibe geçmek istiyorum."));
+		program.setStatus(ProgramStatus.COMPLETED);
+		programRepository.saveAndFlush(program);
+		decline(kaan, id, "Kalsın").andExpect(status().isBadRequest());
+		list(kaan).andExpect(jsonPath("$.requests[0].status").value("PENDING"));
+	}
+
+	@Test
 	void unplacingTheInternCancelsTheirRequest() throws Exception {
 		ask(ayse, "Dijital ekibe geçmek istiyorum.").andExpect(status().isOk());
 		send(delete(PLACE, program.getId(), ayse.getId()).param("actorId", selin.getId().toString()), null)
