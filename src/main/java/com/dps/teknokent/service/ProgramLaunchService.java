@@ -76,6 +76,7 @@ public class ProgramLaunchService {
 	private final NotificationService notificationService;
 	private final AdminCoordinatorService adminCoordinatorService;
 	private final EditionService editionService;
+	private final ProgramFeatureAccess featureAccess;
 
 	/** A semester's switches, checked; the other types take none (their features follow from the type). */
 	private static Set<ProgramFeature> featuresOf(CreateCoordinatorProgramRequest request) {
@@ -129,6 +130,7 @@ public class ProgramLaunchService {
 			program.setBottleneckFlagDays(request.bottleneckFlagDays());
 		}
 		programRepository.save(program);
+		Map<UUID, Set<ProgramFeature>> assigned = checkCoordinatorFeatures(program, request);
 
 		if (request.phases() != null) {
 			programService.writePhases(program.getId(), request.phases());
@@ -146,6 +148,8 @@ public class ProgramLaunchService {
 			row.setAddedBy(actor.getId());
 			row.setCreatedAt(Instant.now());
 			programCoordinatorRepository.save(row);
+			featureAccess.assign(program, coordinator.getId(),
+					assigned.getOrDefault(coordinator.getId(), featureAccess.checkAssignment(program, null)));
 			notificationService.create(
 					coordinator,
 					Texts.get(coordinator, "notification.addedAsCoordinator.title"),
@@ -153,6 +157,23 @@ public class ProgramLaunchService {
 					"/coordinator/programs/" + program.getId());
 		}
 		return programService.detail(actorId, program.getId());
+	}
+
+	/** What each named coordinator runs, checked before anything is invited; only existing coordinators by id. */
+	private Map<UUID, Set<ProgramFeature>> checkCoordinatorFeatures(Program program,
+			CreateCoordinatorProgramRequest request) {
+		if (request.coordinatorFeatures() == null || request.coordinatorFeatures().isEmpty()) {
+			return Map.of();
+		}
+		List<UUID> ids = request.coordinatorIds() == null ? List.of() : request.coordinatorIds();
+		Map<UUID, Set<ProgramFeature>> assigned = new LinkedHashMap<>();
+		request.coordinatorFeatures().forEach((userId, features) -> {
+			if (!ids.contains(userId)) {
+				throw new InvalidRequestException("Features are given only to the coordinators the program names.");
+			}
+			assigned.put(userId, featureAccess.checkAssignment(program, features));
+		});
+		return assigned;
 	}
 
 	/** The coordinators a request names, all checked before the program is saved or anyone is invited. */
@@ -205,13 +226,13 @@ public class ProgramLaunchService {
 
 	@Transactional(readOnly = true)
 	public List<ProgramTeamResponse> teams(UUID actorId, UUID programId) {
-		programService.requireManagedProgram(actorId, programId);
+		peerProgram(actorId, programId);
 		return rows(programId);
 	}
 
 	@Transactional
 	public List<ProgramTeamResponse> addTeams(UUID actorId, UUID programId, List<TeamInviteInput> teams) {
-		Program program = programService.requireManagedProgram(actorId, programId);
+		Program program = peerProgram(actorId, programId);
 		invite(program, teams, actorId);
 		return rows(programId);
 	}
@@ -219,7 +240,7 @@ public class ProgramLaunchService {
 	/** Fixing a mistyped email or name is only possible until the lead has joined. */
 	@Transactional
 	public List<ProgramTeamResponse> updateTeam(UUID actorId, UUID programId, UUID inviteId, TeamInviteInput input) {
-		programService.requireManagedProgram(actorId, programId);
+		peerProgram(actorId, programId);
 		ProgramTeamInvite invite = requireWaitingInvite(programId, inviteId);
 		String email = EmailDomains.normalizeEmail(input.leadEmail());
 		if (!email.equalsIgnoreCase(invite.getLeadEmail())
@@ -244,7 +265,7 @@ public class ProgramLaunchService {
 		TransactionTemplate readOnly = new TransactionTemplate(transactionManager);
 		readOnly.setReadOnly(true);
 		CodeMail mail = readOnly.execute(status -> {
-			Program program = programService.requireManagedProgram(actorId, programId);
+			Program program = peerProgram(actorId, programId);
 			ProgramDrafts.requireLaunched(program);
 			ProgramTeamInvite invite = requireWaitingInvite(programId, inviteId);
 			if (!mailService.isConfigured()) {
@@ -278,7 +299,7 @@ public class ProgramLaunchService {
 	/** The Takımlar drawer for a team that has joined the program. */
 	@Transactional(readOnly = true)
 	public ProgramTeamDetailResponse teamDetail(UUID actorId, UUID programId, UUID organizationId) {
-		programService.requireManagedProgram(actorId, programId);
+		peerProgram(actorId, programId);
 		boolean inProgram = programStartupRepository.findByProgramIdIn(List.of(programId)).stream()
 				.anyMatch(startup -> organizationId.equals(startup.getOrganizationId()));
 		Organization organization = organizationRepository.findById(organizationId)
@@ -312,7 +333,7 @@ public class ProgramLaunchService {
 
 	@Transactional
 	public List<ProgramTeamResponse> removeTeam(UUID actorId, UUID programId, UUID inviteId) {
-		programService.requireManagedProgram(actorId, programId);
+		peerProgram(actorId, programId);
 		inviteRepository.delete(requireWaitingInvite(programId, inviteId));
 		return rows(programId);
 	}
@@ -418,4 +439,10 @@ public class ProgramLaunchService {
 		return invite;
 	}
 
+	/** A peer-mentoring screen: a semester coordinator who does not run Akran Mentörlüğü gets a 403. */
+	private Program peerProgram(UUID actorId, UUID programId) {
+		Program program = programService.requireManagedProgram(actorId, programId);
+		programService.requireAssigned(actorId, program, ProgramFeature.PEER_MENTORING);
+		return program;
+	}
 }

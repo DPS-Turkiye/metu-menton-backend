@@ -19,6 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.dps.teknokent.domain.MentorPoolStatus;
 import com.dps.teknokent.domain.MentorshipStatus;
+import com.dps.teknokent.domain.ProgramFeature;
 import com.dps.teknokent.domain.ProgramMentorInvitedBy;
 import com.dps.teknokent.domain.ProgramMentorStatus;
 import com.dps.teknokent.domain.ProgramStatus;
@@ -78,12 +79,12 @@ public class MentorPoolService {
 
 	@Transactional(readOnly = true)
 	public List<MentorPoolResponse.Row> pool(UUID actorId, UUID programId) {
-		return rows(coordinatorProgramService.requireManagedProgram(actorId, programId));
+		return rows(peerProgram(actorId, programId));
 	}
 
 	@Transactional
 	public List<MentorPoolResponse.Row> invite(UUID actorId, UUID programId, String rawEmail) {
-		Program program = coordinatorProgramService.requireManagedProgram(actorId, programId);
+		Program program = peerProgram(actorId, programId);
 		ProgramDrafts.requireLaunched(program);
 		String email = EmailDomains.normalizeEmail(rawEmail);
 		Optional<AppUser> existing = appUserRepository.findByEmailIgnoreCase(email);
@@ -117,7 +118,7 @@ public class MentorPoolService {
 	/** "Tekrar gönder": another 7 days on the same link, emailed again. */
 	@Transactional
 	public List<MentorPoolResponse.Row> renewInvite(UUID actorId, UUID programId, UUID inviteId) {
-		Program program = coordinatorProgramService.requireManagedProgram(actorId, programId);
+		Program program = peerProgram(actorId, programId);
 		ProgramDrafts.requireLaunched(program);
 		ProgramMentorInvite invite = requireOpenInvite(programId, inviteId);
 		invite.setExpiresAt(Instant.now().plus(INVITE_VALIDITY));
@@ -136,7 +137,7 @@ public class MentorPoolService {
 
 	@Transactional
 	public List<MentorPoolResponse.Row> cancelInvite(UUID actorId, UUID programId, UUID inviteId) {
-		Program program = coordinatorProgramService.requireManagedProgram(actorId, programId);
+		Program program = peerProgram(actorId, programId);
 		inviteRepository.delete(requireOpenInvite(programId, inviteId));
 		return rows(program);
 	}
@@ -144,7 +145,7 @@ public class MentorPoolService {
 	/** Takes back an invitation an existing mentor has not answered yet. */
 	@Transactional
 	public List<MentorPoolResponse.Row> withdraw(UUID actorId, UUID programId, UUID mentorId) {
-		Program program = coordinatorProgramService.requireManagedProgram(actorId, programId);
+		Program program = peerProgram(actorId, programId);
 		ProgramMentor membership = requireMembership(programId, mentorId);
 		if (membership.getStatus() != ProgramMentorStatus.PENDING
 				|| membership.getInvitedBy() != ProgramMentorInvitedBy.COORDINATOR) {
@@ -156,7 +157,7 @@ public class MentorPoolService {
 
 	@Transactional(readOnly = true)
 	public MentorPoolResponse.Review review(UUID actorId, UUID programId, UUID mentorId) {
-		Program program = coordinatorProgramService.requireManagedProgram(actorId, programId);
+		Program program = peerProgram(actorId, programId);
 		ProgramMentor membership = requireAwaitingApproval(programId, mentorId);
 		AppUser mentor = appUserRepository.findById(mentorId)
 				.orElseThrow(() -> new ResourceNotFoundException(Texts.forRequest("error.mentorNotFound", mentorId)));
@@ -187,7 +188,7 @@ public class MentorPoolService {
 	 */
 	@Transactional
 	public List<MentorPoolResponse.Row> decide(UUID actorId, UUID programId, UUID mentorId, boolean accepted) {
-		Program program = coordinatorProgramService.requireManagedProgram(actorId, programId);
+		Program program = peerProgram(actorId, programId);
 		requireAwaitingApproval(programId, mentorId);
 		AppUser mentor = appUserRepository.findById(mentorId)
 				.orElseThrow(() -> new ResourceNotFoundException(Texts.forRequest("error.mentorNotFound", mentorId)));
@@ -382,5 +383,12 @@ public class MentorPoolService {
 
 	private static String newCode() {
 		return UUID.randomUUID().toString().replace("-", "");
+	}
+
+	/** A peer-mentoring screen: a semester coordinator who does not run Akran Mentörlüğü gets a 403. */
+	private Program peerProgram(UUID actorId, UUID programId) {
+		Program program = coordinatorProgramService.requireManagedProgram(actorId, programId);
+		coordinatorProgramService.requireAssigned(actorId, program, ProgramFeature.PEER_MENTORING);
+		return program;
 	}
 }

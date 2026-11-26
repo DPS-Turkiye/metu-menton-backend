@@ -22,8 +22,8 @@ import org.springframework.transaction.annotation.Transactional;
 import com.dps.teknokent.domain.IskurPlacementStatus;
 import com.dps.teknokent.domain.IskurTeamChangeStatus;
 import com.dps.teknokent.domain.NotificationCategory;
+import com.dps.teknokent.domain.ProgramFeature;
 import com.dps.teknokent.domain.ProgramStatus;
-import com.dps.teknokent.domain.ProgramType;
 import com.dps.teknokent.dto.requests.IskurTeamChangeAskRequest;
 import com.dps.teknokent.dto.requests.IskurTeamChangeDeclineRequest;
 import com.dps.teknokent.dto.responses.IskurTeamChangeMineResponse;
@@ -219,9 +219,10 @@ public class IskurTeamChangeService {
 
 	private Program requirePeerProgram(UUID actorId, UUID programId) {
 		Program program = coordinatorProgramService.requireManagedProgram(actorId, programId);
-		if (program.getProgramType() != ProgramType.PEER_MENTORING) {
+		if (!program.has(ProgramFeature.ISKUR)) {
 			throw new InvalidRequestException(Texts.forRequest("error.iskurPeerProgramsOnly"));
 		}
+		coordinatorProgramService.requireAssigned(actorId, program, ProgramFeature.ISKUR);
 		return program;
 	}
 

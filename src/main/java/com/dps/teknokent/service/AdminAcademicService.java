@@ -80,6 +80,7 @@ public class AdminAcademicService {
 		if (!program.has(ProgramFeature.OFFICE_HOURS)) {
 			throw new InvalidRequestException("Academicians are listed for Office Hours programs only.");
 		}
+		coordinatorProgramService.requireAssigned(actorId, program, ProgramFeature.OFFICE_HOURS);
 		return directory(false).stream().filter(AdminAcademicResponse::active).toList();
 	}
 

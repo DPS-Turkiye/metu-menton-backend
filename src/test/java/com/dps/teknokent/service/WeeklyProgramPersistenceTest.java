@@ -37,7 +37,8 @@ import jakarta.persistence.EntityManager;
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @Import({ WeeklyProgramService.class, CoordinatorProgramService.class, ProgramWeekPlanService.class,
 		DomainLookupService.class, LocalPiiRedactionService.class, AiFeatures.class,
-		EditionService.class, ProgramParticipantCounts.class, ProgramWorkBlockers.class })
+		EditionService.class, ProgramParticipantCounts.class, ProgramWorkBlockers.class,
+		ProgramFeatureAccess.class })
 class WeeklyProgramPersistenceTest {
 
 	// Starts in the future, so the save never meets "keep the past".

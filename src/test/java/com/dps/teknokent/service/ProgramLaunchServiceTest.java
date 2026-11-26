@@ -96,6 +96,8 @@ class ProgramLaunchServiceTest {
 	@Spy
 	private EditionService editionService = new EditionService("TEKNOKENT");
 
+	@Mock
+	private ProgramFeatureAccess featureAccess;
 	@InjectMocks
 	private ProgramLaunchService service;
 
@@ -210,7 +212,7 @@ class ProgramLaunchServiceTest {
 
 	private static CreateCoordinatorProgramRequest semester(Set<ProgramFeature> features) {
 		return new CreateCoordinatorProgramRequest(null, ProgramType.SEMESTER, "2026 Güz", null, null, null,
-				List.of(ELIF), null, null, null, null, null, null, null, null, features);
+				List.of(ELIF), null, null, null, null, null, null, null, null, features, null);
 	}
 
 	@Test

@@ -212,7 +212,7 @@ class CoordinatorProgramControllerTest {
 				.content("{\"invite\":{\"fullName\":\"Yeni Kişi\",\"email\":\"yeni@x.org\"}}"))
 				.andExpect(status().isOk());
 		verify(programCoordinatorService).invite(SIGNED_IN_ID, PROGRAM_ID,
-				new NewCoordinatorInput("Yeni Kişi", "yeni@x.org"));
+				new NewCoordinatorInput("Yeni Kişi", "yeni@x.org"), null);
 
 		for (String body : List.of("{}",
 				"{\"userId\":\"" + UUID.randomUUID() + "\",\"invite\":{\"fullName\":\"Y\",\"email\":\"y@x.org\"}}",
@@ -223,15 +223,15 @@ class CoordinatorProgramControllerTest {
 					.content(body))
 					.andExpect(status().isBadRequest());
 		}
-		verify(programCoordinatorService, never()).add(any(), any(), any());
+		verify(programCoordinatorService, never()).add(any(), any(), any(), any());
 	}
 
 	@Test
 	void archivesAndManagesCoordinatorsAsTheSignedInUser() throws Exception {
 		UUID other = UUID.fromString("00000000-0000-0000-0000-0000000000c2");
-		when(programCoordinatorService.add(SIGNED_IN_ID, PROGRAM_ID, other)).thenReturn(List.of(
-				new CoordinatorProgramResponse.CoordinatorRef(SIGNED_IN_ID, "Elif Demir", true),
-				new CoordinatorProgramResponse.CoordinatorRef(other, "Burcu Şen", false)));
+		when(programCoordinatorService.add(SIGNED_IN_ID, PROGRAM_ID, other, null)).thenReturn(List.of(
+				new CoordinatorProgramResponse.CoordinatorRef(SIGNED_IN_ID, "Elif Demir", true, List.of()),
+				new CoordinatorProgramResponse.CoordinatorRef(other, "Burcu Şen", false, List.of())));
 
 		mockMvc.perform(put("/api/coordinator/programs/{id}/archive", PROGRAM_ID)
 				.with(authentication(signedIn()))

@@ -76,8 +76,15 @@ class MeetingProposalServiceTest {
 	@Mock
 	private NotificationService notificationService;
 
+	@Mock
+	private ProgramFeatureAccess featureAccess;
 	@InjectMocks
 	private MeetingProposalService service;
+
+	@BeforeEach
+	void everyProgramOpensItsPeerScreens() {
+		lenient().when(featureAccess.opens(any(), any(), any())).thenReturn(true);
+	}
 
 	private final AppUser coordinator = user("Elif Demir", UserRole.COORDINATOR);
 	private final AppUser mentor = user("Ayşe Demir", UserRole.MENTOR);

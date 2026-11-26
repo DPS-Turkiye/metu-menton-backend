@@ -23,6 +23,7 @@ import com.dps.teknokent.domain.IskurWeekStatus;
 import com.dps.teknokent.domain.IskurWeeklySplit;
 import com.dps.teknokent.domain.IskurWorkEntryKind;
 import com.dps.teknokent.domain.NotificationCategory;
+import com.dps.teknokent.domain.ProgramFeature;
 import com.dps.teknokent.domain.ProgramStatus;
 import com.dps.teknokent.dto.requests.IskurSupportEntryRequest;
 import com.dps.teknokent.dto.requests.IskurWeekObjectionRequest;
@@ -407,6 +408,7 @@ public class IskurWorkWeekService {
 		}
 		return programs.findById(me.getProgramId())
 				.map(program -> coordinatorProgramService.coordinatorsOf(program).stream()
+						.filter(coordinator -> coordinator.features().contains(ProgramFeature.ISKUR))
 						.map(CoordinatorProgramResponse.CoordinatorRef::id)
 						.collect(Collectors.toSet()))
 				.orElse(Set.of());
@@ -414,6 +416,7 @@ public class IskurWorkWeekService {
 
 	private void notifyCoordinators(Program program, AppUser intern, LocalDate monday) {
 		Set<UUID> ids = coordinatorProgramService.coordinatorsOf(program).stream()
+				.filter(coordinator -> coordinator.features().contains(ProgramFeature.ISKUR))
 				.map(CoordinatorProgramResponse.CoordinatorRef::id)
 				.collect(Collectors.toSet());
 		users.findAllById(ids).forEach(coordinator -> notifications.create(coordinator, NotificationCategory.GENERAL,

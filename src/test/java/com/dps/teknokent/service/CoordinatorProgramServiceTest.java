@@ -145,6 +145,8 @@ class CoordinatorProgramServiceTest {
 	private ProgramParticipantCounts participantCounts;
 	@Mock
 	private ProgramWorkBlockers workBlockers;
+	@Mock
+	private ProgramFeatureAccess featureAccess;
 	@InjectMocks
 	private CoordinatorProgramService service;
 
@@ -1401,8 +1403,8 @@ class CoordinatorProgramServiceTest {
 				added, user(formerCoordinatorId, UserRole.MENTOR), user(COORDINATOR_ID, UserRole.COORDINATOR)));
 
 		assertThat(service.coordinatorsOf(program)).containsExactly(
-				new CoordinatorProgramResponse.CoordinatorRef(COORDINATOR_ID, "Elif Demir", true),
-				new CoordinatorProgramResponse.CoordinatorRef(OTHER_COORDINATOR_ID, "Mert Kaya", false));
+				new CoordinatorProgramResponse.CoordinatorRef(COORDINATOR_ID, "Elif Demir", true, List.of()),
+				new CoordinatorProgramResponse.CoordinatorRef(OTHER_COORDINATOR_ID, "Mert Kaya", false, List.of()));
 	}
 
 	@Test

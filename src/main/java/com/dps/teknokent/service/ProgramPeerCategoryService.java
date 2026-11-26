@@ -36,14 +36,16 @@ public class ProgramPeerCategoryService {
 	/** The program's coordinators and the admin may read it. */
 	@Transactional(readOnly = true)
 	public ProgramPeerCategoriesResponse get(UUID actorId, UUID programId) {
-		Program program = requirePeerProgram(coordinatorProgramService.requireManagedProgram(actorId, programId));
+		Program program = requirePeerProgram(actorId,
+				coordinatorProgramService.requireManagedProgram(actorId, programId));
 		return response(program.getId(), activeIn(program.getId()));
 	}
 
 	/** Only the program's coordinators change it, and not while the program is archived. */
 	@Transactional
 	public ProgramPeerCategoriesResponse replace(UUID actorId, UUID programId, List<PeerTopicCategory> wanted) {
-		Program program = requirePeerProgram(coordinatorProgramService.requireSettingsEditor(actorId, programId));
+		Program program = requirePeerProgram(actorId,
+				coordinatorProgramService.requireSettingsEditor(actorId, programId));
 		Set<PeerTopicCategory> next = wanted.isEmpty()
 				? EnumSet.noneOf(PeerTopicCategory.class)
 				: EnumSet.copyOf(wanted);
@@ -77,10 +79,11 @@ public class ProgramPeerCategoryService {
 		return active;
 	}
 
-	private static Program requirePeerProgram(Program program) {
+	private Program requirePeerProgram(UUID actorId, Program program) {
 		if (!program.has(ProgramFeature.PEER_MENTORING)) {
 			throw new InvalidRequestException(Texts.forRequest("error.peerCategoriesPeerProgramsOnly"));
 		}
+		coordinatorProgramService.requireAssigned(actorId, program, ProgramFeature.PEER_MENTORING);
 		return program;
 	}
 

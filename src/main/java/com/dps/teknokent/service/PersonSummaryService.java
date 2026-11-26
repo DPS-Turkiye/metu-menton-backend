@@ -59,6 +59,7 @@ public class PersonSummaryService {
 	private final MentorAvailabilitySummaryService mentorAvailabilitySummaryService;
 	private final ProgramRepository programRepository;
 	private final ProgramCoordinatorRepository programCoordinatorRepository;
+	private final ProgramFeatureAccess featureAccess;
 
 	@Transactional(readOnly = true)
 	public PersonSummaryResponse summary(UUID actorId, UUID personId) {
@@ -90,7 +91,8 @@ public class PersonSummaryService {
 				.filter(program -> program.getProgramType() == ProgramType.STARTUP_MENTORING
 						|| program.has(ProgramFeature.PEER_MENTORING))
 				.filter(program -> admin
-						|| ProgramCoordination.coordinates(program, actorId, programCoordinatorRepository))
+						|| (ProgramCoordination.coordinates(program, actorId, programCoordinatorRepository)
+								&& featureAccess.opens(actor, program, ProgramFeature.PEER_MENTORING)))
 				.toList();
 		if (!admin && programs.isEmpty()) {
 			throw notFound(personId);

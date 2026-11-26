@@ -17,6 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.dps.teknokent.domain.CoordinatorConversationCounterpart;
 import com.dps.teknokent.domain.NotificationCategory;
+import com.dps.teknokent.domain.ProgramFeature;
 import com.dps.teknokent.domain.UserRole;
 import com.dps.teknokent.dto.requests.SendCoordinatorMessageRequest;
 import com.dps.teknokent.dto.requests.StartCoordinatorConversationRequest;
@@ -62,6 +63,7 @@ public class CoordinatorConversationService {
 	private final OrganizationRepository organizationRepository;
 	private final AppUserRepository appUserRepository;
 	private final NotificationService notificationService;
+	private final ProgramFeatureAccess featureAccess;
 
 	enum Side {
 		COORDINATOR,
@@ -232,10 +234,12 @@ public class CoordinatorConversationService {
 		throw new InvalidRequestException("You are not part of this conversation.");
 	}
 
+	/** Coordinator ↔ mentor and coordinator ↔ team conversations are peer-mentoring work in a semester. */
 	private boolean coordinates(AppUser actor, Program program) {
 		return actor.has(UserRole.ADMIN)
 				|| (actor.has(UserRole.COORDINATOR)
-						&& ProgramCoordination.coordinates(program, actor.getId(), programCoordinatorRepository));
+						&& ProgramCoordination.coordinates(program, actor.getId(), programCoordinatorRepository)
+						&& featureAccess.opens(actor, program, ProgramFeature.PEER_MENTORING));
 	}
 
 	private static void markRead(CoordinatorConversation conversation, Side side, Instant at) {
