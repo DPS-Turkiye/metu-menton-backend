@@ -22,6 +22,7 @@ import com.dps.teknokent.dto.requests.UpdateOfficeHoursAvailabilityRequest;
 import com.dps.teknokent.dto.requests.UpdateOfficeHoursProfileRequest;
 import com.dps.teknokent.dto.responses.OfficeHoursAcademicianMeetingResponse;
 import com.dps.teknokent.dto.responses.OfficeHoursAcademicianResponse;
+import com.dps.teknokent.dto.responses.OfficeHoursAvailabilityImpactResponse;
 import com.dps.teknokent.dto.responses.OfficeHoursAvailabilityResponse;
 import com.dps.teknokent.dto.responses.OfficeHoursInboxRequestResponse;
 import com.dps.teknokent.dto.responses.OfficeHoursProfileResponse;
@@ -58,6 +59,16 @@ public class OfficeHoursMeController {
 	public OfficeHoursAvailabilityResponse saveAvailability(@RequestParam(required = false) UUID actorId,
 			@Valid @RequestBody UpdateOfficeHoursAvailabilityRequest request) {
 		return meService.saveAvailability(CurrentActor.resolve(actorId), request);
+	}
+
+	/**
+	 * What saving these hours would leave outside them (FR-OH-29), without saving: the booked meetings and open
+	 * requests to show before the save.
+	 */
+	@PostMapping("/availability/preview")
+	public OfficeHoursAvailabilityImpactResponse previewAvailability(@RequestParam(required = false) UUID actorId,
+			@Valid @RequestBody UpdateOfficeHoursAvailabilityRequest request) {
+		return meService.previewAvailability(CurrentActor.resolve(actorId), request);
 	}
 
 	/** Where and how students meet them, and whether students see them in the list at all. */

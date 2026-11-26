@@ -3,6 +3,7 @@ package com.dps.teknokent.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -16,6 +17,7 @@ import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -30,22 +32,31 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
+import com.dps.teknokent.domain.OfficeHoursRequestStatus;
 import com.dps.teknokent.domain.OfficeHoursRole;
 import com.dps.teknokent.dto.requests.CreateMentorAvailabilityRuleRequest;
 import com.dps.teknokent.dto.requests.MentorAvailabilityExceptionRequest;
+import com.dps.teknokent.dto.requests.OfficeHoursAffectedItemRequest;
 import com.dps.teknokent.dto.requests.OfficeHoursOneOffRequest;
 import com.dps.teknokent.dto.requests.UpdateOfficeHoursAvailabilityRequest;
 import com.dps.teknokent.dto.responses.OfficeHoursAvailabilityResponse;
 import com.dps.teknokent.entity.OfficeHoursException;
+import com.dps.teknokent.entity.OfficeHoursMeeting;
 import com.dps.teknokent.entity.OfficeHoursOneOff;
+import com.dps.teknokent.entity.OfficeHoursRequest;
 import com.dps.teknokent.entity.OfficeHoursRule;
 import com.dps.teknokent.entity.OfficeHoursSettings;
+import com.dps.teknokent.exception.ConflictException;
 import com.dps.teknokent.exception.InvalidRequestException;
 import com.dps.teknokent.repository.OfficeHoursEnrollmentRepository;
 import com.dps.teknokent.repository.OfficeHoursExceptionRepository;
 import com.dps.teknokent.repository.OfficeHoursOneOffRepository;
 import com.dps.teknokent.repository.OfficeHoursRuleRepository;
 import com.dps.teknokent.repository.OfficeHoursSettingsRepository;
+import com.dps.teknokent.repository.OfficeHoursUserRepository;
+import com.dps.teknokent.service.OfficeHoursAvailabilityImpactService.Impact;
+import com.dps.teknokent.service.OfficeHoursSlotService.Hours;
+import com.dps.teknokent.service.OfficeHoursSlotService.Setup;
 
 @ExtendWith(MockitoExtension.class)
 class OfficeHoursAvailabilityServiceTest {
@@ -63,13 +74,18 @@ class OfficeHoursAvailabilityServiceTest {
 	private OfficeHoursExceptionRepository exceptionRepository;
 	@Mock
 	private OfficeHoursOneOffRepository oneOffRepository;
+	@Mock
+	private OfficeHoursUserRepository userRepository;
+	@Mock
+	private OfficeHoursAvailabilityImpactService impactService;
 
 	private OfficeHoursAvailabilityService service;
 
 	@BeforeEach
 	void setUp() {
 		service = new OfficeHoursAvailabilityService(enrollmentRepository, settingsRepository, ruleRepository,
-				exceptionRepository, oneOffRepository, Clock.fixed(NOW, ZoneOffset.UTC));
+				exceptionRepository, oneOffRepository, userRepository, impactService,
+				Clock.fixed(NOW, ZoneOffset.UTC));
 	}
 
 	private void instructorSomewhere(boolean instructor) {
@@ -82,7 +98,7 @@ class OfficeHoursAvailabilityServiceTest {
 
 	private static UpdateOfficeHoursAvailabilityRequest request(List<CreateMentorAvailabilityRuleRequest> rules,
 			List<MentorAvailabilityExceptionRequest> exceptions) {
-		return new UpdateOfficeHoursAvailabilityRequest(rules, exceptions, 5, 30, 10, null);
+		return new UpdateOfficeHoursAvailabilityRequest(rules, exceptions, 5, 30, 10, null, null);
 	}
 
 	private static OfficeHoursOneOffRequest oneOff(String startsAt, String endsAt) {
@@ -194,7 +210,7 @@ class OfficeHoursAvailabilityServiceTest {
 		instructorSomewhere(true);
 		when(settingsRepository.findById(any())).thenReturn(Optional.empty());
 		UpdateOfficeHoursAvailabilityRequest withOneOff = new UpdateOfficeHoursAvailabilityRequest(List.of(),
-				List.of(), 5, 30, 10, List.of(oneOff("2026-11-12T14:00:00+03:00", "2026-11-12T15:00:00+03:00")));
+				List.of(), 5, 30, 10, List.of(oneOff("2026-11-12T14:00:00+03:00", "2026-11-12T15:00:00+03:00")), null);
 
 		service.update(INSTRUCTOR, withOneOff);
 
@@ -217,19 +233,140 @@ class OfficeHoursAvailabilityServiceTest {
 				LocalDate.of(2026, 11, 12), LocalDate.of(2026, 11, 12), null);
 
 		assertThatThrownBy(() -> service.update(INSTRUCTOR, new UpdateOfficeHoursAvailabilityRequest(List.of(),
-				List.of(), 5, 30, 10, List.of(oneOff("2026-11-12T14:00:00+03:00", "2026-11-12T14:10:00+03:00")))))
+				List.of(), 5, 30, 10, List.of(oneOff("2026-11-12T14:00:00+03:00", "2026-11-12T14:10:00+03:00")), null)))
 				.isInstanceOf(InvalidRequestException.class);
 		assertThatThrownBy(() -> service.update(INSTRUCTOR, new UpdateOfficeHoursAvailabilityRequest(List.of(),
 				List.of(), 5, 30, 10, List.of(oneOff("2026-11-12T14:00:00+03:00", "2026-11-12T15:00:00+03:00"),
-						oneOff("2026-11-12T14:30:00+03:00", "2026-11-12T16:00:00+03:00")))))
+						oneOff("2026-11-12T14:30:00+03:00", "2026-11-12T16:00:00+03:00")),
+				null)))
 				.isInstanceOf(InvalidRequestException.class);
 		assertThatThrownBy(() -> service.update(INSTRUCTOR, new UpdateOfficeHoursAvailabilityRequest(List.of(),
 				List.of(thursdayOff), 5, 30, 10,
-				List.of(oneOff("2026-11-12T14:00:00+03:00", "2026-11-12T15:00:00+03:00")))))
+				List.of(oneOff("2026-11-12T14:00:00+03:00", "2026-11-12T15:00:00+03:00")), null)))
 				.isInstanceOf(InvalidRequestException.class);
 		assertThatThrownBy(() -> service.update(INSTRUCTOR, new UpdateOfficeHoursAvailabilityRequest(List.of(),
-				List.of(), 5, 30, 10, List.of(oneOff("2026-11-12T23:00:00+03:00", "2026-11-13T01:00:00+03:00")))))
+				List.of(), 5, 30, 10, List.of(oneOff("2026-11-12T23:00:00+03:00", "2026-11-13T01:00:00+03:00")), null)))
 				.isInstanceOf(InvalidRequestException.class);
 		verify(oneOffRepository, never()).saveAll(any());
+	}
+
+	private static final UUID BOOKED = UUID.fromString("00000000-0000-0000-0000-00000000d101");
+	private static final UUID WAITING = UUID.fromString("00000000-0000-0000-0000-00000000d102");
+
+	private static UpdateOfficeHoursAvailabilityRequest confirming(OfficeHoursAffectedItemRequest... shown) {
+		return new UpdateOfficeHoursAvailabilityRequest(List.of(), List.of(), 5, 30, 10, null, List.of(shown));
+	}
+
+	private static Impact affecting(UUID meetingRequestId, OfficeHoursRequest... requests) {
+		List<OfficeHoursMeeting> meetings = List.of();
+		if (meetingRequestId != null) {
+			OfficeHoursMeeting meeting = new OfficeHoursMeeting();
+			meeting.setRequestId(meetingRequestId);
+			meetings = List.of(meeting);
+		}
+		return new Impact(meetings, Arrays.stream(requests)
+				.map(request -> new OfficeHoursAvailabilityImpactService.AffectedRequest(request,
+						List.of(NOW.plusSeconds(86_400)), List.of()))
+				.toList());
+	}
+
+	private static OfficeHoursRequest waiting(OfficeHoursRequestStatus status) {
+		OfficeHoursRequest request = new OfficeHoursRequest();
+		request.setId(WAITING);
+		request.setStatus(status);
+		return request;
+	}
+
+	@Test
+	void locksTheAcademicBeforeReplacingAnything() {
+		instructorSomewhere(true);
+
+		service.update(INSTRUCTOR, request(List.of(), List.of()));
+
+		InOrder order = inOrder(userRepository, ruleRepository);
+		order.verify(userRepository).findForUpdate(INSTRUCTOR);
+		order.verify(ruleRepository).deleteAll(any());
+	}
+
+	@Test
+	void checksNothingWhenTheClientSendsNoConfirmedList() {
+		instructorSomewhere(true);
+
+		service.update(INSTRUCTOR, request(List.of(), List.of()));
+
+		verify(impactService, never()).affectedBy(any(), any());
+		verify(settingsRepository).save(any());
+	}
+
+	@Test
+	void refusesASaveWhenARequestCameInAfterThePreviewShowedNothing() {
+		instructorSomewhere(true);
+		when(impactService.affectedBy(eq(INSTRUCTOR), any()))
+				.thenReturn(affecting(null, waiting(OfficeHoursRequestStatus.PENDING)));
+
+		assertThatThrownBy(() -> service.update(INSTRUCTOR, confirming()))
+				.isInstanceOfSatisfying(ConflictException.class, exception -> assertThat(exception.code())
+						.isEqualTo(OfficeHoursAvailabilityService.OFFICE_HOURS_AFFECTED_BOOKINGS_CHANGED));
+		verify(ruleRepository, never()).deleteAll(any());
+		verify(settingsRepository, never()).save(any());
+		InOrder order = inOrder(userRepository, impactService);
+		order.verify(userRepository).findForUpdate(INSTRUCTOR);
+		order.verify(impactService).affectedBy(eq(INSTRUCTOR), any());
+	}
+
+	@Test
+	void refusesASaveWhenAnOfferedTimeWasTakenAfterThePreview() {
+		instructorSomewhere(true);
+		// The preview showed the request waiting on the student; they took the time, so it is a meeting now.
+		when(impactService.affectedBy(eq(INSTRUCTOR), any())).thenReturn(affecting(WAITING));
+
+		assertThatThrownBy(() -> service.update(INSTRUCTOR,
+				confirming(new OfficeHoursAffectedItemRequest(WAITING, OfficeHoursRequestStatus.COUNTER_PROPOSED))))
+				.isInstanceOf(ConflictException.class);
+		verify(settingsRepository, never()).save(any());
+	}
+
+	@Test
+	void savesWhenEverythingAffectedWasShown() {
+		instructorSomewhere(true);
+		when(impactService.affectedBy(eq(INSTRUCTOR), any()))
+				.thenReturn(affecting(BOOKED, waiting(OfficeHoursRequestStatus.COUNTER_PROPOSED)));
+
+		service.update(INSTRUCTOR,
+				confirming(new OfficeHoursAffectedItemRequest(BOOKED, OfficeHoursRequestStatus.ACCEPTED),
+						new OfficeHoursAffectedItemRequest(WAITING, OfficeHoursRequestStatus.COUNTER_PROPOSED)));
+
+		verify(settingsRepository).save(any());
+		verify(ruleRepository).saveAll(any());
+	}
+
+	@Test
+	void previewComparesTheRequestAndKeepsSavedOneOffsItLeavesOut() {
+		OfficeHoursOneOff savedOneOff = new OfficeHoursOneOff();
+		savedOneOff.setStartsAt(Instant.parse("2026-11-12T11:00:00Z"));
+		savedOneOff.setEndsAt(Instant.parse("2026-11-12T12:00:00Z"));
+		when(oneOffRepository.findByInstructorIdOrderByStartsAtAsc(INSTRUCTOR)).thenReturn(List.of(savedOneOff));
+		when(impactService.affectedBy(eq(INSTRUCTOR), any())).thenReturn(affecting(BOOKED));
+
+		Impact impact = service.preview(INSTRUCTOR, request(List.of(rule(DayOfWeek.TUESDAY, 14, 16, null)), List.of()));
+
+		assertThat(impact.meetings()).hasSize(1);
+		ArgumentCaptor<Setup> proposed = ArgumentCaptor.forClass(Setup.class);
+		verify(impactService).affectedBy(eq(INSTRUCTOR), proposed.capture());
+		assertThat(proposed.getValue().weekly()).singleElement()
+				.satisfies(range -> assertThat(range.slotMinutes()).isEqualTo(60));
+		assertThat(proposed.getValue().oneOffs())
+				.containsExactly(new Hours(savedOneOff.getStartsAt(), savedOneOff.getEndsAt()));
+		assertThat(proposed.getValue().oneOffMinutes()).isEqualTo(30);
+		verify(ruleRepository, never()).deleteAll(any());
+		verify(settingsRepository, never()).save(any());
+	}
+
+	@Test
+	void previewRefusesHoursASaveWouldRefuse() {
+		assertThatThrownBy(() -> service.preview(INSTRUCTOR,
+				request(List.of(rule(DayOfWeek.MONDAY, 12, 10, null)), List.of())))
+				.isInstanceOf(InvalidRequestException.class);
+		verify(impactService, never()).affectedBy(any(), any());
 	}
 }

@@ -215,4 +215,141 @@ class OfficeHoursMeIntegrationTest {
 				.andExpect(status().isNotFound());
 		assertThat(officeHoursUsers.findByAppUserId(student.getId())).isEmpty();
 	}
+
+	private static String everyDayHours(String extra) {
+		String everyDay = String.join(",", java.util.Arrays.stream(java.time.DayOfWeek.values())
+				.map(day -> "{\"dayOfWeek\":\"" + day
+						+ "\",\"startTime\":\"10:00\",\"endTime\":\"12:00\",\"slotMinutes\":30}")
+				.toList());
+		return "{\"rules\":[" + everyDay + "],\"exceptions\":[],\"studentCapacity\":null,"
+				+ "\"defaultMeetingDurationMinutes\":30,\"meetingBufferMinutes\":0" + extra + "}";
+	}
+
+	private static String noHours(String confirmed) {
+		return "{\"rules\":[],\"exceptions\":[],\"studentCapacity\":null,\"defaultMeetingDurationMinutes\":30,"
+				+ "\"meetingBufferMinutes\":0,\"confirmedAffected\":" + confirmed + "}";
+	}
+
+	@Test
+	void aRequestThatArrivesAfterThePreviewStopsTheSaveUntilTheAcademicianHasSeenIt() throws Exception {
+		mockMvc.perform(put("/api/office-hours/me/availability").param("actorId", as(academician))
+				.with(frontendServer()).contentType(MediaType.APPLICATION_JSON).content(everyDayHours("")))
+				.andExpect(status().isOk());
+		mockMvc.perform(post("/api/office-hours/me/availability/preview").param("actorId", as(academician))
+				.with(frontendServer()).contentType(MediaType.APPLICATION_JSON).content(noHours("[]")))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.meetings.length()").value(0))
+				.andExpect(jsonPath("$.requests.length()").value(0));
+
+		// While the academician looks at the empty list, a student asks for a time the save would take away.
+		UUID instructorId = officeHoursUsers.findByAppUserId(academician.getId()).orElseThrow().getId();
+		OfficeHoursUser asker = new OfficeHoursUser();
+		asker.setId(UUID.randomUUID());
+		asker.setAppUserId(student.getId());
+		asker.setFullName("Ali Kaya");
+		asker.setCreatedAt(Instant.now());
+		asker.setLastLaunchAt(Instant.now());
+		officeHoursUsers.saveAndFlush(asker);
+		OfficeHoursRequest request = new OfficeHoursRequest();
+		request.setId(UUID.randomUUID());
+		request.setStudentId(asker.getId());
+		request.setInstructorId(instructorId);
+		request.setStatus(OfficeHoursRequestStatus.PENDING);
+		request.setTopic("Staj");
+		request.setExpectedOutcome("Özel not");
+		request.setPreferredSlots(java.time.LocalDate.now(MeetingSlotTimes.APP_ZONE).plusDays(7) + "T10:30");
+		request.setCreatedAt(Instant.now());
+		request.setUpdatedAt(Instant.now());
+		requests.saveAndFlush(request);
+
+		mockMvc.perform(put("/api/office-hours/me/availability").param("actorId", as(academician))
+				.with(frontendServer()).contentType(MediaType.APPLICATION_JSON).content(noHours("[]")))
+				.andExpect(status().isConflict())
+				.andExpect(jsonPath("$.code").value("OFFICE_HOURS_AFFECTED_BOOKINGS_CHANGED"));
+		mockMvc.perform(get("/api/office-hours/me/availability").param("actorId", as(academician))
+				.with(frontendServer()))
+				.andExpect(jsonPath("$.rules.length()").value(7));
+
+		String preview = mockMvc.perform(post("/api/office-hours/me/availability/preview")
+				.param("actorId", as(academician)).with(frontendServer())
+				.contentType(MediaType.APPLICATION_JSON).content(noHours("[]")))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.requests[0].requestId").value(request.getId().toString()))
+				.andExpect(jsonPath("$.requests[0].status").value("PENDING"))
+				.andExpect(jsonPath("$.requests[0].studentName").value("Ali Kaya"))
+				.andExpect(jsonPath("$.requests[0].topic").value("Staj"))
+				.andExpect(jsonPath("$.requests[0].lostTimes.length()").value(1))
+				.andReturn().getResponse().getContentAsString();
+		assertThat(preview).doesNotContain("Özel not");
+
+		mockMvc.perform(put("/api/office-hours/me/availability").param("actorId", as(academician))
+				.with(frontendServer()).contentType(MediaType.APPLICATION_JSON)
+				.content(noHours("[{\"requestId\":\"" + request.getId() + "\",\"status\":\"PENDING\"}]")))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.rules.length()").value(0));
+		// Nothing is cancelled for the academician: the request waits for their answer as before.
+		assertThat(requests.findById(request.getId()).orElseThrow().getStatus())
+				.isEqualTo(OfficeHoursRequestStatus.PENDING);
+	}
+
+	@Test
+	void anotherAcademiciansPreviewDoesNotShowTheirRequests() throws Exception {
+		AppUser other = account(UserRole.ACADEMICIAN, "Deniz Aydın", IdentityKind.ACADEMIC, null);
+		mockMvc.perform(put("/api/office-hours/me/availability").param("actorId", as(academician))
+				.with(frontendServer()).contentType(MediaType.APPLICATION_JSON).content(everyDayHours("")))
+				.andExpect(status().isOk());
+		UUID instructorId = officeHoursUsers.findByAppUserId(academician.getId()).orElseThrow().getId();
+		OfficeHoursRequest request = new OfficeHoursRequest();
+		request.setId(UUID.randomUUID());
+		request.setStudentId(UUID.randomUUID());
+		request.setInstructorId(instructorId);
+		request.setStatus(OfficeHoursRequestStatus.PENDING);
+		request.setTopic("Staj");
+		request.setPreferredSlots(java.time.LocalDate.now(MeetingSlotTimes.APP_ZONE).plusDays(7) + "T10:30");
+		request.setCreatedAt(Instant.now());
+		request.setUpdatedAt(Instant.now());
+		requests.saveAndFlush(request);
+		mockMvc.perform(put("/api/office-hours/me/availability").param("actorId", as(other))
+				.with(frontendServer()).contentType(MediaType.APPLICATION_JSON).content(everyDayHours("")))
+				.andExpect(status().isOk());
+
+		mockMvc.perform(post("/api/office-hours/me/availability/preview").param("actorId", as(other))
+				.with(frontendServer()).contentType(MediaType.APPLICATION_JSON).content(noHours("[]")))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.requests.length()").value(0));
+		mockMvc.perform(post("/api/office-hours/me/availability/preview").param("actorId", as(student))
+				.with(frontendServer()).contentType(MediaType.APPLICATION_JSON).content(noHours("[]")))
+				.andExpect(status().isNotFound());
+	}
+
+	@Test
+	void aSaveThatSendsNoConfirmedListWorksAsBefore() throws Exception {
+		mockMvc.perform(put("/api/office-hours/me/availability").param("actorId", as(academician))
+				.with(frontendServer()).contentType(MediaType.APPLICATION_JSON).content(everyDayHours("")))
+				.andExpect(status().isOk());
+		UUID instructorId = officeHoursUsers.findByAppUserId(academician.getId()).orElseThrow().getId();
+		OfficeHoursRequest request = new OfficeHoursRequest();
+		request.setId(UUID.randomUUID());
+		request.setStudentId(UUID.randomUUID());
+		request.setInstructorId(instructorId);
+		request.setStatus(OfficeHoursRequestStatus.PENDING);
+		request.setTopic("Staj");
+		request.setPreferredSlots(java.time.LocalDate.now(MeetingSlotTimes.APP_ZONE).plusDays(7) + "T10:30");
+		request.setCreatedAt(Instant.now());
+		request.setUpdatedAt(Instant.now());
+		requests.saveAndFlush(request);
+
+		mockMvc.perform(put("/api/office-hours/me/availability").param("actorId", as(academician))
+				.with(frontendServer()).contentType(MediaType.APPLICATION_JSON)
+				.content("{\"rules\":[],\"exceptions\":[],\"studentCapacity\":null,"
+						+ "\"defaultMeetingDurationMinutes\":30,\"meetingBufferMinutes\":0}"))
+				.andExpect(status().isOk());
+	}
+
+	@Test
+	void aConfirmedListWithAnEmptyItemIsRefusedAsABadRequest() throws Exception {
+		mockMvc.perform(put("/api/office-hours/me/availability").param("actorId", as(academician))
+				.with(frontendServer()).contentType(MediaType.APPLICATION_JSON).content(noHours("[null]")))
+				.andExpect(status().isBadRequest());
+	}
 }

@@ -5,7 +5,9 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
@@ -16,6 +18,7 @@ import org.springframework.web.server.ResponseStatusException;
 import com.dps.teknokent.domain.OfficeHoursRole;
 import com.dps.teknokent.dto.requests.CreateMentorAvailabilityRuleRequest;
 import com.dps.teknokent.dto.requests.MentorAvailabilityExceptionRequest;
+import com.dps.teknokent.dto.requests.OfficeHoursAffectedItemRequest;
 import com.dps.teknokent.dto.requests.OfficeHoursOneOffRequest;
 import com.dps.teknokent.dto.requests.UpdateOfficeHoursAvailabilityRequest;
 import com.dps.teknokent.dto.responses.OfficeHoursAvailabilityResponse;
@@ -23,14 +26,23 @@ import com.dps.teknokent.entity.OfficeHoursException;
 import com.dps.teknokent.entity.OfficeHoursOneOff;
 import com.dps.teknokent.entity.OfficeHoursRule;
 import com.dps.teknokent.entity.OfficeHoursSettings;
+import com.dps.teknokent.exception.ConflictException;
 import com.dps.teknokent.exception.InvalidRequestException;
 import com.dps.teknokent.repository.OfficeHoursEnrollmentRepository;
 import com.dps.teknokent.repository.OfficeHoursExceptionRepository;
 import com.dps.teknokent.repository.OfficeHoursOneOffRepository;
 import com.dps.teknokent.repository.OfficeHoursRuleRepository;
 import com.dps.teknokent.repository.OfficeHoursSettingsRepository;
+import com.dps.teknokent.repository.OfficeHoursUserRepository;
+import com.dps.teknokent.service.OfficeHoursAvailabilityImpactService.Impact;
+import com.dps.teknokent.service.OfficeHoursAvailabilityImpactService.Item;
+import com.dps.teknokent.service.OfficeHoursSlotService.DaysAway;
+import com.dps.teknokent.service.OfficeHoursSlotService.Hours;
+import com.dps.teknokent.service.OfficeHoursSlotService.Setup;
+import com.dps.teknokent.service.OfficeHoursSlotService.WeeklyRange;
 import com.dps.teknokent.util.MeetingSlotTimes;
 import com.dps.teknokent.util.TextUtils;
+import com.dps.teknokent.util.Texts;
 
 /**
  * An academic's office hours: weekly ranges, dates away and meeting defaults, saved as a whole and checked with
@@ -41,7 +53,8 @@ import com.dps.teknokent.util.TextUtils;
 @Service
 public class OfficeHoursAvailabilityService {
 
-	private static final int DEFAULT_SLOT_MINUTES = 60;
+	/** The 409's code when the save would touch a meeting or request the academic was not shown. */
+	public static final String OFFICE_HOURS_AFFECTED_BOOKINGS_CHANGED = "OFFICE_HOURS_AFFECTED_BOOKINGS_CHANGED";
 	private static final Duration SHORTEST_MEETING = Duration.ofMinutes(15);
 
 	private final OfficeHoursEnrollmentRepository enrollmentRepository;
@@ -49,25 +62,32 @@ public class OfficeHoursAvailabilityService {
 	private final OfficeHoursRuleRepository ruleRepository;
 	private final OfficeHoursExceptionRepository exceptionRepository;
 	private final OfficeHoursOneOffRepository oneOffRepository;
+	private final OfficeHoursUserRepository userRepository;
+	private final OfficeHoursAvailabilityImpactService impactService;
 	private final Clock clock;
 
 	@Autowired
 	public OfficeHoursAvailabilityService(OfficeHoursEnrollmentRepository enrollmentRepository,
 			OfficeHoursSettingsRepository settingsRepository, OfficeHoursRuleRepository ruleRepository,
-			OfficeHoursExceptionRepository exceptionRepository, OfficeHoursOneOffRepository oneOffRepository) {
+			OfficeHoursExceptionRepository exceptionRepository, OfficeHoursOneOffRepository oneOffRepository,
+			OfficeHoursUserRepository userRepository,
+			OfficeHoursAvailabilityImpactService impactService) {
 		this(enrollmentRepository, settingsRepository, ruleRepository, exceptionRepository, oneOffRepository,
-				Clock.systemUTC());
+				userRepository, impactService, Clock.systemUTC());
 	}
 
 	OfficeHoursAvailabilityService(OfficeHoursEnrollmentRepository enrollmentRepository,
 			OfficeHoursSettingsRepository settingsRepository, OfficeHoursRuleRepository ruleRepository,
 			OfficeHoursExceptionRepository exceptionRepository, OfficeHoursOneOffRepository oneOffRepository,
-			Clock clock) {
+			OfficeHoursUserRepository userRepository,
+			OfficeHoursAvailabilityImpactService impactService, Clock clock) {
 		this.enrollmentRepository = enrollmentRepository;
 		this.settingsRepository = settingsRepository;
 		this.ruleRepository = ruleRepository;
 		this.exceptionRepository = exceptionRepository;
 		this.oneOffRepository = oneOffRepository;
+		this.userRepository = userRepository;
+		this.impactService = impactService;
 		this.clock = clock;
 	}
 
@@ -90,14 +110,32 @@ public class OfficeHoursAvailabilityService {
 		return write(instructorId, request);
 	}
 
-	/** Saves someone's office hours as a whole, once the caller is known to be an academic. */
+	/**
+	 * What saving {@code request} would leave outside the academic's hours, without saving anything (FR-OH-29), once
+	 * the caller is known to be an academic.
+	 */
+	@Transactional(readOnly = true)
+	public Impact preview(UUID instructorId, UpdateOfficeHoursAvailabilityRequest request) {
+		validate(request);
+		return impactService.affectedBy(instructorId, proposedSetup(instructorId, request));
+	}
+
+	/**
+	 * Saves someone's office hours as a whole, once the caller is known to be an academic. When the request says
+	 * what the academic was shown, anything else this save would leave out refuses it (409), so a request that came
+	 * in while they were editing is never passed over unseen.
+	 */
 	@Transactional
 	public OfficeHoursAvailabilityResponse write(UUID instructorId, UpdateOfficeHoursAvailabilityRequest request) {
-		AvailabilityRules.validateRules(request.rules());
-		AvailabilityRules.validateExceptions(request.exceptions());
+		validate(request);
 		List<OfficeHoursOneOffRequest> oneOffs = request.oneOffs();
-		if (oneOffs != null) {
-			validateOneOffs(oneOffs, request.exceptions());
+		// The same lock a new request takes before it reads the open slots: one of the two waits for the other, so
+		// what is checked below is what the save really replaces. Taken before the deletes, and after the Menton
+		// side has made the person's row.
+		userRepository.findForUpdate(instructorId);
+		List<OfficeHoursAffectedItemRequest> confirmed = request.confirmedAffected();
+		if (confirmed != null) {
+			requireOnlyConfirmed(instructorId, request, confirmed);
 		}
 		Instant now = clock.instant();
 
@@ -133,6 +171,44 @@ public class OfficeHoursAvailabilityService {
 		ruleRepository.flush();
 		exceptionRepository.flush();
 		return response(instructorId, settings);
+	}
+
+	private void requireOnlyConfirmed(UUID instructorId, UpdateOfficeHoursAvailabilityRequest request,
+			List<OfficeHoursAffectedItemRequest> confirmed) {
+		Set<Item> shown = confirmed.stream().map(item -> new Item(item.requestId(), item.status()))
+				.collect(Collectors.toSet());
+		Set<Item> affected = impactService.affectedBy(instructorId, proposedSetup(instructorId, request)).items();
+		if (!shown.containsAll(affected)) {
+			throw new ConflictException(Texts.forRequest("error.officeHoursAffectedBookingsChanged"),
+					OFFICE_HOURS_AFFECTED_BOOKINGS_CHANGED);
+		}
+	}
+
+	static void validate(UpdateOfficeHoursAvailabilityRequest request) {
+		AvailabilityRules.validateRules(request.rules());
+		AvailabilityRules.validateExceptions(request.exceptions());
+		List<OfficeHoursOneOffRequest> oneOffs = request.oneOffs();
+		if (oneOffs != null) {
+			validateOneOffs(oneOffs, request.exceptions());
+		}
+	}
+
+	/** The hours as they would be once {@code request} is saved; one-offs left out keep the saved ones. */
+	private Setup proposedSetup(UUID instructorId, UpdateOfficeHoursAvailabilityRequest request) {
+		List<OfficeHoursOneOffRequest> oneOffs = request.oneOffs();
+		List<Hours> oneOffHours;
+		if (oneOffs == null) {
+			oneOffHours = oneOffRepository.findByInstructorIdOrderByStartsAtAsc(instructorId).stream()
+					.map(oneOff -> new Hours(oneOff.getStartsAt(), oneOff.getEndsAt())).toList();
+		} else {
+			oneOffHours = oneOffs.stream()
+					.map(oneOff -> new Hours(oneOff.startsAt().toInstant(), oneOff.endsAt().toInstant())).toList();
+		}
+		return new Setup(
+				request.rules().stream().map(rule -> new WeeklyRange(rule.dayOfWeek(), rule.startTime(),
+						rule.endTime(), AvailabilityRules.slotMinutes(rule))).toList(),
+				request.exceptions().stream().map(range -> new DaysAway(range.startsOn(), range.endsOn())).toList(),
+				oneOffHours, request.defaultMeetingDurationMinutes());
 	}
 
 	private void requireInstructor(UUID userId) {
@@ -206,7 +282,7 @@ public class OfficeHoursAvailabilityService {
 		rule.setDay(request.dayOfWeek());
 		rule.setStartTime(request.startTime());
 		rule.setEndTime(request.endTime());
-		rule.setSlotMinutes(request.slotMinutes() != null ? request.slotMinutes() : DEFAULT_SLOT_MINUTES);
+		rule.setSlotMinutes(AvailabilityRules.slotMinutes(request));
 		rule.setCreatedAt(now);
 		return rule;
 	}

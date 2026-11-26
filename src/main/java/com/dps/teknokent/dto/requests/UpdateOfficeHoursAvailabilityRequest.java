@@ -19,5 +19,10 @@ public record UpdateOfficeHoursAvailabilityRequest(
 		@NotNull @Min(15) @Max(480) Integer defaultMeetingDurationMinutes,
 		@NotNull @Min(0) @Max(240) Integer meetingBufferMinutes,
 		/* Hours on single dates. Left out, the saved ones stay, so a client that doesn't know them loses none. */
-		@Size(max = 30) List<@Valid OfficeHoursOneOffRequest> oneOffs) {
+		@Size(max = 30) List<@Valid OfficeHoursOneOffRequest> oneOffs,
+		/*
+		 * The meetings and requests the academic was shown as affected (FR-OH-29). Left out, nothing is checked, as
+		 * before (Moodle). Sent, even empty, the save is refused if anything else is affected by then.
+		 */
+		@Size(max = 500) List<@NotNull @Valid OfficeHoursAffectedItemRequest> confirmedAffected) {
 }

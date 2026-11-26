@@ -16,6 +16,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import org.jspecify.annotations.Nullable;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -33,6 +34,7 @@ import com.dps.teknokent.dto.requests.DecideOfficeHoursRequest;
 import com.dps.teknokent.dto.requests.UpdateOfficeHoursAvailabilityRequest;
 import com.dps.teknokent.dto.requests.UpdateOfficeHoursProfileRequest;
 import com.dps.teknokent.dto.responses.OfficeHoursAcademicianMeetingResponse;
+import com.dps.teknokent.dto.responses.OfficeHoursAvailabilityImpactResponse;
 import com.dps.teknokent.dto.responses.OfficeHoursAvailabilityResponse;
 import com.dps.teknokent.dto.responses.OfficeHoursInboxRequestResponse;
 import com.dps.teknokent.dto.responses.OfficeHoursProfileResponse;
@@ -53,6 +55,7 @@ import com.dps.teknokent.repository.OfficeHoursRequestMessageRepository;
 import com.dps.teknokent.repository.OfficeHoursRequestRepository;
 import com.dps.teknokent.repository.OfficeHoursSettingsRepository;
 import com.dps.teknokent.repository.OfficeHoursUserRepository;
+import com.dps.teknokent.service.OfficeHoursAvailabilityImpactService.Impact;
 import com.dps.teknokent.util.MeetingSlotTimes;
 import com.dps.teknokent.util.TextUtils;
 
@@ -119,6 +122,23 @@ public class OfficeHoursMeService {
 			UpdateOfficeHoursAvailabilityRequest request) {
 		InstitutionPerson record = requireAcademic(accountId);
 		return availabilityService.write(academicianFor(accountId, record), request);
+	}
+
+	/**
+	 * What saving these hours would leave outside them, without saving (FR-OH-29). Someone who has never saved
+	 * hours has nothing booked yet, so nothing is affected.
+	 */
+	@Transactional(readOnly = true)
+	public OfficeHoursAvailabilityImpactResponse previewAvailability(UUID accountId,
+			UpdateOfficeHoursAvailabilityRequest request) {
+		requireAcademic(accountId);
+		Optional<OfficeHoursUser> person = existing(accountId);
+		if (person.isEmpty()) {
+			OfficeHoursAvailabilityService.validate(request);
+			return OfficeHoursAvailabilityImpactResponse.empty();
+		}
+		UUID instructorId = person.get().getId();
+		return impactOf(instructorId, availabilityService.preview(instructorId, request));
 	}
 
 	@Transactional(readOnly = true)
@@ -222,6 +242,53 @@ public class OfficeHoursMeService {
 						courseName(courses, meeting.getCourseId()), settings.getDefaultPlace(),
 						settings.getOnlineLink()))
 				.toList();
+	}
+
+	/** Names and course titles are read once for the whole list. */
+	private OfficeHoursAvailabilityImpactResponse impactOf(UUID instructorId, Impact impact) {
+		if (impact.meetings().isEmpty() && impact.requests().isEmpty()) {
+			return OfficeHoursAvailabilityImpactResponse.empty();
+		}
+		Map<UUID, OfficeHoursRequest> meetingRequests = byId(
+				requestRepository
+						.findAllById(impact.meetings().stream().map(OfficeHoursMeeting::getRequestId).toList()),
+				OfficeHoursRequest::getId);
+		List<OfficeHoursRequest> openRequests = impact.requests().stream()
+				.map(OfficeHoursAvailabilityImpactService.AffectedRequest::request).toList();
+		Map<UUID, OfficeHoursStudentResponse> students = students(Stream.concat(
+				impact.meetings().stream().map(OfficeHoursMeeting::getStudentId),
+				openRequests.stream().map(OfficeHoursRequest::getStudentId)).toList());
+		Map<UUID, String> courses = courseNames(Stream.concat(
+				impact.meetings().stream().map(OfficeHoursMeeting::getCourseId),
+				openRequests.stream().map(OfficeHoursRequest::getCourseId)).toList());
+		Function<Instant, Integer> lengthOf = bookingService.meetingLengths(instructorId);
+		List<OfficeHoursAvailabilityImpactResponse.Meeting> meetings = impact.meetings().stream()
+				.map(meeting -> new OfficeHoursAvailabilityImpactResponse.Meeting(meeting.getRequestId(),
+						OfficeHoursRequestStatus.ACCEPTED,
+						OfficeHoursTimeResponse.of(meeting.getScheduledAt(), meeting.getDurationMinutes()),
+						studentName(students, meeting.getStudentId()),
+						Optional.ofNullable(meetingRequests.get(meeting.getRequestId()))
+								.map(OfficeHoursRequest::getTopic).orElse(null),
+						courseName(courses, meeting.getCourseId())))
+				.toList();
+		List<OfficeHoursAvailabilityImpactResponse.Request> requests = impact.requests().stream()
+				.map(affected -> {
+					OfficeHoursRequest request = affected.request();
+					return new OfficeHoursAvailabilityImpactResponse.Request(request.getId(), request.getStatus(),
+							studentName(students, request.getStudentId()), request.getTopic(),
+							courseName(courses, request.getCourseId()), times(affected.lostTimes(), lengthOf),
+							times(affected.keptTimes(), lengthOf));
+				})
+				.toList();
+		return new OfficeHoursAvailabilityImpactResponse(meetings, requests);
+	}
+
+	private static List<OfficeHoursTimeResponse> times(List<Instant> times, Function<Instant, Integer> lengthOf) {
+		return times.stream().map(at -> OfficeHoursTimeResponse.of(at, lengthOf.apply(at))).toList();
+	}
+
+	private static @Nullable String studentName(Map<UUID, OfficeHoursStudentResponse> students, UUID studentId) {
+		return Optional.ofNullable(students.get(studentId)).map(OfficeHoursStudentResponse::fullName).orElse(null);
 	}
 
 	private InstitutionPerson requireAcademic(UUID accountId) {

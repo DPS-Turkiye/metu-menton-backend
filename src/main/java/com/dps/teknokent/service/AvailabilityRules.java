@@ -11,7 +11,18 @@ import com.dps.teknokent.exception.InvalidRequestException;
 /** Checks on a weekly availability and its days off, shared by mentors and office-hours instructors. */
 final class AvailabilityRules {
 
+	/** A slot's length when the rule leaves it out, for mentors and academics alike. */
+	private static final int DEFAULT_SLOT_MINUTES = 60;
+
 	private AvailabilityRules() {
+	}
+
+	static int slotMinutes(CreateMentorAvailabilityRuleRequest rule) {
+		Integer minutes = rule.slotMinutes();
+		if (minutes == null) {
+			return DEFAULT_SLOT_MINUTES;
+		}
+		return minutes;
 	}
 
 	static void validateRules(List<CreateMentorAvailabilityRuleRequest> rules) {
