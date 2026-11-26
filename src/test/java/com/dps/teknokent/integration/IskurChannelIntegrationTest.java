@@ -163,9 +163,10 @@ class IskurChannelIntegrationTest {
 
 		channels(ayse)
 				.andExpect(jsonPath("$.channels[*].name").value(Matchers.contains(
-						"Genel Duyurular", "Kreatif ve Dijital Üretim", "Medya ve Kreatif Üretim", "Burak Tan",
-						"Deniz Arslan")))
-				.andExpect(jsonPath("$.channels[3].counterpart.leader").value(false));
+						"Genel Duyurular", "Kreatif ve Dijital Üretim", "Liderler odası · Kreatif ve Dijital Üretim",
+						"Medya ve Kreatif Üretim",
+						"Burak Tan", "Deniz Arslan")))
+				.andExpect(jsonPath("$.channels[4].counterpart.leader").value(false));
 	}
 
 	@Test
@@ -268,13 +269,13 @@ class IskurChannelIntegrationTest {
 				.andExpect(jsonPath("$.receipts").doesNotExist());
 
 		channels(ayse)
-				.andExpect(jsonPath("$.channels[2].unreadCount").value(1))
+				.andExpect(jsonPath("$.channels[3].unreadCount").value(1))
 				.andExpect(jsonPath("$.totalUnread").value(1));
 		channels(burak).andExpect(jsonPath("$.totalUnread").value(0));
 		send(post(CHANNELS + "/{id}/read", team), actor(ayse)).andExpect(status().isNoContent());
 		channels(ayse)
-				.andExpect(jsonPath("$.channels[2].unreadCount").value(0))
-				.andExpect(jsonPath("$.channels[2].unopened").value(false));
+				.andExpect(jsonPath("$.channels[3].unreadCount").value(0))
+				.andExpect(jsonPath("$.channels[3].unopened").value(false));
 	}
 
 	@Test
@@ -300,15 +301,67 @@ class IskurChannelIntegrationTest {
 		channels(kaan)
 				.andExpect(jsonPath("$.channels[*].name").value(Matchers.contains(
 						"Genel Duyurular", "Etkinlik ve Topluluk", "Kreatif ve Dijital Üretim",
+						"Liderler odası · Kreatif ve Dijital Üretim",
 						"Dijital Dönüşüm ve Teknoloji", "Etkinlik ve Topluluk Yönetimi", "Medya ve Kreatif Üretim")))
 				.andExpect(jsonPath("$.channels[*].coordinatorView").value(Matchers.everyItem(Matchers.is(true))))
-				.andExpect(jsonPath("$.channels[3].canWrite").value(false));
+				.andExpect(jsonPath("$.channels[3].canWrite").value(true))
+				.andExpect(jsonPath("$.channels[4].canWrite").value(false));
 
 		postMessage(kaan, channelOf(IskurChannelKind.UNIT, creative.getId()).getId(), "{\"body\":\"Hoş geldiniz\"}")
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.sender.coordinator").value(true));
 		postMessage(kaan, channelOf(IskurChannelKind.TEAM, media.getId()).getId(), "{\"body\":\"Merhaba\"}")
 				.andExpect(status().isForbidden());
+	}
+
+	@Test
+	void theLeadersOfAUnitMeetTheirCoordinatorInTheLeadersRoom() throws Exception {
+		UUID room = channelOf(IskurChannelKind.LEADERS, creative.getId()).getId();
+		channels(ayse)
+				.andExpect(jsonPath("$.channels[2].kind").value("LEADERS"))
+				.andExpect(jsonPath("$.channels[2].name").value("Liderler odası · Kreatif ve Dijital Üretim"))
+				.andExpect(jsonPath("$.channels[2].unitName").value("Kreatif ve Dijital Üretim"))
+				.andExpect(jsonPath("$.channels[2].canWrite").value(true))
+				.andExpect(jsonPath("$.channels[2].memberCount").value(2));
+		postMessage(ayse, room, "{\"body\":\"Bu haftanın gündemi\"}").andExpect(status().isOk());
+		postMessage(kaan, room, "{\"body\":\"Perşembe 10:00\"}")
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.sender.coordinator").value(true));
+		messages(admin, room).andExpect(status().isOk());
+		postMessage(admin, room, "{\"body\":\"Merhaba\"}").andExpect(status().isForbidden());
+
+		messages(burak, room).andExpect(status().isNotFound());
+		messages(otherCoordinator, room).andExpect(status().isNotFound());
+		assertThat(channelRepository.findByProgramId(program.getId()).stream()
+				.filter(channel -> channel.getKind() == IskurChannelKind.LEADERS))
+				.extracting(IskurChannel::getUnitId)
+				.containsExactly(creative.getId());
+	}
+
+	@Test
+	void aUnitWithoutItsOwnCoordinatorHasItsLeadersRoomRunByTheProgramsCoordinators() throws Exception {
+		place(unplaced, community, IskurTeamRole.LEADER, null, false);
+		membership.reconcile(program.getId());
+		UUID room = channelOf(IskurChannelKind.LEADERS, events.getId()).getId();
+
+		channels(unplaced).andExpect(jsonPath("$.channels[*].name").value(Matchers.hasItem(
+				"Liderler odası · Etkinlik ve Topluluk")));
+		postMessage(selin, room, "{\"body\":\"Haftalık birim toplantısı\"}").andExpect(status().isOk());
+		messages(ayse, room).andExpect(status().isNotFound());
+		messages(emre, room).andExpect(status().isNotFound());
+	}
+
+	@Test
+	void aLeaderWhoBecomesAMemberLeavesTheLeadersRoom() throws Exception {
+		UUID room = channelOf(IskurChannelKind.LEADERS, creative.getId()).getId();
+		IskurPlacement placement = placementRepository.findByProgramIdAndUserId(program.getId(), ayse.getId())
+				.orElseThrow();
+		placement.setTeamRole(IskurTeamRole.MEMBER);
+		placementRepository.saveAndFlush(placement);
+		membership.reconcile(program.getId());
+
+		messages(ayse, room).andExpect(status().isNotFound());
+		messages(kaan, room).andExpect(status().isOk()).andExpect(jsonPath("$.channel.memberCount").value(1));
 	}
 
 	@Test
@@ -326,7 +379,7 @@ class IskurChannelIntegrationTest {
 	@Test
 	void theAdminReadsEveryUnitAndTeamButPostsOnlyInGenelDuyurular() throws Exception {
 		channels(admin)
-				.andExpect(jsonPath("$.channels.length()").value(6))
+				.andExpect(jsonPath("$.channels.length()").value(7))
 				.andExpect(jsonPath("$.channels[0].canWrite").value(true))
 				.andExpect(jsonPath("$.channels[1].canWrite").value(false));
 		postMessage(admin, channelOf(IskurChannelKind.UNIT, events.getId()).getId(), "{\"body\":\"Merhaba\"}")
@@ -405,6 +458,9 @@ class IskurChannelIntegrationTest {
 		send(put(path), preferences(burak, "\"UNIT\""))
 				.andExpect(jsonPath("$.mutedKinds").value(Matchers.contains("UNIT")));
 		send(put(path), preferences(burak, "\"ANNOUNCEMENTS\"")).andExpect(status().isBadRequest());
+		send(put(path), preferences(ayse, "\"LEADERS\",\"UNIT\""))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.mutedKinds").value(Matchers.containsInAnyOrder("UNIT", "LEADERS")));
 		send(put(path), preferences(unplaced, "")).andExpect(status().isNotFound());
 		send(put(path), preferences(kaan, "\"UNIT\"")).andExpect(status().isOk());
 		send(put(path), preferences(otherCoordinator, "")).andExpect(status().isNotFound());
@@ -486,7 +542,7 @@ class IskurChannelIntegrationTest {
 		send(post(CHANNELS + "/{id}/read", team), actor(ayse)).andExpect(status().isNoContent());
 		send(post(CHANNELS + "/{id}/read", team), actor(ayse)).andExpect(status().isNoContent());
 		postMessage(burak, team, "{\"body\":\"İki\"}").andExpect(status().isOk());
-		channels(ayse).andExpect(jsonPath("$.channels[2].unreadCount").value(1));
+		channels(ayse).andExpect(jsonPath("$.channels[3].unreadCount").value(1));
 	}
 
 	@Test
@@ -563,7 +619,7 @@ class IskurChannelIntegrationTest {
 				.filter(channel -> channel.getKind() == kind)
 				.filter(channel -> switch (kind) {
 				case ANNOUNCEMENTS -> true;
-				case UNIT -> ref.equals(channel.getUnitId());
+				case UNIT, LEADERS -> ref.equals(channel.getUnitId());
 				case TEAM -> ref.equals(channel.getTeamId());
 				case LEADER_DIRECT -> ref.equals(channel.getLeaderId());
 				})

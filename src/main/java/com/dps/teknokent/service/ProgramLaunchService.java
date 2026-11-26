@@ -91,6 +91,19 @@ public class ProgramLaunchService {
 		return features;
 	}
 
+	/** A semester's switches, checked; the other types take none (their features follow from the type). */
+	private static Set<ProgramFeature> featuresOf(CreateCoordinatorProgramRequest request) {
+		if (request.type() != ProgramType.SEMESTER) {
+			return Set.of();
+		}
+		Set<ProgramFeature> features = request.features() == null ? Set.of() : request.features();
+		if (!ProgramFeature.validSet(features)) {
+			throw new InvalidRequestException(Texts.forRequest("error.programFeaturesInvalid"),
+					ProgramFeature.INVALID_SET_CODE);
+		}
+		return features;
+	}
+
 	/** An admin creates every program as a draft (Taslak) with its coordinators; launching is a separate step. */
 	@Transactional
 	public CoordinatorProgramResponse.Detail create(UUID actorId, CreateCoordinatorProgramRequest request) {
