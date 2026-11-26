@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -19,6 +20,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -75,8 +77,15 @@ class CoordinatorConversationServiceTest {
 	private AppUserRepository appUserRepository;
 	@Mock
 	private NotificationService notificationService;
+	@Mock
+	private ProgramFeatureAccess featureAccess;
 	@InjectMocks
 	private CoordinatorConversationService service;
+
+	@BeforeEach
+	void everyProgramOpensItsPeerScreens() {
+		lenient().when(featureAccess.opens(any(), any(), any())).thenReturn(true);
+	}
 
 	private static final UUID COORDINATOR_ID = UUID.fromString("00000000-0000-0000-0000-0000000000c1");
 	private static final UUID MENTOR_ID = UUID.fromString("00000000-0000-0000-0000-000000000006");

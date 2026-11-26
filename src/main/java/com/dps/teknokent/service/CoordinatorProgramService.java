@@ -1038,12 +1038,14 @@ public class CoordinatorProgramService {
 	}
 
 	/**
-	 * For a screen of one feature of a program the caller runs: a semester coordinator who was not given that
-	 * feature gets a 403. A program without the feature is left to the caller's own 400.
+	 * For a screen of one feature of a program the caller runs: a semester that has it switched off is a 400, and a
+	 * semester coordinator who was not given it a 403. Programs of the other types are left as they were.
 	 */
 	public void requireAssigned(UUID actorId, Program program, ProgramFeature feature) {
 		if (program.has(feature)) {
 			featureAccess.requireAssigned(actorId, program, feature);
+		} else if (program.getProgramType() == ProgramType.SEMESTER) {
+			throw new InvalidRequestException(Texts.forRequest("error.programFeatureOff"));
 		}
 	}
 

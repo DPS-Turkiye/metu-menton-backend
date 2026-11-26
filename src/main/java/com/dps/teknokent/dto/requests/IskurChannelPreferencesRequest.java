@@ -12,5 +12,5 @@ import jakarta.validation.constraints.Size;
 public record IskurChannelPreferencesRequest(
 		@NotNull UUID actorId,
 		@NotNull UUID programId,
-		@NotNull @Size(max = 4) List<@NotNull IskurChannelKind> mutedKinds) {
+		@NotNull @Size(max = 5) List<@NotNull IskurChannelKind> mutedKinds) {
 }

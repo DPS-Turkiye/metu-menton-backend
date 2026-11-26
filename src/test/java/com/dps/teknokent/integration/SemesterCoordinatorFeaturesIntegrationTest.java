@@ -95,6 +95,8 @@ class SemesterCoordinatorFeaturesIntegrationTest {
 				.andExpect(status().isForbidden());
 		call(get("/api/coordinator/programs/{id}/iskur/workspace", semester.getId()), officeHoursCoordinator)
 				.andExpect(status().isForbidden());
+		call(get("/api/coordinator/programs/{id}/iskur/team-changes", semester.getId()), officeHoursCoordinator)
+				.andExpect(status().isForbidden());
 	}
 
 	@Test
@@ -102,6 +104,8 @@ class SemesterCoordinatorFeaturesIntegrationTest {
 		call(get("/api/coordinator/programs/{id}/peer-categories", semester.getId()), peerCoordinator)
 				.andExpect(status().isOk());
 		call(get("/api/coordinator/programs/{id}/iskur/workspace", semester.getId()), peerCoordinator)
+				.andExpect(status().isOk());
+		call(get("/api/coordinator/programs/{id}/iskur/team-changes", semester.getId()), peerCoordinator)
 				.andExpect(status().isOk());
 
 		call(get("/api/coordinator/programs/{id}/office-hours/appointments", semester.getId()), peerCoordinator)
@@ -201,6 +205,20 @@ class SemesterCoordinatorFeaturesIntegrationTest {
 			call(get(path, semester.getId()), officeHoursCoordinator).andExpect(status().isForbidden());
 			call(get(path, semester.getId()), peerCoordinator).andExpect(status().is2xxSuccessful());
 		}
+	}
+
+	@Test
+	void aSemesterWithPeerMentoringSwitchedOffRefusesItsPeerScreensToEveryCoordinator() throws Exception {
+		Program officeHoursOnly = semester(EnumSet.of(ProgramFeature.OFFICE_HOURS));
+		coordinatorOf(officeHoursOnly, officeHoursCoordinator, ProgramFeature.OFFICE_HOURS);
+
+		for (String path : List.of("/api/coordinator/programs/{id}/mentors",
+				"/api/coordinator/programs/{id}/eligible-emails", "/api/coordinator/programs/{id}/teams")) {
+			call(get(path, officeHoursOnly.getId()), officeHoursCoordinator).andExpect(status().isBadRequest());
+			call(get(path, officeHoursOnly.getId()), admin).andExpect(status().isBadRequest());
+		}
+		call(get("/api/coordinator/programs/{id}/office-hours/appointments", officeHoursOnly.getId()),
+				officeHoursCoordinator).andExpect(status().isOk());
 	}
 
 	private void switchFeatures(ProgramFeature... features) throws Exception {
