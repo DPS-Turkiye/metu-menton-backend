@@ -171,7 +171,7 @@ class BadgeControllerTest {
 				plain.awardedAt(), plain.revokedAt(), plain.reason(), plain.training(),
 				new GateBadgeRowResponse.Profile("Endüstri Mühendisliği", 4, true,
 						List.of(com.dps.teknokent.domain.PeerTopicCategory.CAREER_INTERNSHIP), 3, 4),
-				null, true);
+				null, true, true);
 		when(badgeService.roster(ACTOR, PROGRAM, null)).thenReturn(List.of(withProfile));
 
 		mockMvc.perform(get("/api/coordinator/programs/" + PROGRAM + "/badges/roster")
@@ -183,12 +183,13 @@ class BadgeControllerTest {
 				.andExpect(jsonPath("$[0].profile.mentorProfile").value(true))
 				.andExpect(jsonPath("$[0].profile.categories[0]").value("CAREER_INTERNSHIP"))
 				.andExpect(jsonPath("$[0].profile.activeMentees").value(3))
-				.andExpect(jsonPath("$[0].profile.menteeCapacity").value(4));
+				.andExpect(jsonPath("$[0].profile.menteeCapacity").value(4))
+				.andExpect(jsonPath("$[0].iskurIntern").value(true));
 	}
 
 	private static GateBadgeRowResponse row(GateBadgeState state) {
 		return new GateBadgeRowResponse(STUDENT, "Zeynep Öğrenci", "zeynep@odtu-dev.invalid", PROGRAM,
 				"İŞKUR 2026 Bahar", state, AWARD, BadgeSource.COORDINATOR, Instant.parse("2026-11-08T10:00:00Z"),
-				null, null, GateBadgeRowResponse.Training.NONE, null, null, true);
+				null, null, GateBadgeRowResponse.Training.NONE, null, null, true, false);
 	}
 }

@@ -157,10 +157,11 @@ public class BadgeService {
 		Map<UUID, GateBadgeRowResponse.Training> training = trainingOf(program.getId(), people.keySet());
 		Map<UUID, GateBadgeRowResponse.Profile> profiles = profilesOf(people.keySet());
 		Map<UUID, GateBadgeRowResponse.Prism> prism = prismOf(program.getId(), people.keySet());
+		Set<UUID> interns = iskurInternsOf(program);
 		return people.values().stream()
 				.map(person -> row(person, program, latest.get(person.getId()),
 						training.getOrDefault(person.getId(), GateBadgeRowResponse.Training.NONE),
-						profiles.get(person.getId()), prism.get(person.getId())))
+						profiles.get(person.getId()), prism.get(person.getId()), interns.contains(person.getId())))
 				.filter(row -> state == null || row.state() == state)
 				.sorted((left, right) -> left.fullName().compareToIgnoreCase(right.fullName()))
 				.toList();
@@ -190,7 +191,7 @@ public class BadgeService {
 			Program program = student.getProgramId() == null ? null : studentPrograms.get(student.getProgramId());
 			if (program == null) {
 				// In no semester: no award to show or revoke here.
-				rows.add(row(student, null, null));
+				rows.add(row(student, null, null, false));
 			} else {
 				byProgram.computeIfAbsent(program.getId(), id -> new ArrayList<>()).add(student);
 			}
@@ -215,8 +216,10 @@ public class BadgeService {
 			Program program = studentPrograms.get(programId);
 			Map<UUID, GateBadgeRowResponse.Training> training = trainingOf(programId,
 					members.stream().map(AppUser::getId).toList());
+			Set<UUID> interns = iskurInternsOf(program);
 			members.forEach(student -> rows.add(row(student, program, latestIn.get(student.getId() + "|" + programId),
-					training.getOrDefault(student.getId(), GateBadgeRowResponse.Training.NONE), null, null)));
+					training.getOrDefault(student.getId(), GateBadgeRowResponse.Training.NONE), null, null,
+					interns.contains(student.getId()))));
 		});
 		return rows.stream()
 				.filter(row -> state == null || row.state() == state)
@@ -301,7 +304,7 @@ public class BadgeService {
 			throw new ConflictException(Texts.forRequest("error.badgeAlreadyActive"));
 		}
 		UserBadge award = award(student, GATE, program, sourceOf(actor), actor.getId());
-		return row(student, program, award);
+		return row(student, program, award, isIskurIntern(program, student));
 	}
 
 	/**
@@ -391,7 +394,7 @@ public class BadgeService {
 			users.save(holder);
 		}
 		notify(holder, "notification.badgeRevoked", award.getBadgeCode(), program, why);
-		return row(holder, program, award);
+		return row(holder, program, award, isIskurIntern(program, holder));
 	}
 
 	private Set<UserRole> permissionsStillGranted(UUID userId) {
@@ -649,18 +652,30 @@ public class BadgeService {
 		}).orElse(Map.of());
 	}
 
-	private static GateBadgeRowResponse row(AppUser person, @Nullable Program program, @Nullable UserBadge award) {
-		return row(person, program, award, GateBadgeRowResponse.Training.NONE, null, null);
+	/** The program's İŞKUR interns; none when there is no program or it does not run İŞKUR. */
+	private Set<UUID> iskurInternsOf(@Nullable Program program) {
+		return program != null && program.has(ProgramFeature.ISKUR) ? iskurInterns.internIds(program.getId())
+				: Set.of();
+	}
+
+	private boolean isIskurIntern(Program program, AppUser person) {
+		return program.has(ProgramFeature.ISKUR) && iskurInterns.isIntern(program.getId(), person.getId());
+	}
+
+	private static GateBadgeRowResponse row(AppUser person, @Nullable Program program, @Nullable UserBadge award,
+			boolean iskurIntern) {
+		return row(person, program, award, GateBadgeRowResponse.Training.NONE, null, null, iskurIntern);
 	}
 
 	private static GateBadgeRowResponse row(AppUser person, @Nullable Program program, @Nullable UserBadge award,
 			GateBadgeRowResponse.Training training, GateBadgeRowResponse.@Nullable Profile profile,
-			GateBadgeRowResponse.@Nullable Prism prism) {
+			GateBadgeRowResponse.@Nullable Prism prism, boolean iskurIntern) {
 		return new GateBadgeRowResponse(person.getId(), person.getFullName(), person.getEmail(),
 				program == null ? null : program.getId(), program == null ? null : program.getName(),
 				GateBadgeState.of(award == null ? null : award.getStatus()),
 				award == null ? null : award.getId(), award == null ? null : award.getSource(),
 				award == null ? null : award.getAwardedAt(), award == null ? null : award.getRevokedAt(),
-				award == null ? null : award.getReason(), training, profile, prism, person.has(UserRole.MENTEE));
+				award == null ? null : award.getReason(), training, profile, prism, person.has(UserRole.MENTEE),
+				iskurIntern);
 	}
 }

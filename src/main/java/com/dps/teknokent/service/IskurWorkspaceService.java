@@ -25,7 +25,6 @@ import com.dps.teknokent.domain.IskurTeamRole;
 import com.dps.teknokent.domain.IskurWarning;
 import com.dps.teknokent.domain.IskurWeeklySplit;
 import com.dps.teknokent.domain.ProgramFeature;
-import com.dps.teknokent.domain.ProgramMentorStatus;
 import com.dps.teknokent.domain.ProgramStatus;
 import com.dps.teknokent.dto.requests.IskurFinalizeRequest;
 import com.dps.teknokent.dto.requests.IskurPlacementRequest;
@@ -38,7 +37,6 @@ import com.dps.teknokent.entity.IskurPlacement;
 import com.dps.teknokent.entity.IskurTeam;
 import com.dps.teknokent.entity.IskurUnit;
 import com.dps.teknokent.entity.Program;
-import com.dps.teknokent.entity.ProgramMentor;
 import com.dps.teknokent.exception.ConflictException;
 import com.dps.teknokent.exception.InvalidRequestException;
 import com.dps.teknokent.exception.ResourceNotFoundException;
@@ -48,7 +46,6 @@ import com.dps.teknokent.repository.IskurOnboardingRepository;
 import com.dps.teknokent.repository.IskurPlacementRepository;
 import com.dps.teknokent.repository.IskurTeamRepository;
 import com.dps.teknokent.repository.IskurUnitRepository;
-import com.dps.teknokent.repository.ProgramMentorRepository;
 import com.dps.teknokent.repository.ProgramRepository;
 import com.dps.teknokent.util.Texts;
 
@@ -82,7 +79,6 @@ public class IskurWorkspaceService {
 	private final IskurPlacementRepository placements;
 	private final IskurOnboardingRepository onboardings;
 	private final AppUserRepository users;
-	private final ProgramMentorRepository programMentors;
 	private final ProgramRepository programs;
 	private final InstitutionPersonRepository institutionPeople;
 	private final ApplicationEventPublisher events;
@@ -386,13 +382,6 @@ public class IskurWorkspaceService {
 		return interns.internIds(program.getId());
 	}
 
-	private Set<UUID> peerMentorIds(Program program) {
-		return programMentors.findByProgramIdOrderByCreatedAtAsc(program.getId()).stream()
-				.filter(membership -> membership.getStatus() == ProgramMentorStatus.ACCEPTED)
-				.map(ProgramMentor::getMentorId)
-				.collect(Collectors.toCollection(LinkedHashSet::new));
-	}
-
 	private IskurWorkspaceResponse build(Program program) {
 		List<IskurPlacement> placementRows = placements.findByProgramId(program.getId());
 		List<IskurWorkspaceResponse.Coordinator> coordinators = coordinatorProgramService.coordinatorsOf(program)
@@ -400,12 +389,13 @@ public class IskurWorkspaceService {
 				.map(ref -> new IskurWorkspaceResponse.Coordinator(ref.id(), ref.fullName()))
 				.toList();
 
-		Set<UUID> mentorIds = peerMentorIds(program);
 		Set<UUID> candidates = candidateIds(program);
 		Map<UUID, AppUser> accounts = new HashMap<>();
 		Set<UUID> wanted = new LinkedHashSet<>(candidates);
 		placementRows.forEach(placement -> wanted.add(placement.getUserId()));
 		users.findAllById(wanted).forEach(user -> accounts.put(user.getId(), user));
+		// peerMentor false is the placement screen's "Rozet bekleniyor": an intern works in İŞKUR before the badge.
+		Set<UUID> mentorIds = interns.peerMentorIds(program.getId(), accounts.values());
 		Map<UUID, InstitutionPerson> records = latestRecords(accounts.keySet());
 		Map<UUID, IskurWorkspaceResponse.Person> people = new HashMap<>();
 		accounts.values().forEach(user -> people.put(user.getId(), new IskurWorkspaceResponse.Person(user.getId(),

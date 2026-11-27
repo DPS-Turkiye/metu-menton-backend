@@ -521,23 +521,34 @@ class IskurWeekIntegrationTest {
 
 	@Test
 	void reportsTwoWeeksWithoutAMeetingToTheCoordinatorsOnce() {
+		// A badge holder from after badges: MENTOR from the badge, no accepted mentor row.
+		AppUser ece = student("Ece Badge");
+		ece.grant(UserRole.MENTOR, PermissionSource.BADGE, NOW.minus(Duration.ofDays(10)));
+		ece = userRepository.saveAndFlush(ece);
+		place(ece, teamNamed("Dijital Dönüşüm"), IskurTeamRole.MEMBER, null, 2, null);
+		// Placed long ago, but the badge came on 1 December: not two whole weeks to mentor yet.
+		AppUser can = student("Can Yeni");
+		can.grant(UserRole.MENTOR, PermissionSource.BADGE, Instant.parse("2026-12-01T09:00:00Z"));
+		can = userRepository.saveAndFlush(can);
+		place(can, teamNamed("Dijital Dönüşüm"), IskurTeamRole.MEMBER, null, 2, null);
 		// Monday 7 December: the weeks of 23 and 30 November had no meeting for anyone.
 		doReturn(Instant.parse("2026-12-07T07:00:00Z")).when(calendar).now();
 
-		assertThat(meetingGaps.run()).isEqualTo(4);
+		assertThat(meetingGaps.run()).isEqualTo(3);
 		assertThat(alertRepository.findAll())
 				.extracting(IskurMeetingGapAlert::getUserId)
-				.containsExactlyInAnyOrder(zeynep.getId(), mert.getId(), ayse.getId(), outsider.getId());
+				.containsExactlyInAnyOrder(zeynep.getId(), mert.getId(), ece.getId());
 		assertThat(notificationRepository.findByRecipientIdOrderByCreatedAtDesc(coordinator.getId()))
-				.hasSize(4)
-				.anySatisfy(notification -> assertThat(notification.getBody()).contains("Ayşe Yıldız"));
-		// Kaan gives no mentoring; a second run tells no one again.
+				.hasSize(3)
+				.anySatisfy(notification -> assertThat(notification.getBody()).contains("Ece Badge"))
+				.noneSatisfy(notification -> assertThat(notification.getBody()).contains("Ayşe Yıldız"));
+		// Kaan gives no mentoring, and Ayşe and Deniz have no badge yet; a second run tells no one again.
 		assertThat(meetingGaps.run()).isZero();
 		// A week later the same stretch goes on: its mark moves forward, and no one is told again.
 		doReturn(Instant.parse("2026-12-14T07:00:00Z")).when(calendar).now();
 		assertThat(meetingGaps.run()).isZero();
-		assertThat(alertRepository.findAll()).hasSize(8);
-		assertThat(notificationRepository.findByRecipientIdOrderByCreatedAtDesc(coordinator.getId())).hasSize(4);
+		assertThat(alertRepository.findAll()).hasSize(6);
+		assertThat(notificationRepository.findByRecipientIdOrderByCreatedAtDesc(coordinator.getId())).hasSize(3);
 
 		// A week earlier, Mert's meetings of 17 and 18 November still count, so he is not reported.
 		alertRepository.deleteAll();
@@ -762,6 +773,10 @@ class IskurWeekIntegrationTest {
 			internOf(joined, saved);
 		}
 		return saved;
+	}
+
+	private IskurTeam teamNamed(String name) {
+		return teamRepository.findAll().stream().filter(team -> team.getName().equals(name)).findFirst().orElseThrow();
 	}
 
 	/** Puts the person's address on the program's İŞKUR intern list, as the coordinator would. */

@@ -33,6 +33,7 @@ import org.springframework.transaction.annotation.Transactional;
 import com.dps.teknokent.domain.InstitutionDataSource;
 import com.dps.teknokent.domain.IskurPlacementStatus;
 import com.dps.teknokent.domain.IskurTeamRole;
+import com.dps.teknokent.domain.PermissionSource;
 import com.dps.teknokent.domain.ProgramMentorInvitedBy;
 import com.dps.teknokent.domain.ProgramMentorStatus;
 import com.dps.teknokent.domain.ProgramStatus;
@@ -144,6 +145,29 @@ class IskurWorkspaceIntegrationTest {
 				.andExpect(jsonPath("$.coordinators[*].fullName").value(Matchers.contains("Selin Er", "Kaan Yurt")))
 				.andExpect(jsonPath("$.counts.interns").value(5))
 				.andExpect(jsonPath("$.counts.placed").value(0));
+	}
+
+	@Test
+	void marksBadgeHoldersAsPeerMentorsAndEveryOtherInternAsBadgePending() throws Exception {
+		burak.grant(UserRole.MENTOR, PermissionSource.BADGE, Instant.now());
+		userRepository.saveAndFlush(burak);
+
+		workspace(coordinator)
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.pool[*].fullName").value(Matchers.contains(
+						"Ayşe Yıldız", "Burak Tan", "Ceren Su", "Deniz Arslan", "Zeynep Kaya")))
+				// No badge yet: still in the pool, placed like anyone else ("Rozet bekleniyor").
+				.andExpect(jsonPath("$.pool[0].peerMentor").value(false))
+				// The badge grants MENTOR; no accepted mentor row is needed any more.
+				.andExpect(jsonPath("$.pool[1].peerMentor").value(true))
+				// An accepted peer mentor from before badges still counts.
+				.andExpect(jsonPath("$.pool[4].peerMentor").value(true));
+
+		IskurTeam team = team(unit("Kreatif ve Dijital Üretim"), "Medya ve Kreatif Üretim");
+		place(coordinator, ayse, team, IskurTeamRole.MEMBER, null, 2, 180).andExpect(status().isOk());
+		workspace(coordinator)
+				.andExpect(jsonPath("$.units[*].teams[*].people[?(@.fullName == 'Ayşe Yıldız')].peerMentor")
+						.value(Matchers.contains(false)));
 	}
 
 	@Test
