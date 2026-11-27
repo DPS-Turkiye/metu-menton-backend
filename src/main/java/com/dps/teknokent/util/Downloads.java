@@ -1,6 +1,7 @@
 package com.dps.teknokent.util;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 
 import org.springframework.http.CacheControl;
 import org.springframework.http.ContentDisposition;
@@ -9,8 +10,10 @@ import org.springframework.http.InvalidMediaTypeException;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 
-/** A file the backend hands out for saving. */
+/** A file the backend hands out for saving, or a photo it hands out for showing. */
 public final class Downloads {
+
+	private static final Duration AVATAR_MAX_AGE = Duration.ofMinutes(10);
 
 	private Downloads() {
 	}
@@ -28,6 +31,21 @@ public final class Downloads {
 						.toString())
 				.header("X-Content-Type-Options", "nosniff")
 				.cacheControl(CacheControl.noStore().cachePrivate())
+				.body(body);
+	}
+
+	/**
+	 * A profile photo drawn in an {@code <img>}, so inline rather than an attachment. Only an image type the caller
+	 * produced or checked may come here; nosniff and a sandbox policy keep the browser from treating it as anything
+	 * else. Cached privately for a few minutes, since a list of people asks for each photo again on every page.
+	 */
+	public static ResponseEntity<byte[]> avatar(byte[] body, String imageType) {
+		return ResponseEntity.ok()
+				.contentType(MediaType.parseMediaType(imageType))
+				.header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.inline().build().toString())
+				.header("X-Content-Type-Options", "nosniff")
+				.header("Content-Security-Policy", "default-src 'none'; sandbox")
+				.cacheControl(CacheControl.maxAge(AVATAR_MAX_AGE).cachePrivate())
 				.body(body);
 	}
 

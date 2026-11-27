@@ -11,6 +11,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
@@ -147,6 +148,14 @@ public class DocumentService {
 		}
 	}
 
+	/** A person's current photo among their avatar rows: the newest, ties broken by id. */
+	public static Optional<StoredDocument> newestAvatar(List<StoredDocument> avatars) {
+		return avatars.stream()
+				.max(Comparator
+						.comparing(StoredDocument::getCreatedAt, Comparator.nullsFirst(Comparator.naturalOrder()))
+						.thenComparing(StoredDocument::getId));
+	}
+
 	// Only the newest photo is ever shown, so the rest are removed. Keeping the newest,
 	// rather than this request's own upload, means two uploads racing each other agree
 	// on what stays; a failed cleanup is left for the next upload to finish.
@@ -156,12 +165,7 @@ public class DocumentService {
 		if (avatars.size() < 2) {
 			return;
 		}
-		UUID newestId = avatars.stream()
-				.max(Comparator
-						.comparing(StoredDocument::getCreatedAt, Comparator.nullsFirst(Comparator.naturalOrder()))
-						.thenComparing(StoredDocument::getId))
-				.orElseThrow()
-				.getId();
+		UUID newestId = newestAvatar(avatars).orElseThrow().getId();
 		List<StoredDocument> older = avatars.stream()
 				.filter(document -> !document.getId().equals(newestId))
 				.toList();

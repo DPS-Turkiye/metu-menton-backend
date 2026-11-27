@@ -3,6 +3,7 @@ package com.dps.teknokent.controller;
 import java.util.List;
 import java.util.UUID;
 
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -25,8 +26,11 @@ import com.dps.teknokent.dto.responses.UserProfileResponse;
 import com.dps.teknokent.dto.responses.UserResponse;
 import com.dps.teknokent.security.CurrentActor;
 import com.dps.teknokent.service.AppUserService;
+import com.dps.teknokent.service.PersonPhotoService;
 import com.dps.teknokent.service.PersonSummaryService;
 import com.dps.teknokent.service.TeamMembershipService;
+import com.dps.teknokent.util.AvatarImages;
+import com.dps.teknokent.util.Downloads;
 
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -41,6 +45,7 @@ public class AppUserController {
 	private final AppUserService appUserService;
 	private final TeamMembershipService teamMembershipService;
 	private final PersonSummaryService personSummaryService;
+	private final PersonPhotoService personPhotoService;
 
 	/** Admins only. */
 	@GetMapping
@@ -67,6 +72,13 @@ public class AppUserController {
 	@GetMapping("/{id}/summary")
 	public PersonSummaryResponse summary(@PathVariable UUID id, @RequestParam(required = false) UUID actorId) {
 		return personSummaryService.summary(CurrentActor.resolve(actorId), id);
+	}
+
+	/** The person's photo as an avatar, for whoever {@code PersonPhotoService.canSeePhoto} lets see it. */
+	@GetMapping("/{id}/photo")
+	public ResponseEntity<byte[]> photo(@PathVariable UUID id, @RequestParam(required = false) UUID actorId) {
+		AvatarImages.Image photo = personPhotoService.photo(CurrentActor.resolve(actorId), id);
+		return Downloads.avatar(photo.bytes(), photo.contentType());
 	}
 
 	/** Same audience as {@link #findById}. */
