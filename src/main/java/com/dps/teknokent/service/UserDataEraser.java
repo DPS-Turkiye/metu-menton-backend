@@ -431,6 +431,9 @@ class UserDataEraser {
 		// A team change request and its reason are the intern's; who answered it is only a reference.
 		update("delete from IskurTeamChangeRequest r where r.userId = :id", "id", id);
 		update("update IskurTeamChangeRequest r set r.decidedBy = null where r.decidedBy = :id", "id", id);
+		// An assessment statement and its text are the intern's; who decided it is only a reference.
+		update("delete from IskurAssessmentStatement s where s.userId = :id", "id", id);
+		update("update IskurAssessmentStatement s set s.decidedBy = null where s.decidedBy = :id", "id", id);
 		// A support request belongs to the two teams; who opened or answered it is only a reference.
 		update("update IskurTeamSupportRequest r set r.openedBy = null where r.openedBy = :id", "id", id);
 		update("update IskurTeamSupportRequest r set r.answeredBy = null where r.answeredBy = :id", "id", id);
