@@ -3,6 +3,7 @@ package com.dps.teknokent.service;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 
@@ -192,6 +193,21 @@ class IskurInternServiceTest {
 		assertThat(service.internIds(iskur.getId())).containsExactly(mentor.getId());
 		assertThat(service.isIntern(iskur.getId(), mentor.getId())).isTrue();
 		assertThat(service.isIntern(iskur.getId(), waiting.getId())).isFalse();
+	}
+
+	@Test
+	void aBadgeHolderOrAnAcceptedPeerMentorCanMentorAndEveryOtherInternWaitsForTheBadge() {
+		AppUser pending = listed(iskur, user(UserRole.MENTEE, iskur));
+		AppUser badged = listed(iskur, user(UserRole.MENTEE, iskur));
+		badged.grant(UserRole.MENTOR, PermissionSource.BADGE, Instant.now());
+		badged = userRepository.saveAndFlush(badged);
+		AppUser accepted = user(UserRole.MENTOR, null);
+		mentorOf(iskur, accepted, ProgramMentorStatus.ACCEPTED);
+		listed(iskur, accepted);
+
+		assertThat(service.peerMentorIds(iskur.getId(), List.of(pending, badged, accepted)))
+				.containsExactly(badged.getId(), accepted.getId());
+		assertThat(service.peerMentorIds(iskur.getId(), List.of())).isEmpty();
 	}
 
 	@Test

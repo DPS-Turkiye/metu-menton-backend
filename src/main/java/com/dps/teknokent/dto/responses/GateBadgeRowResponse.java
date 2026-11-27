@@ -33,7 +33,9 @@ public record GateBadgeRowResponse(
 		@Nullable Profile profile,
 		@Nullable Prism prism,
 		/* A student account, whose semester the admin can change; false for a gate holder who is not one. */
-		boolean student) {
+		boolean student,
+		/* On the program's İŞKUR intern list: without the badge they still work in İŞKUR ("Rozet bekleniyor"). */
+		boolean iskurIntern) {
 
 	/**
 	 * The person's Prism training in the program, for its coordinators and admins only: when they said they finished

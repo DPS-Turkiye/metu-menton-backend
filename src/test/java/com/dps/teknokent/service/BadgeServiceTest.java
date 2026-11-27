@@ -394,6 +394,19 @@ class BadgeServiceTest {
 	}
 
 	@Test
+	void theRosterMarksTheProgramsIskurInternsSoABadgeLessOneShowsAsPending() {
+		AppUser intern = student(iskur);
+		when(users.findByProgramIdAndPermissionAndStatusOrderByCreatedAtAsc(iskur.getId(), UserRole.MENTEE,
+				UserAccountStatus.APPROVED)).thenReturn(List.of(student, intern));
+		when(iskurInterns.internIds(iskur.getId())).thenReturn(java.util.Set.of(intern.getId()));
+
+		assertThat(service.roster(coordinator.getId(), iskur.getId(), null))
+				.extracting(row -> row.userId(), row -> row.iskurIntern())
+				.containsExactlyInAnyOrder(org.assertj.core.groups.Tuple.tuple(student.getId(), false),
+						org.assertj.core.groups.Tuple.tuple(intern.getId(), true));
+	}
+
+	@Test
 	void theRosterShowsEachPersonsDepartmentAndAPeerMentorsCategoriesAndLoad() {
 		AppUser mentorAccount = user("Mert Demir", UserRole.MENTEE);
 		when(users.findByProgramIdAndPermissionAndStatusOrderByCreatedAtAsc(iskur.getId(), UserRole.MENTEE,

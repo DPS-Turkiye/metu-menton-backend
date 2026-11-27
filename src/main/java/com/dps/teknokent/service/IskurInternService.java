@@ -1,6 +1,7 @@
 package com.dps.teknokent.service;
 
 import java.time.Instant;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -91,6 +92,22 @@ public class IskurInternService {
 				.collect(Collectors.toSet());
 		mentorIds.stream().filter(listedMentors::contains).forEach(ids::add);
 		return ids;
+	}
+
+	/**
+	 * Who among these people can give peer mentoring in the program: a badge holder (the badge grants MENTOR) or an
+	 * accepted peer mentor from before badges. Every other intern works in İŞKUR with their badge still pending.
+	 */
+	@Transactional(readOnly = true)
+	public Set<UUID> peerMentorIds(UUID programId, Collection<AppUser> people) {
+		Set<UUID> accepted = programMentors.findByProgramIdOrderByCreatedAtAsc(programId).stream()
+				.filter(membership -> membership.getStatus() == ProgramMentorStatus.ACCEPTED)
+				.map(ProgramMentor::getMentorId)
+				.collect(Collectors.toSet());
+		return people.stream()
+				.filter(person -> person.has(UserRole.MENTOR) || accepted.contains(person.getId()))
+				.map(AppUser::getId)
+				.collect(Collectors.toCollection(LinkedHashSet::new));
 	}
 
 	/** Whether this one person is an intern of the program; the single-person form of {@link #internIds(UUID)}. */
