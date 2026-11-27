@@ -58,20 +58,44 @@ class AvatarImagesTest {
 
 	@Test
 	void sendsNoWebpTooLargeForAListOfAvatars() {
-		byte[] large = Arrays.copyOf("RIFF\0\0\0\0WEBPVP8 ".getBytes(StandardCharsets.US_ASCII),
-				AvatarImages.MAX_WEBP_BYTES + 1);
+		byte[] large = webp(chunk("VP8 ", new byte[AvatarImages.MAX_WEBP_BYTES]));
 
 		assertThat(AvatarImages.thumbnail(large, "image/webp")).isEmpty();
 	}
 
 	@Test
-	void sendsAWebpAsUploadedSinceTheJdkCannotReadIt() {
-		byte[] webp = "RIFF\0\0\0\0WEBPVP8 ".getBytes(StandardCharsets.US_ASCII);
+	void sendsAWebpWithoutMetadataAsItIsSinceTheJdkCannotReadIt() {
+		byte[] webp = webp(chunk("VP8 ", new byte[] { 1, 2, 3, 4 }));
 
 		AvatarImages.Image avatar = AvatarImages.thumbnail(webp, "image/webp").orElseThrow();
 
-		assertThat(avatar.bytes()).isSameAs(webp);
+		assertThat(avatar.bytes()).isEqualTo(webp);
 		assertThat(avatar.contentType()).isEqualTo(AvatarImages.WEBP);
+	}
+
+	@Test
+	void leavesAWebpsExifAndXmpBehind() {
+		// VP8X flags: alpha (0x10) stays; EXIF (0x08) and XMP (0x04) go with their chunks.
+		byte[] extended = new byte[10];
+		extended[0] = 0x10 | 0x08 | 0x04;
+		byte[] image = { 9, 8, 7, 6, 5 };
+		byte[] webp = webp(chunk("VP8X", extended), chunk("VP8L", image),
+				chunk("EXIF", "GPS 39.89N 32.78E".getBytes(StandardCharsets.US_ASCII)),
+				chunk("XMP ", "<x:xmpmeta/>".getBytes(StandardCharsets.US_ASCII)));
+
+		byte[] shown = AvatarImages.thumbnail(webp, "image/webp").orElseThrow().bytes();
+
+		String text = new String(shown, StandardCharsets.ISO_8859_1);
+		assertThat(text).doesNotContain("EXIF").doesNotContain("XMP ").doesNotContain("GPS");
+		assertThat(shown).isEqualTo(webp(chunk("VP8X", flagged(extended, 0x10)), chunk("VP8L", image)));
+	}
+
+	@Test
+	void refusesAWebpWhoseChunksRunPastItsEnd() {
+		byte[] webp = webp(chunk("VP8 ", new byte[] { 1, 2, 3, 4 }));
+		webp[16] = 100;
+
+		assertThat(AvatarImages.thumbnail(webp, "image/webp")).isEmpty();
 	}
 
 	@Test
@@ -161,6 +185,45 @@ class AvatarImagesTest {
 
 		assertThat(shown.getRGB(topLeftX, topLeftY) & 0xFFFFFF).isEqualTo(RED);
 		assertThat(shown.getRGB(topRightX, topRightY) & 0xFFFFFF).isEqualTo(BLUE);
+	}
+
+	/** A RIFF WebP of the given chunks, its size field filled in. */
+	private static byte[] webp(byte[]... chunks) {
+		ByteArrayOutputStream body = new ByteArrayOutputStream();
+		body.writeBytes("WEBP".getBytes(StandardCharsets.US_ASCII));
+		for (byte[] chunk : chunks) {
+			body.writeBytes(chunk);
+		}
+		ByteArrayOutputStream out = new ByteArrayOutputStream();
+		out.writeBytes("RIFF".getBytes(StandardCharsets.US_ASCII));
+		writeLittleEndian(out, body.size());
+		out.writeBytes(body.toByteArray());
+		return out.toByteArray();
+	}
+
+	/** One chunk: its four-letter name, its size and its data, padded to an even length. */
+	private static byte[] chunk(String fourcc, byte[] data) {
+		ByteArrayOutputStream out = new ByteArrayOutputStream();
+		out.writeBytes(fourcc.getBytes(StandardCharsets.US_ASCII));
+		writeLittleEndian(out, data.length);
+		out.writeBytes(data);
+		if (data.length % 2 == 1) {
+			out.write(0);
+		}
+		return out.toByteArray();
+	}
+
+	private static byte[] flagged(byte[] extended, int flags) {
+		byte[] copy = extended.clone();
+		copy[0] = (byte) flags;
+		return copy;
+	}
+
+	private static void writeLittleEndian(ByteArrayOutputStream out, int value) {
+		out.write(value & 0xFF);
+		out.write((value >>> 8) & 0xFF);
+		out.write((value >>> 16) & 0xFF);
+		out.write((value >>> 24) & 0xFF);
 	}
 
 	private static byte[] image(int width, int height, String format) throws IOException {

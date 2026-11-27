@@ -39,6 +39,12 @@ public final class AvatarImages {
 
 	private static final int EXIF_ORIENTATION_TAG = 0x0112;
 
+	private static final String WEBP_VP8X = "VP8X";
+	private static final String WEBP_EXIF = "EXIF";
+	private static final String WEBP_XMP = "XMP ";
+	private static final int VP8X_EXIF_FLAG = 0x08;
+	private static final int VP8X_XMP_FLAG = 0x04;
+
 	private AvatarImages() {
 	}
 
@@ -50,13 +56,14 @@ public final class AvatarImages {
 	/**
 	 * The photo at most {@link #MAX_SIDE} pixels on its longer side, turned upright when the camera recorded a
 	 * rotation. A PNG or JPEG is always drawn afresh, so its metadata (a phone's GPS position, say) never leaves with
-	 * it. A WebP, which the JDK cannot read, goes out as uploaded while it is small. Empty when the bytes are not a
-	 * photo that can be shown, or one too large to decode safely.
+	 * it. A WebP, which the JDK cannot read, goes out at its own size while it is small, rewritten without its EXIF
+	 * and XMP chunks. Empty when the bytes are not a photo that can be shown, or one too large to decode safely.
 	 */
 	public static Optional<Image> thumbnail(byte[] original, @Nullable String contentType) {
 		String type = contentType == null ? "" : contentType.strip().toLowerCase(Locale.ROOT);
 		if (type.equals(WEBP)) {
-			return isWebp(original) && original.length <= MAX_WEBP_BYTES ? Optional.of(new Image(original, WEBP))
+			return original.length <= MAX_WEBP_BYTES
+					? withoutWebpMetadata(original).map(bytes -> new Image(bytes, WEBP))
 					: Optional.empty();
 		}
 		if (!type.equals(PNG) && !type.equals(JPEG)) {
@@ -160,6 +167,55 @@ public final class AvatarImages {
 
 	private static int imageType(BufferedImage image) {
 		return image.getColorModel().hasAlpha() ? BufferedImage.TYPE_INT_ARGB : BufferedImage.TYPE_INT_RGB;
+	}
+
+	/**
+	 * The WebP with its EXIF and XMP chunks left out and their VP8X flags cleared, so a phone's GPS position does not
+	 * leave with it; every other chunk is copied as it is. Done when the photo is sent, so files stored before this
+	 * are covered too. Empty when the RIFF structure does not hold together.
+	 */
+	static Optional<byte[]> withoutWebpMetadata(byte[] webp) {
+		if (!isWebp(webp)) {
+			return Optional.empty();
+		}
+		ByteArrayOutputStream payload = new ByteArrayOutputStream();
+		payload.writeBytes("WEBP".getBytes(StandardCharsets.US_ASCII));
+		int position = 12;
+		while (position < webp.length) {
+			if (position + 8 > webp.length) {
+				return Optional.empty();
+			}
+			String fourcc = new String(webp, position, 4, StandardCharsets.US_ASCII);
+			long size = unsigned32(webp, position + 4, false);
+			int dataStart = position + 8;
+			if (size > webp.length - dataStart) {
+				return Optional.empty();
+			}
+			int dataEnd = dataStart + (int) size;
+			if (!fourcc.equals(WEBP_EXIF) && !fourcc.equals(WEBP_XMP)) {
+				payload.write(webp, position, 8);
+				if (fourcc.equals(WEBP_VP8X) && size > 0) {
+					payload.write(webp[dataStart] & ~(VP8X_EXIF_FLAG | VP8X_XMP_FLAG) & 0xFF);
+					payload.write(webp, dataStart + 1, (int) size - 1);
+				} else {
+					payload.write(webp, dataStart, (int) size);
+				}
+				// Chunks are padded to an even length; the pad may be missing at the very end of a file.
+				if ((size & 1) == 1) {
+					payload.write(0);
+				}
+			}
+			position = dataEnd + (int) (size & 1);
+		}
+		byte[] body = payload.toByteArray();
+		ByteArrayOutputStream out = new ByteArrayOutputStream(body.length + 8);
+		out.writeBytes("RIFF".getBytes(StandardCharsets.US_ASCII));
+		out.write(body.length & 0xFF);
+		out.write((body.length >>> 8) & 0xFF);
+		out.write((body.length >>> 16) & 0xFF);
+		out.write((body.length >>> 24) & 0xFF);
+		out.writeBytes(body);
+		return Optional.of(out.toByteArray());
 	}
 
 	private static boolean isWebp(byte[] bytes) {

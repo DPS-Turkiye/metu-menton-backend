@@ -5,11 +5,15 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
 
 import org.jspecify.annotations.Nullable;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.web.server.ResponseStatusException;
 
 import com.dps.teknokent.domain.DocumentKind;
 import com.dps.teknokent.domain.ProgramMentorStatus;
@@ -27,6 +31,7 @@ import com.dps.teknokent.repository.ProgramRepository;
 import com.dps.teknokent.repository.StoredDocumentRepository;
 import com.dps.teknokent.util.AvatarImages;
 import com.dps.teknokent.util.ProgramCoordination;
+import com.dps.teknokent.util.Texts;
 
 import lombok.RequiredArgsConstructor;
 
@@ -49,6 +54,13 @@ public class PersonPhotoService {
 	private final ProgramCoordinatorRepository programCoordinatorRepository;
 	private final PlatformTransactionManager transactionManager;
 
+	// A decode holds up to ~100 MB of heap for a large photo, so only a few run at once; a list of avatars waits
+	// briefly
+	// for a turn and, past that, its initials stay.
+	private static final int CONCURRENT_DECODES = 4;
+	private static final long DECODE_WAIT_SECONDS = 5;
+	private final Semaphore decodes = new Semaphore(CONCURRENT_DECODES);
+
 	private record StoredPhoto(String key, @Nullable String contentType) {
 	}
 
@@ -61,11 +73,27 @@ public class PersonPhotoService {
 		readOnly.setReadOnly(true);
 		StoredPhoto photo = readOnly.execute(status -> visiblePhoto(actorId, personId))
 				.orElseThrow(() -> notFound(personId));
-		byte[] original = objectStorage.get(photo.key());
-		if (original == null) {
-			throw notFound(personId);
+		acquireDecode();
+		try {
+			byte[] original = objectStorage.get(photo.key());
+			if (original == null) {
+				throw notFound(personId);
+			}
+			return AvatarImages.thumbnail(original, photo.contentType()).orElseThrow(() -> notFound(personId));
+		} finally {
+			decodes.release();
 		}
-		return AvatarImages.thumbnail(original, photo.contentType()).orElseThrow(() -> notFound(personId));
+	}
+
+	private void acquireDecode() {
+		try {
+			if (decodes.tryAcquire(DECODE_WAIT_SECONDS, TimeUnit.SECONDS)) {
+				return;
+			}
+		} catch (InterruptedException interrupted) {
+			Thread.currentThread().interrupt();
+		}
+		throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, Texts.forRequest("error.photoBusy"));
 	}
 
 	// Most people have no photo, so that is asked first; every "no" below is the same answer.

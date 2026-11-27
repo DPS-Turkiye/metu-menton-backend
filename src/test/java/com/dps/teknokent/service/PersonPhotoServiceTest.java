@@ -353,6 +353,18 @@ class PersonPhotoServiceTest {
 				.hasMessage("Photo not found: " + person.getId());
 	}
 
+	@Test
+	void aFailedReadGivesItsTurnToDecodeBack() {
+		when(storedDocumentRepository.findByUserIdAndKind(person.getId(), DocumentKind.AVATAR))
+				.thenReturn(List.of(avatar("avatars/gone", Instant.now())));
+
+		// More failures than there are turns: each must still answer at once, not wait for a turn.
+		for (int attempt = 0; attempt < 10; attempt++) {
+			assertThatThrownBy(() -> service.photo(person.getId(), person.getId()))
+					.isInstanceOf(ResourceNotFoundException.class);
+		}
+	}
+
 	private StoredDocument avatar(String key, Instant createdAt) {
 		StoredDocument document = new StoredDocument();
 		document.setId(UUID.randomUUID());
