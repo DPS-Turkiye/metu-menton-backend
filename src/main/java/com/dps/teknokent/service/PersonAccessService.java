@@ -77,10 +77,16 @@ public class PersonAccessService {
 			return person;
 		}
 		AppUser actor = domainLookupService.requireUser(actorId);
-		if (actor.getStatus() != UserAccountStatus.APPROVED || !related(actor, person)) {
+		if (!sees(actor, person)) {
 			throw new ResourceNotFoundException("User not found: " + personId);
 		}
 		return person;
+	}
+
+	/** {@link #requireVisible}'s rule for someone else's account, without the lookups or the "not found". */
+	@Transactional(readOnly = true)
+	public boolean sees(AppUser actor, AppUser person) {
+		return actor.getStatus() == UserAccountStatus.APPROVED && related(actor, person);
 	}
 
 	/** Whether the caller also gets the person's phone and contact preferences: only they and approved admins. */

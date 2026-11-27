@@ -11,6 +11,8 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -41,8 +43,10 @@ import com.dps.teknokent.dto.responses.UserResponse;
 import com.dps.teknokent.exception.ResourceNotFoundException;
 import com.dps.teknokent.security.AppUserPrincipal;
 import com.dps.teknokent.service.AppUserService;
+import com.dps.teknokent.service.PersonPhotoService;
 import com.dps.teknokent.service.PersonSummaryService;
 import com.dps.teknokent.service.TeamMembershipService;
+import com.dps.teknokent.util.AvatarImages;
 
 @WebMvcTest(AppUserController.class)
 @Import(SecurityConfig.class)
@@ -61,6 +65,9 @@ class AppUserControllerTest {
 
 	@MockitoBean
 	private PersonSummaryService personSummaryService;
+
+	@MockitoBean
+	private PersonPhotoService personPhotoService;
 
 	@Test
 	void requiresAuthenticationForUsersList() throws Exception {
@@ -388,6 +395,60 @@ class AppUserControllerTest {
 				.thenThrow(new ResourceNotFoundException("User not found: " + userId));
 
 		mockMvc.perform(get("/api/users/{id}/summary", userId)
+				.param("actorId", actorId.toString())
+				.with(user("test-user")))
+				.andExpect(status().isNotFound());
+	}
+
+	@Test
+	void photoRequiresAuthentication() throws Exception {
+		mockMvc.perform(get("/api/users/{id}/photo", UUID.randomUUID()))
+				.andExpect(status().isUnauthorized());
+	}
+
+	@Test
+	void sendsThePhotoInlineForTheProxysNamedActor() throws Exception {
+		UUID userId = UUID.fromString("00000000-0000-0000-0000-000000000805");
+		UUID actorId = UUID.fromString("00000000-0000-0000-0000-0000000000c3");
+		byte[] photo = { (byte) 0x89, 'P', 'N', 'G' };
+		when(personPhotoService.photo(actorId, userId)).thenReturn(new AvatarImages.Image(photo, AvatarImages.PNG));
+
+		mockMvc.perform(get("/api/users/{id}/photo", userId)
+				.param("actorId", actorId.toString())
+				.with(user("test-user")))
+				.andExpect(status().isOk())
+				.andExpect(header().string("Content-Type", AvatarImages.PNG))
+				.andExpect(header().string("Content-Disposition", "inline"))
+				.andExpect(header().string("X-Content-Type-Options", "nosniff"))
+				.andExpect(header().string("Cache-Control", "max-age=600, private"))
+				.andExpect(content().bytes(photo));
+	}
+
+	@Test
+	void thePhotoIsForTheSignedInCallerNotTheRequestedActor() throws Exception {
+		UUID userId = UUID.fromString("00000000-0000-0000-0000-000000000806");
+		UUID signedIn = UUID.fromString("00000000-0000-0000-0000-0000000000c4");
+		when(personPhotoService.photo(signedIn, userId))
+				.thenReturn(new AvatarImages.Image(new byte[] { 1 }, AvatarImages.JPEG));
+
+		mockMvc.perform(get("/api/users/{id}/photo", userId)
+				.param("actorId", "00000000-0000-0000-0000-000000000999")
+				.with(authentication(new UsernamePasswordAuthenticationToken(
+						new AppUserPrincipal(signedIn, "student@hocam-test.metu.edu.tr", UserRole.MENTEE,
+								UserAccountStatus.APPROVED, "uid"),
+						null, List.of()))))
+				.andExpect(status().isOk());
+		verify(personPhotoService).photo(signedIn, userId);
+	}
+
+	@Test
+	void aPhotoTheCallerMayNotSeeIsNotFound() throws Exception {
+		UUID userId = UUID.fromString("00000000-0000-0000-0000-000000000807");
+		UUID actorId = UUID.fromString("00000000-0000-0000-0000-0000000000c5");
+		when(personPhotoService.photo(actorId, userId))
+				.thenThrow(new ResourceNotFoundException("Photo not found: " + userId));
+
+		mockMvc.perform(get("/api/users/{id}/photo", userId)
 				.param("actorId", actorId.toString())
 				.with(user("test-user")))
 				.andExpect(status().isNotFound());
