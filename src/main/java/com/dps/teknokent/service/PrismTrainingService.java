@@ -127,6 +127,18 @@ public class PrismTrainingService {
 		reviews.save(review);
 	}
 
+	/**
+	 * "Testi yeniden alabilir" from an İŞKUR assessment statement's decision: the same RETAKE as the list decision,
+	 * without its notification, since the statement's decision tells the intern in one message.
+	 */
+	void askToRetake(UUID programId, UUID userId, UUID actorId) {
+		PrismTrainingReview review = reviewOf(programId, userId);
+		review.setDecision(PrismDecision.RETAKE);
+		review.setDecidedAt(Instant.now());
+		review.setDecidedBy(actorId);
+		reviews.save(review);
+	}
+
 	/** A student's state from their review: saying they finished after the last decision means waiting for one. */
 	static TrainingState stateOf(@Nullable PrismTrainingReview review) {
 		if (review == null) {

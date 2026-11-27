@@ -197,19 +197,23 @@ public class IskurTeamChangeService {
 				&& program.getStatus() != ProgramStatus.COMPLETED;
 	}
 
-	/** The unit's own coordinator, or every coordinator of the program while the unit has none. */
 	private void notifyCoordinators(Program program, IskurPlacement placement, UUID internId) {
-		IskurUnit unit = teams.findById(placement.getTeamId())
-				.flatMap(team -> units.findById(team.getUnitId()))
-				.orElse(null);
-		List<UUID> coordinatorIds = ProgramCoordination.coordinatorIds(program, programCoordinators);
-		UUID own = unit == null ? null : unit.getCoordinatorId();
-		List<UUID> recipients = own != null && coordinatorIds.contains(own) ? List.of(own) : coordinatorIds;
+		List<UUID> recipients = unitCoordinatorOrAll(program, placement.getTeamId(), teams, units,
+				programCoordinators);
 		String internName = users.findById(internId).map(AppUser::getFullName).orElse("");
 		String href = "/coordinator/programs/" + program.getId() + "/iskur";
 		users.findAllById(recipients).forEach(coordinator -> notifications.create(coordinator,
 				NotificationCategory.GENERAL, Texts.get(coordinator, "notification.iskurTeamChangeAsked.title"),
 				Texts.get(coordinator, "notification.iskurTeamChangeAsked.body", internName), href));
+	}
+
+	/** Who hears about an intern's request: their unit's own coordinator, or all of the program's while it has none. */
+	static List<UUID> unitCoordinatorOrAll(Program program, UUID teamId, IskurTeamRepository teams,
+			IskurUnitRepository units, ProgramCoordinatorRepository programCoordinators) {
+		IskurUnit unit = teams.findById(teamId).flatMap(team -> units.findById(team.getUnitId())).orElse(null);
+		List<UUID> coordinatorIds = ProgramCoordination.coordinatorIds(program, programCoordinators);
+		UUID own = unit == null ? null : unit.getCoordinatorId();
+		return own != null && coordinatorIds.contains(own) ? List.of(own) : coordinatorIds;
 	}
 
 	private Program requireInternProgram(UUID actorId) {
