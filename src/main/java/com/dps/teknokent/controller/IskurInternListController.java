@@ -21,9 +21,8 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 
 /**
- * The coordinator's İŞKUR intern list of e-mail addresses; since 27 Nov it no longer decides who is an intern. Every
- * call
- * answers with the whole list. Addresses are removed by their entry id, so none travels in a URL.
+ * The coordinator's İŞKUR intern list of e-mail addresses; since 27 Nov it no longer decides who is an intern.
+ * Every call answers with the whole list. Addresses are removed by their entry id, so none travels in a URL.
  */
 @RestController
 @RequestMapping("/api/coordinator/programs/{programId}/iskur/interns")

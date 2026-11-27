@@ -152,6 +152,27 @@ class IskurInternServiceTest {
 	}
 
 	@Test
+	void anUnapprovedStudentAStaffAccountAndARejectedMentorAreNotInterns() {
+		AppUser pending = user(UserRole.MENTEE, iskur);
+		pending.setStatus(UserAccountStatus.PENDING);
+		userRepository.saveAndFlush(pending);
+		AppUser rejected = user(UserRole.MENTEE, iskur);
+		rejected.setStatus(UserAccountStatus.REJECTED);
+		userRepository.saveAndFlush(rejected);
+		AppUser staff = user(UserRole.COORDINATOR, iskur);
+		AppUser formerMentor = user(UserRole.MENTOR, null);
+		mentorOf(iskur, formerMentor, ProgramMentorStatus.ACCEPTED);
+		formerMentor.setStatus(UserAccountStatus.REJECTED);
+		userRepository.saveAndFlush(formerMentor);
+
+		assertThat(service.internIds(iskur.getId())).isEmpty();
+		for (AppUser person : List.of(pending, rejected, staff, formerMentor)) {
+			assertThat(service.isIntern(iskur.getId(), person.getId())).isFalse();
+			assertThat(service.currentProgram(person.getId())).isEmpty();
+		}
+	}
+
+	@Test
 	void theOldEmailListNeitherAddsNorTakesAwayAnyone() {
 		// An address listed for nobody adds no one, and a listing in another program does not make anyone its intern.
 		internEmailRepository.saveAndFlush(new IskurInternEmail(iskur.getId(), "yeni.stajyer@example.test",
