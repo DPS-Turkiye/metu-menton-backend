@@ -113,6 +113,7 @@ public class PeerMentorDocumentService {
 		if (evidenceType.isLink()) {
 			throw new InvalidRequestException("A portfolio is added as a link, not a file.");
 		}
+		requireAllowed(evidenceType, visibility);
 		requireRoom(mentor.getId());
 		byte[] bytes;
 		try {
@@ -145,8 +146,10 @@ public class PeerMentorDocumentService {
 		requireRoom(mentor.getId());
 		StoredDocument source = formFile(mentor.getId(), slot)
 				.orElseThrow(() -> new ResourceNotFoundException("No such file on the form."));
-		return store(mentor, slot == IskurDocumentSlot.CV ? PeerEvidenceType.CV : PeerEvidenceType.TRANSCRIPT,
-				visibility, source.getOriginalFilename(), source.getContentType(),
+		PeerEvidenceType evidenceType = slot == IskurDocumentSlot.CV ? PeerEvidenceType.CV
+				: PeerEvidenceType.TRANSCRIPT;
+		requireAllowed(evidenceType, visibility);
+		return store(mentor, evidenceType, visibility, source.getOriginalFilename(), source.getContentType(),
 				objectStorage.require(source.getS3Key()));
 	}
 
@@ -182,6 +185,7 @@ public class PeerMentorDocumentService {
 			PeerDocumentVisibility visibility) {
 		AppUser mentor = requirePeerMentor(actorId);
 		PeerMentorDocument row = ownRow(mentor.getId(), documentId);
+		requireAllowed(row.getEvidenceType(), visibility);
 		row.setVisibility(visibility);
 		return response(peerMentorDocumentRepository.save(row));
 	}
@@ -354,6 +358,14 @@ public class PeerMentorDocumentService {
 			objectStorage.delete(s3Key);
 		} catch (RuntimeException error) {
 			log.warn("Peer mentor evidence object {} remains in storage: {}", s3Key, error.getMessage());
+		}
+	}
+
+	/** A transcript stays with the coordinators who verify it; the database refuses it too (V142). */
+	private static void requireAllowed(PeerEvidenceType evidenceType, PeerDocumentVisibility visibility) {
+		if (visibility == PeerDocumentVisibility.PROFILE && !evidenceType.shareable()) {
+			throw new InvalidRequestException(Texts.forRequest("error.peerTranscriptNotShared"),
+					"PEER_TRANSCRIPT_NOT_SHARED");
 		}
 	}
 

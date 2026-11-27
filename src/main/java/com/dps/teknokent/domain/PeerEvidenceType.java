@@ -17,4 +17,9 @@ public enum PeerEvidenceType {
 	public boolean isLink() {
 		return this == PORTFOLIO;
 	}
+
+	/** Whether the mentor may show it to students on their profile. A transcript is only ever for verification. */
+	public boolean shareable() {
+		return this != TRANSCRIPT;
+	}
 }
