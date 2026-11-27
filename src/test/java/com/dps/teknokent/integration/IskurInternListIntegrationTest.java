@@ -155,7 +155,8 @@ class IskurInternListIntegrationTest {
 		placementRepository.delete(placement);
 		placementRepository.flush();
 		remove(coordinator, ayseEntry).andExpect(status().isOk()).andExpect(jsonPath("$.entries").isEmpty());
-		asStudent(get("/api/iskur/onboarding"), ayse).andExpect(status().isNotFound());
+		// Off the list she is still an intern: the list no longer decides.
+		asStudent(get("/api/iskur/onboarding"), ayse).andExpect(status().isOk());
 	}
 
 	@Test
@@ -190,11 +191,13 @@ class IskurInternListIntegrationTest {
 	}
 
 	@Test
-	void aPlainStudentKeepsEveryStudentFeatureButTheIskurScreens() throws Exception {
+	void everyStudentOfTheProgramIsAnInternWithoutBeingListedAndKeepsEveryStudentFeature() throws Exception {
 		AppUser plain = student("Düz Öğrenci", "duz@example.test", program);
 
-		asStudent(get("/api/iskur/onboarding"), plain).andExpect(status().isNotFound());
-		asStudent(get("/api/iskur/me"), plain).andExpect(status().isNotFound());
+		// Nobody is listed: the student still gets the placement form from day one.
+		asStudent(get("/api/iskur/onboarding"), plain).andExpect(status().isOk());
+		asStudent(get("/api/iskur/me"), plain).andExpect(status().isOk());
+		// Not placed yet, so there is no week to show.
 		asStudent(get("/api/iskur/week"), plain).andExpect(status().isNotFound());
 
 		asStudent(get("/api/peer-mentoring/mentors"), plain).andExpect(status().isOk());
@@ -206,15 +209,9 @@ class IskurInternListIntegrationTest {
 				.with(SecurityMockMvcRequestPostProcessors.user("frontend").roles("SERVICE")))
 				.andExpect(status().isOk());
 
-		asStudent(get("/api/institution/me"), plain).andExpect(status().isOk())
-				.andExpect(jsonPath("$.iskurParticipant").value(false));
-
-		add(coordinator, "\"duz@example.test\"").andExpect(status().isOk());
-		asStudent(get("/api/iskur/onboarding"), plain).andExpect(status().isOk());
 		// The web's İŞKUR home and "Mentorluk Ver" open on this flag.
 		asStudent(get("/api/institution/me"), plain).andExpect(status().isOk())
 				.andExpect(jsonPath("$.iskurParticipant").value(true));
-		asStudent(get("/api/peer-mentoring/mentors"), plain).andExpect(status().isOk());
 	}
 
 	private ResultActions list(AppUser actor) throws Exception {
