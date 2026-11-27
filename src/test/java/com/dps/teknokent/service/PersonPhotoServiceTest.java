@@ -172,9 +172,29 @@ class PersonPhotoServiceTest {
 	}
 
 	@Test
-	void aCoordinatorOfAFinishedProgramStillSeesItsPeople() {
+	void aCoordinatorOfAFinishedSemesterNoLongerSeesItsPeople() {
 		semester.setStatus(ProgramStatus.COMPLETED);
 		AppUser coordinator = user(UserRole.COORDINATOR, UserAccountStatus.APPROVED);
+		coordinate(semester, coordinator);
+
+		assertThat(service.canSeePhoto(coordinator, person)).isFalse();
+	}
+
+	@Test
+	void aCoordinatorOfASemesterNotStartedYetDoesNotSeeItsPeople() {
+		semester.setStatus(ProgramStatus.DRAFT);
+		AppUser coordinator = user(UserRole.COORDINATOR, UserAccountStatus.APPROVED);
+		coordinate(semester, coordinator);
+
+		assertThat(service.canSeePhoto(coordinator, person)).isFalse();
+	}
+
+	@Test
+	void aCoordinatorStillSeesThroughTheRunningSemesterWhenAnOldOneHasEnded() {
+		Program past = program(ProgramStatus.COMPLETED);
+		pool(past, person, ProgramMentorStatus.ACCEPTED);
+		AppUser coordinator = user(UserRole.COORDINATOR, UserAccountStatus.APPROVED);
+		coordinate(past, coordinator);
 		coordinate(semester, coordinator);
 
 		assertThat(service.canSeePhoto(coordinator, person)).isTrue();

@@ -115,7 +115,8 @@ public class PersonPhotoService {
 	 * <li>the person themself, and approved admins;</li>
 	 * <li>anyone who may open the person's profile ({@link PersonAccessService}: teammates, their mentors and
 	 * mentees, the coordinators of their startup programs);</li>
-	 * <li>approved coordinators of a program the person is in, of any kind (semester, Akran, İŞKUR);</li>
+	 * <li>approved coordinators of a running program the person is in, of any kind (semester, Akran, İŞKUR), whatever
+	 * features they were given;</li>
 	 * <li>approved people who share a running program with the person.</li>
 	 * </ol>
 	 * Rules 3 and 4 need both accounts approved; a pending or rejected account gets only rules 1 and 2, and a deleted
@@ -143,8 +144,10 @@ public class PersonPhotoService {
 		return personAccessService.sees(viewer, person);
 	}
 
+	// Only while the program runs: when a semester ends or before it starts, its coordinators no longer see photos.
 	private boolean coordinatesAny(AppUser viewer, List<Program> programs) {
 		return viewer.has(UserRole.COORDINATOR) && programs.stream()
+				.filter(program -> program.getStatus() == ProgramStatus.ACTIVE)
 				.anyMatch(program -> ProgramCoordination.coordinates(program, viewer.getId(),
 						programCoordinatorRepository));
 	}
