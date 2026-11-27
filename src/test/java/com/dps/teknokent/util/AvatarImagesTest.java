@@ -12,8 +12,13 @@ import java.util.Arrays;
 import javax.imageio.ImageIO;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 class AvatarImagesTest {
+
+	private static final int RED = 0xFF0000;
+	private static final int BLUE = 0x0000FF;
 
 	@Test
 	void shrinksALargeJpegToTheAvatarSizeKeepingItsShape() throws IOException {
@@ -32,13 +37,31 @@ class AvatarImagesTest {
 	}
 
 	@Test
-	void sendsAPhotoThatIsAlreadySmallAsUploaded() throws IOException {
+	void drawsASmallPhotoAfreshAtItsOwnSize() throws IOException {
 		byte[] small = image(120, 120, "png");
 
 		AvatarImages.Image avatar = AvatarImages.thumbnail(small, "IMAGE/PNG").orElseThrow();
 
-		assertThat(avatar.bytes()).isSameAs(small);
+		assertThat(avatar.bytes()).isNotSameAs(small);
 		assertThat(avatar.contentType()).isEqualTo(AvatarImages.PNG);
+		assertThat(size(avatar)).containsExactly(120, 120);
+	}
+
+	@Test
+	void leavesAPhonesMetadataBehind() throws IOException {
+		byte[] withExif = withExifOrientation(image(40, 40, "jpg"), 1, true);
+
+		AvatarImages.Image avatar = AvatarImages.thumbnail(withExif, "image/jpeg").orElseThrow();
+
+		assertThat(new String(avatar.bytes(), StandardCharsets.ISO_8859_1)).doesNotContain("Exif");
+	}
+
+	@Test
+	void sendsNoWebpTooLargeForAListOfAvatars() {
+		byte[] large = Arrays.copyOf("RIFF\0\0\0\0WEBPVP8 ".getBytes(StandardCharsets.US_ASCII),
+				AvatarImages.MAX_WEBP_BYTES + 1);
+
+		assertThat(AvatarImages.thumbnail(large, "image/webp")).isEmpty();
 	}
 
 	@Test
@@ -113,6 +136,31 @@ class AvatarImagesTest {
 		assertThat(AvatarImages.jpegOrientation(withExifOrientation(jpeg, 42, true))).isEqualTo(1);
 		byte[] truncated = withExifOrientation(jpeg, 6, true);
 		assertThat(AvatarImages.jpegOrientation(Arrays.copyOf(truncated, 20))).isEqualTo(1);
+	}
+
+	@ParameterizedTest
+	@CsvSource({
+			// orientation, where the stored top-left pixel lands, and the stored top-right one (x, y)
+			"1, 0, 0, 1, 0",
+			"2, 1, 0, 0, 0",
+			"3, 1, 2, 0, 2",
+			"4, 0, 2, 1, 2",
+			"5, 0, 0, 0, 1",
+			"6, 2, 0, 2, 1",
+			"7, 2, 1, 2, 0",
+			"8, 0, 1, 0, 0",
+	})
+	void turnsEachExifOrientationTheWayTheCameraMeantIt(int orientation, int topLeftX, int topLeftY, int topRightX,
+			int topRightY) {
+		// Two pixels wide and three high, with its two top corners marked.
+		BufferedImage stored = new BufferedImage(2, 3, BufferedImage.TYPE_INT_RGB);
+		stored.setRGB(0, 0, RED);
+		stored.setRGB(1, 0, BLUE);
+
+		BufferedImage shown = AvatarImages.upright(stored, orientation);
+
+		assertThat(shown.getRGB(topLeftX, topLeftY) & 0xFFFFFF).isEqualTo(RED);
+		assertThat(shown.getRGB(topRightX, topRightY) & 0xFFFFFF).isEqualTo(BLUE);
 	}
 
 	private static byte[] image(int width, int height, String format) throws IOException {

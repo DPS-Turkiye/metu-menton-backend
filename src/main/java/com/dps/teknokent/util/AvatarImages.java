@@ -14,8 +14,10 @@ import java.util.Locale;
 import java.util.Optional;
 
 import javax.imageio.ImageIO;
+import javax.imageio.ImageReadParam;
 import javax.imageio.ImageReader;
 import javax.imageio.stream.ImageInputStream;
+import javax.imageio.stream.MemoryCacheImageInputStream;
 
 import org.jspecify.annotations.Nullable;
 
@@ -30,7 +32,10 @@ public final class AvatarImages {
 	public static final String WEBP = "image/webp";
 
 	// A photo is at most 5 MB, but a small file can still claim a huge canvas; beyond this it is not decoded.
-	static final long MAX_PIXELS = 40_000_000L;
+	static final long MAX_PIXELS = 16_000_000L;
+
+	// The JDK cannot shrink a WebP, so one goes out as uploaded only while it is small enough for a list of avatars.
+	static final int MAX_WEBP_BYTES = 512 * 1024;
 
 	private static final int EXIF_ORIENTATION_TAG = 0x0112;
 
@@ -44,21 +49,21 @@ public final class AvatarImages {
 
 	/**
 	 * The photo at most {@link #MAX_SIDE} pixels on its longer side, turned upright when the camera recorded a
-	 * rotation. WebP, which the JDK cannot read, goes out as uploaded, as does a PNG or JPEG the JDK cannot decode
-	 * (a CMYK JPEG, say) once its size is known to be sane. Empty when the bytes are not a photo that can be shown.
+	 * rotation. A PNG or JPEG is always drawn afresh, so its metadata (a phone's GPS position, say) never leaves with
+	 * it. A WebP, which the JDK cannot read, goes out as uploaded while it is small. Empty when the bytes are not a
+	 * photo that can be shown, or one too large to decode safely.
 	 */
 	public static Optional<Image> thumbnail(byte[] original, @Nullable String contentType) {
 		String type = contentType == null ? "" : contentType.strip().toLowerCase(Locale.ROOT);
 		if (type.equals(WEBP)) {
-			return isWebp(original) ? Optional.of(new Image(original, WEBP)) : Optional.empty();
+			return isWebp(original) && original.length <= MAX_WEBP_BYTES ? Optional.of(new Image(original, WEBP))
+					: Optional.empty();
 		}
 		if (!type.equals(PNG) && !type.equals(JPEG)) {
 			return Optional.empty();
 		}
-		try (ImageInputStream input = ImageIO.createImageInputStream(new ByteArrayInputStream(original))) {
-			if (input == null) {
-				return Optional.empty();
-			}
+		// In memory: ImageIO's default stream would write a temporary file for every request.
+		try (ImageInputStream input = new MemoryCacheImageInputStream(new ByteArrayInputStream(original))) {
 			Iterator<ImageReader> readers = ImageIO.getImageReaders(input);
 			if (!readers.hasNext()) {
 				return Optional.empty();
@@ -73,15 +78,11 @@ public final class AvatarImages {
 				}
 				String format = reader.getFormatName().toLowerCase(Locale.ROOT);
 				int orientation = format.contains("jp") ? jpegOrientation(original) : 1;
-				if (Math.max(width, height) <= MAX_SIDE && orientation == 1) {
-					return Optional.of(new Image(original, type));
-				}
-				BufferedImage decoded;
-				try {
-					decoded = reader.read(0);
-				} catch (IOException | RuntimeException undecodable) {
-					return Optional.of(new Image(original, type));
-				}
+				// Reading every n-th pixel keeps the decoded raster small: still at least twice the avatar's size.
+				int step = Math.max(1, Math.max(width, height) / (MAX_SIDE * 2));
+				ImageReadParam param = reader.getDefaultReadParam();
+				param.setSourceSubsampling(step, step, 0, 0);
+				BufferedImage decoded = reader.read(0, param);
 				return Optional.of(encode(upright(shrink(decoded), orientation)));
 			} finally {
 				reader.dispose();
@@ -121,7 +122,7 @@ public final class AvatarImages {
 	}
 
 	/** EXIF orientations 2 to 8: mirrored and/or turned by 90, 180 or 270 degrees. */
-	private static BufferedImage upright(BufferedImage image, int orientation) {
+	static BufferedImage upright(BufferedImage image, int orientation) {
 		if (orientation < 2 || orientation > 8) {
 			return image;
 		}

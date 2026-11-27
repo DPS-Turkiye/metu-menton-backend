@@ -30,6 +30,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
+import org.springframework.transaction.PlatformTransactionManager;
 
 import com.dps.teknokent.domain.DocumentKind;
 import com.dps.teknokent.domain.ProgramMentorStatus;
@@ -42,6 +43,7 @@ import com.dps.teknokent.entity.Program;
 import com.dps.teknokent.entity.ProgramMentor;
 import com.dps.teknokent.entity.StoredDocument;
 import com.dps.teknokent.exception.ResourceNotFoundException;
+import com.dps.teknokent.repository.AppUserRepository;
 import com.dps.teknokent.repository.ProgramCoordinatorRepository;
 import com.dps.teknokent.repository.ProgramMentorRepository;
 import com.dps.teknokent.repository.ProgramRepository;
@@ -53,7 +55,7 @@ import com.dps.teknokent.util.AvatarImages;
 class PersonPhotoServiceTest {
 
 	@Mock
-	private DomainLookupService domainLookupService;
+	private AppUserRepository appUserRepository;
 	@Mock
 	private StoredDocumentRepository storedDocumentRepository;
 	@Mock
@@ -68,6 +70,8 @@ class PersonPhotoServiceTest {
 	private ProgramRepository programRepository;
 	@Mock
 	private ProgramCoordinatorRepository programCoordinatorRepository;
+	@Mock
+	private PlatformTransactionManager transactionManager;
 
 	@InjectMocks
 	private PersonPhotoService service;
@@ -281,7 +285,7 @@ class PersonPhotoServiceTest {
 		StoredDocument newer = avatar("avatars/newer", Instant.parse("2026-11-20T10:00:00Z"));
 		when(storedDocumentRepository.findByUserIdAndKind(person.getId(), DocumentKind.AVATAR))
 				.thenReturn(List.of(older, newer));
-		when(objectStorage.require("avatars/newer")).thenReturn(png(1024, 512));
+		when(objectStorage.get("avatars/newer")).thenReturn(png(1024, 512));
 
 		AvatarImages.Image photo = service.photo(admin.getId(), person.getId());
 
@@ -307,17 +311,46 @@ class PersonPhotoServiceTest {
 
 		assertThatThrownBy(() -> service.photo(stranger.getId(), person.getId()))
 				.isInstanceOf(ResourceNotFoundException.class);
-		verify(objectStorage, never()).require(any());
+		verify(objectStorage, never()).get(any());
 	}
 
 	@Test
 	void aStoredFileThatIsNotAPictureIsNotFound() {
 		when(storedDocumentRepository.findByUserIdAndKind(person.getId(), DocumentKind.AVATAR))
 				.thenReturn(List.of(avatar("avatars/broken", Instant.now())));
-		when(objectStorage.require("avatars/broken")).thenReturn(new byte[] { 1, 2, 3 });
+		when(objectStorage.get("avatars/broken")).thenReturn(new byte[] { 1, 2, 3 });
 
 		assertThatThrownBy(() -> service.photo(person.getId(), person.getId()))
 				.isInstanceOf(ResourceNotFoundException.class);
+	}
+
+	@Test
+	void anUnknownPersonGetsTheSameAnswerAsAHiddenPhoto() {
+		UUID nobody = UUID.randomUUID();
+
+		assertThatThrownBy(() -> service.photo(person.getId(), nobody))
+				.isInstanceOf(ResourceNotFoundException.class)
+				.hasMessage("Photo not found: " + nobody);
+	}
+
+	@Test
+	void aHiddenPhotoSaysOnlyThatThePhotoIsNotFound() {
+		AppUser stranger = user(UserRole.MENTEE, UserAccountStatus.APPROVED);
+		when(storedDocumentRepository.findByUserIdAndKind(person.getId(), DocumentKind.AVATAR))
+				.thenReturn(List.of(avatar("avatars/hidden", Instant.now())));
+
+		assertThatThrownBy(() -> service.photo(stranger.getId(), person.getId()))
+				.hasMessage("Photo not found: " + person.getId());
+	}
+
+	@Test
+	void aPhotoWhoseFileIsGoneFromStorageIsNotFound() {
+		when(storedDocumentRepository.findByUserIdAndKind(person.getId(), DocumentKind.AVATAR))
+				.thenReturn(List.of(avatar("avatars/gone", Instant.now())));
+
+		assertThatThrownBy(() -> service.photo(person.getId(), person.getId()))
+				.isInstanceOf(ResourceNotFoundException.class)
+				.hasMessage("Photo not found: " + person.getId());
 	}
 
 	private StoredDocument avatar(String key, Instant createdAt) {
@@ -344,7 +377,7 @@ class PersonPhotoServiceTest {
 		user.setFullName("Kişi " + role);
 		user.setRole(role);
 		user.setStatus(status);
-		when(domainLookupService.requireUser(user.getId())).thenReturn(user);
+		when(appUserRepository.findById(user.getId())).thenReturn(Optional.of(user));
 		return user;
 	}
 
