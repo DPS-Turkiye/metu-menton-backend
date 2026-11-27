@@ -68,6 +68,13 @@ on those calls, the parameter can become required.
 `DocumentService` checks each file's kind, size, extension, content type and magic bytes (PDF header and trailer,
 image signatures), rejects archives with executables and zip bombs in Office files, and stores under generated S3
 keys. Every download is an attachment with `X-Content-Type-Options: nosniff` and `Cache-Control: no-store`.
+
+The one exception is a profile photo (`GET /api/users/{id}/photo`, proxy-only), which an `<img>` draws inline. It
+is a fresh PNG or JPEG of at most 256 px, or a small WebP rewritten without its EXIF and XMP chunks; no metadata
+leaves and the stored original is not changed. At most four photos are decoded at once. It goes out with `nosniff`, a sandbox policy and `Cache-Control: private, max-age=600`.
+`PersonPhotoService.canSeePhoto` decides who sees it: the person and approved admins; anyone who may open the
+person's profile; approved coordinators of a running program the person is in; approved people sharing a running program
+with them. Pending, rejected and deleted accounts get less, and every refusal is the same 404.
 CSV and XLSX exports escape cells that a spreadsheet would run as formulas.
 
 ## Secrets

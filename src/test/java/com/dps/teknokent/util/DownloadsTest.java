@@ -38,6 +38,18 @@ class DownloadsTest {
 				.isEqualTo(MediaType.APPLICATION_OCTET_STREAM);
 	}
 
+	@Test
+	void anAvatarIsAnInlineImageCachedPrivatelyForAFewMinutes() {
+		ResponseEntity<byte[]> response = Downloads.avatar(bytes("img"), "image/jpeg");
+
+		assertThat(response.getHeaders().getContentType()).isEqualTo(MediaType.IMAGE_JPEG);
+		assertThat(response.getHeaders().getFirst(HttpHeaders.CONTENT_DISPOSITION)).isEqualTo("inline");
+		assertThat(response.getHeaders().getFirst("X-Content-Type-Options")).isEqualTo("nosniff");
+		assertThat(response.getHeaders().getFirst("Content-Security-Policy")).contains("sandbox");
+		assertThat(response.getHeaders().getCacheControl()).isEqualTo("max-age=600, private");
+		assertThat(response.getBody()).isEqualTo(bytes("img"));
+	}
+
 	private static byte[] bytes(String text) {
 		return text.getBytes(StandardCharsets.UTF_8);
 	}
