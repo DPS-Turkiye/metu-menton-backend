@@ -83,7 +83,7 @@ public class IskurApplicationService {
 		Program program = workspaceService.requireProgram(actorId, programId);
 		UUID documentId = onboardings.findByProgramIdAndUserId(program.getId(), userId)
 				.filter(IskurOnboarding::isSubmitted)
-				.filter(form -> interns.internIds(program.getId()).contains(form.getUserId()))
+				.filter(form -> interns.isIntern(program.getId(), form.getUserId()))
 				.map(form -> IskurOnboardingService.slotOf(form, slot))
 				.orElse(null);
 		StoredDocument file = documentId == null ? null : storedDocuments.findById(documentId).orElse(null);

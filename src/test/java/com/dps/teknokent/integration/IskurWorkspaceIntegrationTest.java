@@ -331,7 +331,7 @@ class IskurWorkspaceIntegrationTest {
 	}
 
 	@Test
-	void aStudentOffTheInternListIsNotInThePoolAndCannotBePlaced() throws Exception {
+	void everyApprovedStudentAndAcceptedMentorIsInThePoolWithoutAList() throws Exception {
 		AppUser plain = userRepository.saveAndFlush(account("Liste Dışı Öğrenci", program));
 		AppUser unlistedMentor = user("Listesiz Mentor", UserRole.MENTOR, null);
 		ProgramMentor membership = new ProgramMentor();
@@ -346,13 +346,12 @@ class IskurWorkspaceIntegrationTest {
 
 		workspace(coordinator)
 				.andExpect(status().isOk())
-				.andExpect(jsonPath("$.pool[*].fullName").value(Matchers.contains(
-						"Ayşe Yıldız", "Burak Tan", "Ceren Su", "Deniz Arslan", "Zeynep Kaya")))
-				.andExpect(jsonPath("$.counts.interns").value(5));
-		place(coordinator, plain, team, IskurTeamRole.MEMBER, null, 3, null).andExpect(status().isBadRequest());
-		place(coordinator, unlistedMentor, team, IskurTeamRole.MEMBER, null, 3, null)
-				.andExpect(status().isBadRequest());
-		assertThat(placementRepository.findByProgramId(program.getId())).isEmpty();
+				.andExpect(jsonPath("$.pool[*].fullName").value(Matchers.contains("Ayşe Yıldız", "Burak Tan",
+						"Ceren Su", "Deniz Arslan", "Liste Dışı Öğrenci", "Listesiz Mentor", "Zeynep Kaya")))
+				.andExpect(jsonPath("$.counts.interns").value(7));
+		place(coordinator, plain, team, IskurTeamRole.MEMBER, null, 3, null).andExpect(status().isOk());
+		place(coordinator, unlistedMentor, team, IskurTeamRole.MEMBER, null, 3, null).andExpect(status().isOk());
+		assertThat(placementRepository.findByProgramId(program.getId())).hasSize(2);
 	}
 
 	@Test

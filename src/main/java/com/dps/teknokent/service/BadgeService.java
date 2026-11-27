@@ -565,13 +565,14 @@ public class BadgeService {
 
 	/**
 	 * Who may hold the program's gate badge under the optional interns-only rule: its İŞKUR interns, as
-	 * {@link IskurInternService#internIds} counts them. The one place the rule lives; with it off, everyone passes.
+	 * {@link IskurInternService#internIds} counts them, and nobody in a program without İŞKUR. The one place the rule
+	 * lives; with it off, everyone passes.
 	 */
 	Predicate<UUID> internRule(Program program) {
 		if (!peerTraining.internsOnly()) {
 			return userId -> true;
 		}
-		Set<UUID> interns = iskurInterns.internIds(program.getId());
+		Set<UUID> interns = iskurInternsOf(program);
 		return interns::contains;
 	}
 

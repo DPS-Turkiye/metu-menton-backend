@@ -234,6 +234,15 @@ class BadgeServiceTest {
 	}
 
 	@Test
+	void withTheInternsOnlyRuleAProgramWithoutIskurHasNoInterns() {
+		when(peerTraining.internsOnly()).thenReturn(true);
+		Program semester = program("Bahar 2027", ProgramType.SEMESTER);
+
+		assertThat(service.internRule(semester).test(student.getId())).isFalse();
+		verifyNoInteractions(iskurInterns);
+	}
+
+	@Test
 	void withTheRuleOffEveryoneOfTheProgramPassesWithoutLookingUpInterns() {
 		assertThat(service.internRule(iskur).test(UUID.randomUUID())).isTrue();
 		verifyNoInteractions(iskurInterns);

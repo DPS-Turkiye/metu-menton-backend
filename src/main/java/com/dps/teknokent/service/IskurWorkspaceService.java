@@ -377,7 +377,9 @@ public class IskurWorkspaceService {
 		return orders.stream().mapToInt(Integer::intValue).max().orElse(-1) + 1;
 	}
 
-	/** The program's interns (students and peer mentors on its İŞKUR list): the people the coordinator can place. */
+	/**
+	 * The program's interns (its approved students and accepted peer mentors): the people the coordinator can place.
+	 */
 	private Set<UUID> candidateIds(Program program) {
 		return interns.internIds(program.getId());
 	}
