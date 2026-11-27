@@ -526,6 +526,11 @@ class IskurWeekIntegrationTest {
 		ece.grant(UserRole.MENTOR, PermissionSource.BADGE, NOW.minus(Duration.ofDays(10)));
 		ece = userRepository.saveAndFlush(ece);
 		place(ece, teamNamed("Dijital Dönüşüm"), IskurTeamRole.MEMBER, null, 2, null);
+		// Placed long ago, but the badge came on 1 December: not two whole weeks to mentor yet.
+		AppUser can = student("Can Yeni");
+		can.grant(UserRole.MENTOR, PermissionSource.BADGE, Instant.parse("2026-12-01T09:00:00Z"));
+		can = userRepository.saveAndFlush(can);
+		place(can, teamNamed("Dijital Dönüşüm"), IskurTeamRole.MEMBER, null, 2, null);
 		// Monday 7 December: the weeks of 23 and 30 November had no meeting for anyone.
 		doReturn(Instant.parse("2026-12-07T07:00:00Z")).when(calendar).now();
 

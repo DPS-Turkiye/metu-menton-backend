@@ -14,6 +14,7 @@ import org.springframework.transaction.annotation.Transactional;
 import com.dps.teknokent.domain.NotificationCategory;
 import com.dps.teknokent.domain.ProgramFeature;
 import com.dps.teknokent.domain.ProgramStatus;
+import com.dps.teknokent.domain.UserRole;
 import com.dps.teknokent.dto.responses.CoordinatorProgramResponse;
 import com.dps.teknokent.entity.AppUser;
 import com.dps.teknokent.entity.IskurMeetingGapAlert;
@@ -101,7 +102,7 @@ public class IskurMeetingGapService {
 		int reported = 0;
 		for (IskurPlacement placement : watched) {
 			AppUser person = people.get(placement.getUserId());
-			if (person == null || !mentors.contains(person.getId())
+			if (person == null || !mentors.contains(person.getId()) || badgeTooRecent(person, firstMonday)
 					|| tally.meetingsHeld(person, firstMonday, thisMonday) > 0) {
 				continue;
 			}
@@ -120,6 +121,12 @@ public class IskurMeetingGapService {
 			reported++;
 		}
 		return reported;
+	}
+
+	/** Like a late placement: an intern whose badge came during the two weeks has not had two whole weeks to mentor. */
+	private boolean badgeTooRecent(AppUser person, LocalDate firstMonday) {
+		return person.heldSince(UserRole.MENTOR).map(calendar::dateOf).filter(day -> day.isAfter(firstMonday))
+				.isPresent();
 	}
 
 	/** An intern whose split is set to no mentoring is not expected to meet anyone. */

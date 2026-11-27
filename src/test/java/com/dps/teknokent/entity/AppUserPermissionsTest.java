@@ -28,6 +28,23 @@ class AppUserPermissionsTest {
 		});
 	}
 
+	@Test
+	void knowsSinceWhenAPermissionIsHeldAndStartsAgainWhenItComesBack() {
+		AppUser user = new AppUser();
+		user.setRole(UserRole.MENTEE);
+		Instant first = Instant.parse("2026-11-02T09:00:00Z");
+		Instant again = Instant.parse("2026-11-20T09:00:00Z");
+
+		assertThat(user.heldSince(UserRole.MENTOR)).isEmpty();
+		user.grant(UserRole.MENTOR, PermissionSource.BADGE, first);
+		assertThat(user.heldSince(UserRole.MENTOR)).contains(first);
+
+		user.withdraw(PermissionSource.BADGE, java.util.Set.of(), Instant.parse("2026-11-10T09:00:00Z"));
+		assertThat(user.heldSince(UserRole.MENTOR)).isEmpty();
+		user.grant(UserRole.MENTOR, PermissionSource.BADGE, again);
+		assertThat(user.heldSince(UserRole.MENTOR)).contains(again);
+	}
+
 	// Until dual role lands, changing the role must not leave the old permission behind.
 	@Test
 	void changingTheRoleRevokesTheOldPermissionInPlace() {

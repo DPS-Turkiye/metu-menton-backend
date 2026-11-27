@@ -224,6 +224,16 @@ class BadgeServiceTest {
 	}
 
 	@Test
+	void theAwardedRowStillSaysWhetherThePersonIsAnIskurIntern() {
+		when(iskurInterns.isIntern(iskur.getId(), student.getId())).thenReturn(true);
+
+		var row = service.awardGate(coordinator.getId(), iskur.getId(), student.getId());
+
+		assertThat(row.state()).isEqualTo(GateBadgeState.ACTIVE);
+		assertThat(row.iskurIntern()).isTrue();
+	}
+
+	@Test
 	void withTheRuleOffEveryoneOfTheProgramPassesWithoutLookingUpInterns() {
 		assertThat(service.internRule(iskur).test(UUID.randomUUID())).isTrue();
 		verifyNoInteractions(iskurInterns);

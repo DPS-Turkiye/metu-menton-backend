@@ -181,6 +181,18 @@ public class AppUser {
 		return activePermissions().contains(permission);
 	}
 
+	/**
+	 * Since when the permission has been held without a break (a grant brought back starts again); empty when it is
+	 * not held, or held only as the primary role with no grant row.
+	 */
+	public Optional<Instant> heldSince(UserRole permission) {
+		Instant now = Instant.now();
+		return permissions.stream()
+				.filter(grant -> grant.getPermission() == permission && grant.activeAt(now))
+				.map(AppUserPermission::getGrantedAt)
+				.min(Comparator.naturalOrder());
+	}
+
 	/** When the permission was last taken away; empty while it is held, or if it never was. */
 	public Optional<Instant> lastRevoked(UserRole permission) {
 		if (has(permission)) {
