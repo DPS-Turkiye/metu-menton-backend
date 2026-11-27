@@ -247,6 +247,22 @@ class IskurAssessmentStatementIntegrationTest {
 		list(kaan).andExpect(jsonPath("$.statements[0].status").value("PENDING"));
 	}
 
+	@Test
+	void anAnonymousCallerIsRefusedEverywhere() throws Exception {
+		String id = idOf(send(ece, "NOT_STARTED", "Bu hafta zaman bulamadım."));
+		mockMvc.perform(get(MINE).param("actorId", ece.getId().toString())).andExpect(status().isUnauthorized());
+		mockMvc.perform(post(MINE).contentType(MediaType.APPLICATION_JSON)
+				.content("{\"actorId\":\"%s\",\"reason\":\"NOT_STARTED\",\"text\":\"x\"}".formatted(ece.getId())))
+				.andExpect(status().isUnauthorized());
+		mockMvc.perform(get(LIST, program.getId()).param("actorId", kaan.getId().toString()))
+				.andExpect(status().isUnauthorized());
+		mockMvc.perform(post(LIST + "/{id}/decide", program.getId(), id).contentType(MediaType.APPLICATION_JSON)
+				.content("{\"actorId\":\"%s\",\"mentoring\":\"SET\",\"mentoringMinutes\":0,\"openRetake\":false}"
+						.formatted(kaan.getId())))
+				.andExpect(status().isUnauthorized());
+		list(kaan).andExpect(jsonPath("$.statements[0].status").value("PENDING"));
+	}
+
 	private ResultActions mine(AppUser actor) throws Exception {
 		return mockMvc.perform(get(MINE).param("actorId", actor.getId().toString()).with(httpBasic("test", "test")));
 	}
