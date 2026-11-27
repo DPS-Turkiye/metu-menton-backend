@@ -121,4 +121,11 @@ public interface OfficeHoursMeetingRepository extends JpaRepository<OfficeHoursM
 				select person.id from OfficeHoursUser person where person.appUserId in (
 					select account.id from AppUser account where account.programId = :programId))""")
 	long countUpcomingForStudentsOf(@Param("programId") UUID programId, @Param("now") Instant now);
+
+	/** The person's meetings that are not cancelled and have not started yet. */
+	@Query("""
+			select count(meeting) from OfficeHoursMeeting meeting
+			where meeting.cancelledAt is null and meeting.scheduledAt > :now
+			and meeting.studentId in (select person.id from OfficeHoursUser person where person.appUserId = :userId)""")
+	long countUpcomingForStudent(@Param("userId") UUID userId, @Param("now") Instant now);
 }

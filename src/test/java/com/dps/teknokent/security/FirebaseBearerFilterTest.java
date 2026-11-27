@@ -357,6 +357,32 @@ class FirebaseBearerFilterTest {
 		}
 	}
 
+	// Moving or removing a student takes its actor from the token alone; the GET of the same path stays off.
+	@Test
+	void anAdminsOwnTokenReachesAStudentsProgramChangeButNotItsRead() throws Exception {
+		AppUser admin = user(UserAccountStatus.APPROVED);
+		admin.setRole(UserRole.ADMIN);
+		signsInAs(admin);
+		String path = "/api/admin/users/" + OTHER_USER_ID + "/program";
+
+		for (String method : new String[] { "PUT", "DELETE" }) {
+			MockHttpServletResponse response = new MockHttpServletResponse();
+			MockFilterChain chain = new MockFilterChain();
+			filter.doFilter(request(method, path, "Bearer good"), response, chain);
+			assertThat(chain.getRequest()).as(method).isNotNull();
+			SecurityContextHolder.clearContext();
+		}
+		for (String[] call : new String[][] { { "GET", path }, { "POST", path }, { "PUT", path + "/extra" },
+				{ "PUT", "/api/admin/users/not-an-id/program" } }) {
+			MockHttpServletResponse refused = new MockHttpServletResponse();
+			MockFilterChain stopped = new MockFilterChain();
+			filter.doFilter(request(call[0], call[1], "Bearer good"), refused, stopped);
+			assertThat(refused.getStatus()).as(call[0] + " " + call[1]).isEqualTo(403);
+			assertThat(stopped.getRequest()).isNull();
+			SecurityContextHolder.clearContext();
+		}
+	}
+
 	// The read takes its actor from the token, so the coordinator's own token may reach it and be counted
 	// against their own parse budget. Nothing else under /api/coordinator opens up.
 	@Test

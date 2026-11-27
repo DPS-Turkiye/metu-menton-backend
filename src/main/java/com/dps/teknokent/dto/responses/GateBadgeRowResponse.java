@@ -20,8 +20,9 @@ public record GateBadgeRowResponse(
 		UUID userId,
 		String fullName,
 		String email,
-		UUID programId,
-		String programName,
+		/* Null on the admin's student list for a student in no semester. */
+		@Nullable UUID programId,
+		@Nullable String programName,
 		GateBadgeState state,
 		@Nullable UUID awardId,
 		@Nullable BadgeSource source,
@@ -30,7 +31,9 @@ public record GateBadgeRowResponse(
 		@Nullable String reason,
 		Training training,
 		@Nullable Profile profile,
-		@Nullable Prism prism) {
+		@Nullable Prism prism,
+		/* A student account, whose semester the admin can change; false for a gate holder who is not one. */
+		boolean student) {
 
 	/**
 	 * The person's Prism training in the program, for its coordinators and admins only: when they said they finished

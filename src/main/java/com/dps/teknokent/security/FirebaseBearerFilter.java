@@ -49,6 +49,12 @@ public class FirebaseBearerFilter extends OncePerRequestFilter {
 	private static final Pattern USER_DELETION_PATH = Pattern.compile(
 			"/api/admin/users/[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}/delete");
 	/**
+	 * Moving a student into or out of a semester (PUT, DELETE) takes its actor from the token alone, like the
+	 * deletion. The GET of the same path trusts the request's actorId and stays on the proxy.
+	 */
+	private static final Pattern STUDENT_PROGRAM_PATH = Pattern.compile(
+			"/api/admin/users/[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}/program");
+	/**
 	 * Reading a weekly program PDF takes its actor from the token, so the coordinator's own token may reach it
 	 * and the read counts against that person's parse budget. The save and every other coordinator path stay
 	 * on the proxy.
@@ -207,6 +213,8 @@ public class FirebaseBearerFilter extends OncePerRequestFilter {
 				|| uri.startsWith(NOTIFICATIONS_PATH + "/")
 				|| uri.startsWith(ASSISTANT_PATH_PREFIX)
 				|| ("POST".equalsIgnoreCase(request.getMethod()) && USER_DELETION_PATH.matcher(uri).matches())
+				|| (("PUT".equalsIgnoreCase(request.getMethod()) || "DELETE".equalsIgnoreCase(request.getMethod()))
+						&& STUDENT_PROGRAM_PATH.matcher(uri).matches())
 				|| ("POST".equalsIgnoreCase(request.getMethod()) && WEEKLY_PROGRAM_READ_PATH.matcher(uri).matches())
 				|| isOwnMentorProfileUpdate(request, user)
 				|| isOwnUserProfileUpdate(request, user);

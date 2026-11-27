@@ -65,4 +65,10 @@ public interface MentorshipRequestRepository extends JpaRepository<MentorshipReq
 			@Param("statuses") Collection<MentorshipRequestStatus> statuses);
 
 	long countByProgramIdAndStatusIn(UUID programId, Collection<MentorshipRequestStatus> statuses);
+
+	long countByProgramIdAndMentorIdAndStatusIn(UUID programId, UUID mentorId,
+			Collection<MentorshipRequestStatus> statuses);
+
+	long countByProgramIdAndRequesterIdAndStatusIn(UUID programId, UUID requesterId,
+			Collection<MentorshipRequestStatus> statuses);
 }

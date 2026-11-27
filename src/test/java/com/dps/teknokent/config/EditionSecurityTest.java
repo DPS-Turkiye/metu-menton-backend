@@ -62,6 +62,8 @@ class EditionSecurityTest {
 					.andExpect(status().isNotFound());
 			mockMvc.perform(post("/api/auth/register/student").with(httpBasic("test", "test")))
 					.andExpect(status().isNotFound());
+			mockMvc.perform(get("/api/admin/users/" + UUID.randomUUID() + "/program").with(httpBasic("test", "test")))
+					.andExpect(status().isNotFound());
 		}
 
 		@Test
