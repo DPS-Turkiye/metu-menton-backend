@@ -204,7 +204,7 @@ class PeerMentorDocumentIntegrationTest {
 		MockMultipartFile script = new MockMultipartFile("file", "not-a.pdf", "application/pdf",
 				"<script>alert(1)</script>".getBytes(StandardCharsets.UTF_8));
 		mockMvc.perform(multipart(MINE).file(script)
-				.param("evidenceType", PeerEvidenceType.TRANSCRIPT.name())
+				.param("evidenceType", PeerEvidenceType.CERTIFICATE.name())
 				.param("visibility", PeerDocumentVisibility.PROFILE.name())
 				.with(authentication(signedIn(mentor))))
 				.andExpect(status().isBadRequest());
@@ -348,6 +348,8 @@ class PeerMentorDocumentIntegrationTest {
 				.andReturn().getResponse().getContentAsString();
 		UUID transcript = UUID.fromString(JsonPath.read(body, "$.id"));
 
+		// Someone else's transcript is not found, before any word on what may be shown.
+		changeVisibility(otherMentor, transcript, PeerDocumentVisibility.PROFILE).andExpect(status().isNotFound());
 		changeVisibility(mentor, transcript, PeerDocumentVisibility.PROFILE)
 				.andExpect(status().isBadRequest())
 				.andExpect(jsonPath("$.code").value("PEER_TRANSCRIPT_NOT_SHARED"));
@@ -355,6 +357,26 @@ class PeerMentorDocumentIntegrationTest {
 				.isEqualTo(PeerDocumentVisibility.VERIFICATION_ONLY);
 		changeVisibility(mentor, transcript, PeerDocumentVisibility.VERIFICATION_ONLY)
 				.andExpect(status().isOk());
+
+		mockMvc.perform(get(OF_MENTOR, mentor.getId()).with(authentication(signedIn(mentee))))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.length()").value(0));
+		mockMvc.perform(get(CONTENT, transcript).with(authentication(signedIn(mentee))))
+				.andExpect(status().isNotFound());
+		mockMvc.perform(get(CONTENT, transcript).with(authentication(signedIn(coordinator))))
+				.andExpect(status().isOk());
+	}
+
+	@Test
+	void aTranscriptSetToProfileOutsideTheAppStillReachesNoStudent() throws Exception {
+		String body = upload(mentor, PeerEvidenceType.TRANSCRIPT, PeerDocumentVisibility.VERIFICATION_ONLY)
+				.andExpect(status().isCreated())
+				.andReturn().getResponse().getContentAsString();
+		UUID transcript = UUID.fromString(JsonPath.read(body, "$.id"));
+		// The test schema has no V142 check, so this stands in for a row changed by hand.
+		PeerMentorDocument row = peerMentorDocumentRepository.findById(transcript).orElseThrow();
+		row.setVisibility(PeerDocumentVisibility.PROFILE);
+		peerMentorDocumentRepository.saveAndFlush(row);
 
 		mockMvc.perform(get(OF_MENTOR, mentor.getId()).with(authentication(signedIn(mentee))))
 				.andExpect(status().isOk())
@@ -381,6 +403,10 @@ class PeerMentorDocumentIntegrationTest {
 				.andExpect(status().isBadRequest())
 				.andExpect(jsonPath("$.code").value("PEER_TRANSCRIPT_NOT_SHARED"));
 		assertThat(peerMentorDocumentRepository.findByUserIdOrderByCreatedAtAsc(mentor.getId())).isEmpty();
+		mockMvc.perform(post(FORM).with(authentication(signedIn(mentor))).contentType(MediaType.APPLICATION_JSON)
+				.content("{\"slot\":\"TRANSCRIPT\",\"visibility\":\"VERIFICATION_ONLY\"}"))
+				.andExpect(status().isCreated())
+				.andExpect(jsonPath("$.evidenceType").value("TRANSCRIPT"));
 
 		String body = mockMvc.perform(post(FORM).with(authentication(signedIn(mentor)))
 				.contentType(MediaType.APPLICATION_JSON)
