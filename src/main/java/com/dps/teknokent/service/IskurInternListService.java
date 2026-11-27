@@ -35,10 +35,11 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * The coordinator's İŞKUR intern list (weekend launch, part B): the addresses whose accounts count as the program's
- * interns. Addresses can be listed before their owners sign up. Removing one is refused while that person is placed in
- * a
- * team, so the placement screen never holds someone who is no longer an intern.
+ * The coordinator's İŞKUR intern list (weekend launch, part B). Since 27 Nov it decides nothing: every approved student
+ * of an İŞKUR program is an intern ({@link IskurInternService}), and the web no longer shows the list. It stays
+ * readable
+ * so the addresses already entered are kept, until a cleanup removes it. Removing one is still refused while that
+ * person is placed in a team.
  */
 @Slf4j
 @Service

@@ -139,56 +139,41 @@ class IskurInternServiceTest {
 	}
 
 	@Test
-	void aStudentOffTheListIsAPlainStudent() {
-		AppUser plain = user(UserRole.MENTEE, iskur);
-		AppUser intern = listed(iskur, user(UserRole.MENTEE, iskur));
+	void everyApprovedStudentAndAcceptedPeerMentorIsAnInternWithoutAnyList() {
+		AppUser student = user(UserRole.MENTEE, iskur);
 		AppUser mentor = user(UserRole.MENTOR, null);
 		mentorOf(iskur, mentor, ProgramMentorStatus.ACCEPTED);
 
-		assertThat(service.currentProgram(plain.getId())).isEmpty();
-		assertThat(service.currentPlacement(plain.getId())).isEmpty();
-		assertThat(service.currentProgram(mentor.getId())).isEmpty();
-		assertThat(service.internIds(iskur.getId())).containsExactly(intern.getId());
-		assertThat(service.isIntern(iskur.getId(), intern.getId())).isTrue();
-		assertThat(service.isIntern(iskur.getId(), plain.getId())).isFalse();
-		assertThat(service.isIntern(iskur.getId(), mentor.getId())).isFalse();
+		assertThat(service.currentProgram(student.getId())).map(Program::getId).contains(iskur.getId());
+		assertThat(service.currentProgram(mentor.getId())).map(Program::getId).contains(iskur.getId());
+		assertThat(service.internIds(iskur.getId())).containsExactly(student.getId(), mentor.getId());
+		assertThat(service.isIntern(iskur.getId(), student.getId())).isTrue();
+		assertThat(service.isIntern(iskur.getId(), mentor.getId())).isTrue();
 	}
 
 	@Test
-	void anAddressListedBeforeSignUpMakesAnInternOnceTheAccountJoins() {
+	void theOldEmailListNeitherAddsNorTakesAwayAnyone() {
+		// An address listed for nobody adds no one, and a listing in another program does not make anyone its intern.
 		internEmailRepository.saveAndFlush(new IskurInternEmail(iskur.getId(), "yeni.stajyer@example.test",
 				coordinator.getId(), Instant.now()));
 		assertThat(service.internIds(iskur.getId())).isEmpty();
 
-		AppUser joined = user(UserRole.MENTEE, iskur);
-		joined.setEmail("Yeni.Stajyer@Example.test");
-		userRepository.saveAndFlush(joined);
-
-		assertThat(service.currentProgram(joined.getId())).map(Program::getId).contains(iskur.getId());
-		assertThat(service.internIds(iskur.getId())).containsExactly(joined.getId());
-		assertThat(service.isIntern(iskur.getId(), joined.getId())).isTrue();
-	}
-
-	@Test
-	void aListingCountsOnlyInItsOwnProgram() {
 		Program other = program(ProgramType.PEER_MENTORING, Instant.now());
 		unitOf(other);
 		AppUser student = listed(other, user(UserRole.MENTEE, iskur));
 
-		assertThat(service.currentProgram(student.getId())).isEmpty();
-		assertThat(service.internIds(iskur.getId())).isEmpty();
+		assertThat(service.currentProgram(student.getId())).map(Program::getId).contains(iskur.getId());
+		assertThat(service.internIds(iskur.getId())).containsExactly(student.getId());
 		assertThat(service.internIds(other.getId())).isEmpty();
 		assertThat(service.isIntern(other.getId(), student.getId())).isFalse();
 	}
 
 	@Test
-	void listsAcceptedPeerMentorsOnTheListAsInterns() {
+	void listsAcceptedPeerMentorsAsInternsButNotPendingOnes() {
 		AppUser mentor = user(UserRole.MENTOR, null);
 		mentorOf(iskur, mentor, ProgramMentorStatus.ACCEPTED);
-		listed(iskur, mentor);
 		AppUser waiting = user(UserRole.MENTOR, null);
 		mentorOf(iskur, waiting, ProgramMentorStatus.PENDING);
-		listed(iskur, waiting);
 
 		assertThat(service.internIds(iskur.getId())).containsExactly(mentor.getId());
 		assertThat(service.isIntern(iskur.getId(), mentor.getId())).isTrue();

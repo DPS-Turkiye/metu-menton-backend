@@ -13,8 +13,9 @@ import com.dps.teknokent.entity.InstitutionPerson;
 /**
  * What the institution says about the signed-in person, shown read-only ("Kurumsal Bilgiler"). {@code advisor} is
  * null when the record names none; its {@code userId} is null until that academician has signed in to Menton.
- * {@code iskurParticipant} is also true for someone on a program's İŞKUR intern list: a student who signed up by e-mail
- * has no ODTÜ record to say so.
+ * {@code iskurParticipant} is also true for every intern of an İŞKUR program (any approved student there): a student
+ * who
+ * signed up by e-mail has no ODTÜ record to say so.
  */
 public record InstitutionRecordResponse(
 		List<IdentityKind> kinds,
